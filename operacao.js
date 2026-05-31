@@ -96,12 +96,12 @@
       return;
     }
     const r = LW.calcPaineis(state.tipo_montagem, bercos);
-    $('op-paineis-total').textContent = r.paineis_total;
-    $('op-paineis-2p').textContent    = r.paineis_2p;
-    $('op-paineis-sp').textContent    = r.paineis_sp;
-    $('op-m2-total').textContent      = r.m2_total.toFixed(2) + ' m²';
-    $('op-m2-2p').textContent         = r.m2_2p.toFixed(2) + ' m²';
-    $('op-m2-sp').textContent         = r.m2_sp.toFixed(2) + ' m²';
+    $('op-paineis-total').textContent = r.total_paineis;
+    $('op-paineis-2p').textContent = r.paineis_2p;
+    $('op-paineis-sp').textContent = r.paineis_sp;
+    $('op-m2-total').textContent = r.m2_total.toFixed(2) + ' m²';
+    $('op-m2-2p').textContent = r.m2_2p.toFixed(2) + ' m²';
+    $('op-m2-sp').textContent = r.m2_sp.toFixed(2) + ' m²';
   }
 
   function iniciarInjecao() {
@@ -150,7 +150,7 @@
       if (!el) return;
       const m = Math.floor(elapsed);
       const s = Math.floor((elapsed - m) * 60);
-      el.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      el.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       el.className = 'timer-display' + (m >= LW.LIMITE_INJECAO_MIN ? ' danger' : m >= 50 ? ' warning' : '');
     }, 1000);
   }
@@ -227,14 +227,14 @@
 
   function updatePendencias() {
     const checks = [
-      { label: 'Turno definido',         ok: !!state.turno },
-      { label: 'Dimensão da bateria',     ok: !!state.dimensao },
-      { label: 'Tipo de montagem',        ok: !!state.tipo_montagem },
-      { label: 'ID da bateria',           ok: !!state.id_bateria },
-      { label: 'Injeção iniciada',        ok: !!state.inicio },
-      { label: 'Injeção finalizada',      ok: !!state.fim },
-      { label: 'Motivo do atraso',        ok: state.houve_atraso === 'NÃO' || !!state.motivo_atraso },
-      { label: 'Ao menos 1 traço',        ok: state.tracos.length > 0 },
+      { label: 'Turno definido', ok: !!state.turno },
+      { label: 'Dimensão da bateria', ok: !!state.dimensao },
+      { label: 'Tipo de montagem', ok: !!state.tipo_montagem },
+      { label: 'ID da bateria', ok: !!state.id_bateria },
+      { label: 'Injeção iniciada', ok: !!state.inicio },
+      { label: 'Injeção finalizada', ok: !!state.fim },
+      { label: 'Motivo do atraso', ok: state.houve_atraso === 'NÃO' || !!state.motivo_atraso },
+      { label: 'Ao menos 1 traço', ok: state.tracos.length > 0 },
     ];
 
     const allOk = checks.every(c => c.ok);
@@ -253,7 +253,7 @@
     if (pending === 0) {
       badge.innerHTML = '<span class="badge badge-green">✓ Tudo preenchido</span>';
     } else {
-      badge.innerHTML = `<span class="badge badge-red">${pending} pendência${pending>1?'s':''}</span>`;
+      badge.innerHTML = `<span class="badge badge-red">${pending} pendência${pending > 1 ? 's' : ''}</span>`;
     }
   }
 
@@ -263,23 +263,30 @@
 
     const calc = LW.calcPaineis(state.tipo_montagem, bercos);
 
+    const data = new Date(state.inicio);
+
+    const dataLocal =
+      `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')
+      }-${String(data.getDate()).padStart(2, '0')
+      }`;
+
     const record = {
-      id:            'op_' + Date.now(),
-      data:          new Date(state.inicio).toISOString().split('T')[0],
-      turno:         state.turno,
-      dimensao:      state.dimensao,
-      capacidade:    LW.DIMENSAO_OPTS.find(o => o.label === state.dimensao)?.bercos || 0,
-      id_bateria:    state.id_bateria,
-      inicio:        state.inicio,
-      fim:           state.fim,
-      tempo_min:     state.tempo_min,
-      qtd_tracos:    state.tracos.length,
-      houve_atraso:  state.houve_atraso,
+      id: 'op_' + Date.now(),
+      data: dataLocal,
+      turno: state.turno,
+      dimensao: state.dimensao,
+      capacidade: LW.DIMENSAO_OPTS.find(o => o.label === state.dimensao)?.bercos || 0,
+      id_bateria: state.id_bateria,
+      inicio: state.inicio,
+      fim: state.fim,
+      tempo_min: state.tempo_min,
+      qtd_tracos: state.tracos.length,
+      houve_atraso: state.houve_atraso,
       motivo_atraso: state.motivo_atraso || '',
       tipo_montagem: state.tipo_montagem,
-      bercos_reais:  bercos,
+      bercos_reais: bercos,
       ...calc,
-      tracos:        state.tracos,
+      tracos: state.tracos,
     };
 
     const db = LW.loadDB(LW.DB_KEY_BATERIAS);
@@ -297,10 +304,10 @@
   function showSuccessModal(record) {
     const modal = $('success-modal');
     $('modal-bateria').textContent = record.id_bateria;
-    $('modal-tempo').textContent   = LW.formatDuration(record.tempo_min);
+    $('modal-tempo').textContent = LW.formatDuration(record.tempo_min);
     $('modal-paineis').textContent = record.total_paineis;
-    $('modal-m2').textContent      = record.m2_total.toFixed(2) + ' m²';
-    $('modal-atraso').innerHTML    = record.houve_atraso === 'SIM'
+    $('modal-m2').textContent = record.m2_total.toFixed(2) + ' m²';
+    $('modal-atraso').innerHTML = record.houve_atraso === 'SIM'
       ? '<span class="badge badge-red">SIM</span>'
       : '<span class="badge badge-green">NÃO</span>';
     modal.style.display = 'flex';
@@ -330,17 +337,17 @@
 
   function renderAll() {
     // Set form values
-    $('op-turno').value     = state.turno || '1º TURNO';
-    $('op-dimensao').value  = state.dimensao || '';
-    $('op-montagem').value  = state.tipo_montagem || '';
-    $('op-id-bateria').value= state.id_bateria || '';
+    $('op-turno').value = state.turno || '1º TURNO';
+    $('op-dimensao').value = state.dimensao || '';
+    $('op-montagem').value = state.tipo_montagem || '';
+    $('op-id-bateria').value = state.id_bateria || '';
     $('op-bercos-reais').value = state.bercos_reais || '';
-    $('op-motivo').value    = state.motivo_atraso || '';
+    $('op-motivo').value = state.motivo_atraso || '';
 
     updateCapacidade();
 
     $('op-inicio').value = state.inicio ? LW.formatTime(state.inicio) : '';
-    $('op-fim').value    = state.fim    ? LW.formatTime(state.fim)    : '';
+    $('op-fim').value = state.fim ? LW.formatTime(state.fim) : '';
     $('op-tempo-total').textContent = state.tempo_min ? LW.formatDuration(state.tempo_min) : '—';
 
     if (state.houve_atraso) {
@@ -354,7 +361,7 @@
 
     $('op-motivo-row').style.display = state.houve_atraso === 'SIM' ? 'flex' : 'none';
 
-    $('btn-iniciar').disabled   = state.status !== 'idle';
+    $('btn-iniciar').disabled = state.status !== 'idle';
     $('btn-finalizar').disabled = state.status !== 'running';
 
     $('op-data').textContent = new Date().toLocaleDateString('pt-BR', {

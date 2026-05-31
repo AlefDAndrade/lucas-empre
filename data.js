@@ -21,7 +21,7 @@ const TIPO_MONTAGEM_MAP = {
 const DIMENSAO_OPTS = [
   { label: '7,5 cm', bercos: 22 },
   { label: '9 cm',   bercos: 20 },
-  { label: '12 cm',  bercos: 16 },
+  { label: '12 cm',  bercos: 18 },
 ];
 
 const MONTAGEM_OPTS = ['2/P', 'S/P', 'HÍBRIDA'];
@@ -81,7 +81,7 @@ function calcPaineis(tipoMontagem, bercos) {
   const m2_total = paineis_total * M2_POR_PAINEL;
   const m2_2p    = paineis_2p * M2_POR_PAINEL;
   const m2_sp    = paineis_sp * M2_POR_PAINEL;
-  return { paineis_total, paineis_2p, paineis_sp, m2_total, m2_2p, m2_sp };
+  return { paineis_total, paineis_2p, paineis_sp, m2_total, m2_2p, m2_sp, total_paineis: paineis_total };
 }
 
 function formatTime(date) {
