@@ -5,33 +5,68 @@
 
 'use strict';
 
-// ---- Constants ----
+// ---- Constants (fixas) ----
 
-const TURNO_OPTS = ['1º TURNO', '2º TURNO', '3º TURNO'];
+const TURNO_OPTS         = ['1º TURNO', '2º TURNO', '3º TURNO'];
+const M2_POR_PAINEL      = 1.83;  // m² por painel (calculado da planilha original)
+const LIMITE_INJECAO_MIN = 59;    // minutos limite antes de registrar atraso
 
-const TIPO_BATERIA_OPTS = ['SP', '2P', 'HÍBRIDA'];
+// ---- Config dinâmica — carregada de config.json ----
+// Defaults vazios; preenchidos por loadConfig()
+let DIMENSAO_OPTS = [];
+let MONTAGEM_OPTS = [];   // ['2/P', 'S/P', 'HÍBRIDA', ...]
+let MONTAGEM_MAP  = {};   // { label: { paineis_2p_por_berco, paineis_sp_por_berco } }
+let BATERIA_IDS   = [];
 
-const TIPO_MONTAGEM_MAP = {
-  // montagem: { capacidade: N, paineis_por_berco: 2, m2_por_painel_sp, m2_por_painel_2p }
-  // Derived from real data: 9cm Hibrida 20 bercos -> 40 paineis -> 73.2m2 -> 1.83 m2/painel
-  // 7,5cm 2/P 22 bercos -> 44 paineis -> 80.52m2 -> 1.83 m2/painel
-  // 12cm Hibrida 16 bercos -> 32 paineis -> 58.56m2 -> 1.83 m2/painel
-};
+let _configReady = false;
+const _configCallbacks = [];
 
-const DIMENSAO_OPTS = [
-  { label: '7,5 cm', bercos: 22 },
-  { label: '9 cm',   bercos: 20 },
-  { label: '12 cm',  bercos: 18 },
-];
+async function loadConfig() {
+  if (_configReady) return;
+  try {
+    const res = await fetch('config.json');
+    if (!res.ok) throw new Error('config.json não encontrado');
+    const cfg = await res.json();
 
-const MONTAGEM_OPTS = ['2/P', 'S/P', 'HÍBRIDA'];
+    DIMENSAO_OPTS = cfg.dimensoes.opcoes.map(d => ({ label: d.label, bercos: d.bercos }));
 
-const BATERIA_IDS = [
-  'B1','B2','B3','B4','B5-7,5cm','B6-12cm','B7','B8','B9','B10','B11','B12'
-];
+    MONTAGEM_OPTS = cfg.tipos_montagem.opcoes.map(t => t.label);
+    MONTAGEM_MAP  = {};
+    cfg.tipos_montagem.opcoes.forEach(t => {
+      MONTAGEM_MAP[t.label] = {
+        paineis_2p_por_berco: t.paineis_2p_por_berco,
+        paineis_sp_por_berco: t.paineis_sp_por_berco,
+      };
+    });
 
-const M2_POR_PAINEL = 1.83; // fixed from data analysis
-const LIMITE_INJECAO_MIN = 59; // minutes
+    BATERIA_IDS = cfg.baterias.ids;
+
+  } catch (err) {
+    console.warn('[LW] Usando valores fallback — config.json indisponível:', err.message);
+    DIMENSAO_OPTS = [
+      { label: '7,5 cm', bercos: 22 },
+      { label: '9 cm',   bercos: 20 },
+      { label: '12 cm',  bercos: 18 },
+    ];
+    MONTAGEM_OPTS = ['2/P', 'S/P', 'HÍBRIDA'];
+    MONTAGEM_MAP  = {
+      '2/P':     { paineis_2p_por_berco: 2, paineis_sp_por_berco: 0 },
+      'S/P':     { paineis_2p_por_berco: 0, paineis_sp_por_berco: 2 },
+      'HÍBRIDA': { paineis_2p_por_berco: 1, paineis_sp_por_berco: 1 },
+    };
+    BATERIA_IDS = ['B1','B2','B3','B4','B5-7,5cm','B6-12cm','B7','B8','B9','B10','B11','B12'];
+  }
+
+  _configReady = true;
+  _configCallbacks.forEach(fn => fn());
+  _configCallbacks.length = 0;
+}
+
+/** Executa fn imediatamente se config já carregou, senão aguarda. */
+function waitConfig(fn) {
+  if (_configReady) { fn(); return; }
+  _configCallbacks.push(fn);
+}
 
 // ---- LocalStorage helpers ----
 
@@ -73,15 +108,20 @@ function getBercosByDimensao(dim) {
 }
 
 function calcPaineis(tipoMontagem, bercos) {
-  const paineis_total = bercos * 2;
-  let paineis_2p = 0, paineis_sp = 0;
-  if (tipoMontagem === '2/P')   { paineis_2p = paineis_total; }
-  if (tipoMontagem === 'S/P')   { paineis_sp = paineis_total; }
-  if (tipoMontagem === 'HÍBRIDA') { paineis_2p = bercos; paineis_sp = bercos; }
+  const map = MONTAGEM_MAP[tipoMontagem];
+  let paineis_2p, paineis_sp;
+  if (map) {
+    paineis_2p = bercos * map.paineis_2p_por_berco;
+    paineis_sp = bercos * map.paineis_sp_por_berco;
+  } else {
+    paineis_2p = 0;
+    paineis_sp = bercos * 2;
+  }
+  const paineis_total = paineis_2p + paineis_sp;
   const m2_total = paineis_total * M2_POR_PAINEL;
-  const m2_2p    = paineis_2p * M2_POR_PAINEL;
-  const m2_sp    = paineis_sp * M2_POR_PAINEL;
-  return { paineis_total, paineis_2p, paineis_sp, m2_total, m2_2p, m2_sp, total_paineis: paineis_total };
+  const m2_2p    = paineis_2p    * M2_POR_PAINEL;
+  const m2_sp    = paineis_sp    * M2_POR_PAINEL;
+  return { total_paineis: paineis_total, paineis_2p, paineis_sp, m2_total, m2_2p, m2_sp };
 }
 
 function formatTime(date) {
@@ -438,11 +478,31 @@ function getStats(filtros = {}) {
 // ---- Export ----
 
 window.LW = {
-  TURNO_OPTS, TIPO_BATERIA_OPTS, DIMENSAO_OPTS, MONTAGEM_OPTS, BATERIA_IDS,
-  M2_POR_PAINEL, LIMITE_INJECAO_MIN,
+  // Constantes fixas
+  TURNO_OPTS,
+  M2_POR_PAINEL,
+  LIMITE_INJECAO_MIN,
+
+  // Getters dinâmicos — leem do estado após config.json carregar
+  get DIMENSAO_OPTS() { return DIMENSAO_OPTS; },
+  get MONTAGEM_OPTS() { return MONTAGEM_OPTS; },
+  get MONTAGEM_MAP()  { return MONTAGEM_MAP;  },
+  get BATERIA_IDS()   { return BATERIA_IDS;   },
+
+  // Config loader
+  loadConfig,
+  waitConfig,
+
+  // Storage
   loadDB, saveDB, DB_KEY_BATERIAS, DB_KEY_INJECOES,
   getOperacaoAtual, saveOperacaoAtual, clearOperacaoAtual,
+
+  // Cálculos
   getBercosByDimensao, calcPaineis,
+
+  // Formatação
   formatTime, formatDate, diffMinutes, formatDuration, formatM2,
+
+  // Dados e analytics
   seedHistoricalData, getStats,
 };

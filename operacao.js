@@ -26,15 +26,70 @@
   const $ = id => document.getElementById(id);
 
   function init() {
-    // Restore saved state if exists
-    const saved = LW.getOperacaoAtual();
-    if (saved) {
-      state = saved;
-      renderAll();
-      if (state.status === 'running') startTimerUI();
-    }
+    // Carrega config.json e só depois inicializa a tela
+    LW.loadConfig().then(() => {
+      populateSelects();
 
-    // Wire selects/inputs
+      const saved = LW.getOperacaoAtual();
+      if (saved) {
+        state = saved;
+        renderAll();
+        if (state.status === 'running') startTimerUI();
+      }
+
+      wireEvents();
+      setInterval(updateClock, 1000);
+      updateClock();
+      renderAll();
+    });
+  }
+
+  // Preenche os <select> com dados do config.json
+  function populateSelects() {
+    // ID da bateria
+    const selBateria = document.getElementById('op-id-bateria');
+    selBateria.innerHTML = '<option value="">— Selecione —</option>';
+    LW.BATERIA_IDS.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      selBateria.appendChild(opt);
+    });
+
+    // Dimensão
+    const selDim = document.getElementById('op-dimensao');
+    selDim.innerHTML = '<option value="">— Selecione —</option>';
+    LW.DIMENSAO_OPTS.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.label;
+      opt.textContent = d.label + ' (' + d.bercos + ' berços)';
+      selDim.appendChild(opt);
+    });
+
+    // Tipo de montagem
+    const selMont = document.getElementById('op-montagem');
+    selMont.innerHTML = '<option value="">— Selecione —</option>';
+    LW.MONTAGEM_OPTS.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = m;
+      selMont.appendChild(opt);
+    });
+
+    // Atualiza referência rápida
+    renderReferencia();
+  }
+
+  function renderReferencia() {
+    const el = document.getElementById('ref-rapida');
+    if (!el) return;
+    el.innerHTML = LW.DIMENSAO_OPTS.map(d =>
+      '<div style="display:flex;justify-content:space-between">' +
+        '<span>' + d.label + '</span>' +
+        '<span style="color:var(--text-3)">' + d.bercos + ' berços → ' + (d.bercos * 2) + ' painéis</span>' +
+      '</div>'
+    ).join('');
+  }
+
+  function wireEvents() {
     $('op-turno').addEventListener('change', e => {
       state.turno = e.target.value; persist();
     });
@@ -60,17 +115,11 @@
     $('op-motivo').addEventListener('input', e => {
       state.motivo_atraso = e.target.value; persist();
     });
-
-    // Buttons
     $('btn-iniciar').addEventListener('click', iniciarInjecao);
     $('btn-finalizar').addEventListener('click', finalizarInjecao);
     $('btn-registrar').addEventListener('click', registrarOperacao);
     $('btn-resetar').addEventListener('click', resetarOperacao);
     $('btn-add-traco').addEventListener('click', addTraco);
-
-    setInterval(updateClock, 1000);
-    updateClock();
-    renderAll();
   }
 
   function updateClock() {
