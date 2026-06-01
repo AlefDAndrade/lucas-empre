@@ -61,7 +61,7 @@
     LW.DIMENSAO_OPTS.forEach(d => {
       const opt = document.createElement('option');
       opt.value = d.label;
-      opt.textContent = d.label + ' (' + d.bercos + ' berços)';
+      opt.textContent = d.label;
       selDim.appendChild(opt);
     });
 
