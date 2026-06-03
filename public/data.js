@@ -174,6 +174,45 @@ function formatM2(v) {
 // Pre-load the historical records from the original xlsm into localStorage
 // so dashboards show real data from day one.
 
+// ---- Relatório de Injeção ----
+
+async function registrarRelatorioInjecao(record) {
+  // Expande os traços do registro em linhas individuais para o relatorio_injecao.json
+  const linhas = (record.tracos || []).map(t => ({
+    id_traco: t.id || (record.id + '_t' + t.num),
+    id_operacao: record.id,
+    data: record.data,
+    turno: record.turno,
+    id_bateria: record.id_bateria,
+    dimensao: record.dimensao,
+    tipo_montagem: record.tipo_montagem,
+    num_traco: t.num,
+    berco_ini: t.berco_ini || '',
+    berco_fim: t.berco_fim || '',
+    densidade: t.densidade || '',
+    flow: t.flow || '',
+    obs: t.obs || '',
+  }));
+
+  if (!linhas.length) return; // sem traços, nada a salvar
+
+  const res = await fetch('/registrar-relatorio-injecao', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(linhas),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.erro || 'Erro ao registrar relatório de injeção');
+}
+
+async function getRelatorioInjecao() {
+  try {
+    const res = await fetch('relatorio_injecao.json');
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (_) { return []; }
+}
+
 // ---- Analytics ----
 
 async function registrarOperacao(record) {
@@ -288,6 +327,10 @@ window.LW = {
 
   // Formatação
   formatTime, formatDate, diffMinutes, formatDuration, formatM2,
+
+  // Relatório de Injeção
+  registrarRelatorioInjecao,
+  getRelatorioInjecao,
 
   // Dados e analytics
   registrarOperacao, getStats,

@@ -56,7 +56,61 @@ http.createServer((req, res) => {
     return;
   }
 
-  // Importar lote de registros — merge no historico.json com deduplicação
+  // Registrar linhas do relatório de injeção — append em relatorio_injecao.json
+  if (req.method === 'POST' && req.url === '/registrar-relatorio-injecao') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const linhas = JSON.parse(body);
+        if (!Array.isArray(linhas)) throw new Error('Payload deve ser um array');
+        const relatorioPath = path.join(DIR, 'relatorio_injecao.json');
+        let relatorio = [];
+        try { relatorio = JSON.parse(fs.readFileSync(relatorioPath, 'utf8')); } catch(_) {}
+        linhas.forEach(l => relatorio.push(l));
+        fs.writeFileSync(relatorioPath, JSON.stringify(relatorio, null, 2), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, inseridos: linhas.length }));
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
+  // Importar lote de relatório de injeção — merge com deduplicação
+  if (req.method === 'POST' && req.url === '/importar-relatorio-injecao') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const novos = JSON.parse(body);
+        if (!Array.isArray(novos)) throw new Error('Payload deve ser um array');
+        const relatorioPath = path.join(DIR, 'relatorio_injecao.json');
+        let relatorio = [];
+        try { relatorio = JSON.parse(fs.readFileSync(relatorioPath, 'utf8')); } catch(_) {}
+        // Chave: id_operacao + num_traco
+        const existentes = new Set(relatorio.map(r => r.id_operacao + '|' + r.num_traco));
+        let inseridos = 0, duplicatas = 0;
+        novos.forEach(r => {
+          const chave = r.id_operacao + '|' + r.num_traco;
+          if (existentes.has(chave)) { duplicatas++; }
+          else { relatorio.push(r); existentes.add(chave); inseridos++; }
+        });
+        relatorio.sort((a, b) => (a.data > b.data ? 1 : -1));
+        fs.writeFileSync(relatorioPath, JSON.stringify(relatorio, null, 2), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, inseridos, duplicatas }));
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
+    // Importar lote de registros — merge no historico.json com deduplicação
   if (req.method === 'POST' && req.url === '/importar-historico') {
     let body = '';
     req.on('data', chunk => body += chunk);

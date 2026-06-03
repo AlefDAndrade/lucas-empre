@@ -25,7 +25,7 @@
           style="font-size:.7rem;padding:4px 10px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-2);cursor:pointer">
           Sair
         </button>
-        <button id="btn-config" onclick="abrirConfig()"
+        <button id="btn-config" data-admin-only onclick="abrirConfig()"
           style="display:none;font-size:.7rem;padding:4px 10px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-2);cursor:pointer">
           ⚙ Configurações
         </button>
@@ -132,10 +132,11 @@
             <div class="menu-card-desc">Detalhamento por traço de cada injeção: berços, densidade, flow e observações.
             </div>
           </div>
-          <div class="menu-card" onclick="abrirImportacao()">
+          <div class="menu-card" data-admin-only onclick="abrirImportacao()">
             <div class="menu-card-icon">📥</div>
-            <div class="menu-card-title">Importar Histórico</div>
-            <div class="menu-card-desc">Importa dados de uma planilha Excel (.xlsx / .xls) antiga para o histórico do sistema.</div>
+            <div class="menu-card-title">Importar Documento</div>
+            <div class="menu-card-desc">Importa dados de uma planilha Excel (.xlsx / .xls) para o histórico ou relatório
+              de injeção.</div>
           </div>
         </div>
       </div>
@@ -216,6 +217,24 @@
                   <label class="form-label">Berços Injetados (Real)</label>
                   <input class="form-input" type="number" id="op-bercos-reais"
                     placeholder="Deixe vazio para usar capacidade total" min="1" max="22">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Silo de EPS <span class="required">*</span></label>
+                  <select class="form-select" id="op-silo">
+                    <option value="">— Selecione —</option>
+                    <option value="Silo 1">Silo 1</option>
+                    <option value="Silo 2">Silo 2</option>
+                    <option value="Silo 3">Silo 3</option>
+                    <option value="Silo 4">Silo 4</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Expansão do EPS <span class="required">*</span></label>
+                  <select class="form-select" id="op-expansao">
+                    <option value="">— Selecione —</option>
+                    <option value="Primeira expansão">Primeira expansão</option>
+                    <option value="Segunda expansão">Segunda expansão</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -635,22 +654,62 @@
       <div class="page-body">
 
         <div class="card mb-4" style="padding:16px 20px">
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between">
-            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-              <input class="form-input" type="text" id="reg-busca" placeholder="Buscar por ID, data, motivo..."
-                style="width:260px">
-              <select class="form-select" id="reg-turno" style="width:160px">
-                <option value="">Todos os turnos</option>
-                <option>1º TURNO</option>
-                <option>2º TURNO</option>
-                <option>3º TURNO</option>
-              </select>
+          <!-- Linha 1: busca + botões -->
+          <div
+            style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;margin-bottom:12px">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <input class="form-input" type="text" id="reg-busca" placeholder="Buscar por ID, motivo..."
+                style="width:240px">
               <button class="btn btn-outline-accent" id="btn-registro-filtrar">Filtrar</button>
+              <button class="btn btn-ghost btn-sm" id="btn-registro-limpar">✕ Limpar</button>
             </div>
             <div style="display:flex;align-items:center;gap:12px">
               <span style="font-size:.78rem;color:var(--text-3)" id="reg-count"></span>
-              <button class="btn btn-ghost btn-sm" onclick="LWDash.exportCSV()">⬇ Exportar CSV</button>
+              <button class="btn btn-ghost btn-sm" onclick="LWDash.abrirExportModal()">⬇ Exportar CSV</button>
             </div>
+          </div>
+          <!-- Linha 2: filtros -->
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input class="form-input" type="date" id="reg-data-inicio" style="width:150px" title="Data início">
+            <span style="color:var(--text-3);font-size:.85rem">até</span>
+            <input class="form-input" type="date" id="reg-data-fim" style="width:150px" title="Data fim">
+            <select class="form-select" id="reg-turno" style="width:145px">
+              <option value="">Todos os turnos</option>
+              <option>1º TURNO</option>
+              <option>2º TURNO</option>
+              <option>3º TURNO</option>
+            </select>
+            <select class="form-select" id="reg-montagem" style="width:130px">
+              <option value="">Tipo montagem</option>
+              <option>2/P</option>
+              <option>S/P</option>
+              <option>HÍBRIDA</option>
+            </select>
+            <select class="form-select" id="reg-dimensao" style="width:120px">
+              <option value="">Dimensão</option>
+              <option>7,5 cm</option>
+              <option>9 cm</option>
+              <option>12 cm</option>
+            </select>
+            <select class="form-select" id="reg-tracos" style="width:120px">
+              <option value="">Qtd traços</option>
+              <option value="1">1 traço</option>
+              <option value="2">2 traços</option>
+              <option value="3">3 traços</option>
+              <option value="4">4 traços</option>
+            </select>
+            <select class="form-select" id="reg-capacidade" style="width:130px">
+              <option value="">Cap. berço</option>
+              <option value="18">18 berços</option>
+              <option value="20">20 berços</option>
+              <option value="22">22 berços</option>
+            </select>
+            <input class="form-input" type="text" id="reg-id-bateria" placeholder="ID Bateria" style="width:120px">
+            <select class="form-select" id="reg-atraso" style="width:120px">
+              <option value="">Atraso</option>
+              <option value="SIM">Com atraso</option>
+              <option value="NÃO">Sem atraso</option>
+            </select>
           </div>
         </div>
 
@@ -699,22 +758,40 @@
       <div class="page-body">
 
         <div class="card mb-4" style="padding:16px 20px">
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between">
-            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-              <input class="form-input" type="text" id="rel-busca" placeholder="Buscar por ID, data, motivo..."
-                style="width:260px">
-              <select class="form-select" id="rel-turno" style="width:160px">
-                <option value="">Todos os turnos</option>
-                <option>1º TURNO</option>
-                <option>2º TURNO</option>
-                <option>3º TURNO</option>
-              </select>
+          <!-- Linha 1: busca + botões -->
+          <div
+            style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;margin-bottom:12px">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <input class="form-input" type="text" id="rel-busca" placeholder="Buscar em observações..."
+                style="width:240px">
               <button class="btn btn-outline-accent" id="btn-relatorio-filtrar">Filtrar</button>
+              <button class="btn btn-ghost btn-sm" id="btn-relatorio-limpar">✕ Limpar</button>
             </div>
             <div style="display:flex;align-items:center;gap:12px">
               <span style="font-size:.78rem;color:var(--text-3)" id="rel-count"></span>
-              <button class="btn btn-ghost btn-sm" onclick="LWDash.exportCSV()">⬇ Exportar CSV</button>
             </div>
+          </div>
+          <!-- Linha 2: filtros -->
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input class="form-input" type="date" id="rel-data-inicio" style="width:150px" title="Data início">
+            <span style="color:var(--text-3);font-size:.85rem">até</span>
+            <input class="form-input" type="date" id="rel-data-fim" style="width:150px" title="Data fim">
+            <input class="form-input" type="text" id="rel-id-bateria" placeholder="ID Bateria" style="width:120px">
+            <select class="form-select" id="rel-num-traco" style="width:130px">
+              <option value="">Nº do traço</option>
+              <option value="1">Traço 1</option>
+              <option value="2">Traço 2</option>
+              <option value="3">Traço 3</option>
+              <option value="4">Traço 4</option>
+              <option value="5">Traço 5</option>
+              <option value="6">Traço 6</option>
+              <option value="7">Traço 7</option>
+              <option value="8">Traço 8</option>
+              <option value="9">Traço 9</option>
+              <option value="10">Traço 10</option>
+              <option value="11">Traço 11</option>
+              <option value="12">Traço 12</option>
+            </select>
           </div>
         </div>
 
@@ -876,9 +953,11 @@
   <script>
 
     // ---- Navigation ----
+    const ADMIN_ONLY_PAGES = [];
+
     function showPage(pageId, navEl) {
       const role = sessionStorage.getItem('lw_role');
-      if (role === 'Operador' && pageId !== 'operacao') return;
+      if (role === 'Operador' && ADMIN_ONLY_PAGES.includes(pageId)) return;
       document.querySelectorAll('.main').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -907,8 +986,9 @@
         // redraw charts on tab switch (canvas needs layout)
         setTimeout(() => LWDash.initDashboard(), 50);
       }
-      if (pageId === 'relatorio') {
-        LWDash.renderRelatorio();
+      if (pageId === 'relatorio' && !window._relatorioInit) {
+        window._relatorioInit = true;
+        LWDash.initRelatorio();
       }
     }
 
@@ -924,24 +1004,24 @@
 
       // Init operation page
       LWOp.init();
-      // Restrição por perfil
+      // ---- Controle de acesso por perfil ----
       const role = sessionStorage.getItem('lw_role');
+
       if (role === 'Operador') {
-        // Esconde itens da sidebar que o operador não pode acessar
-        // Esconde o menu principal inteiro (operador vai direto para operação)
-        document.getElementById('page-menu').style.display = 'none';
-        document.querySelectorAll('[data-page="menu"],[data-page="dashboard"],[data-page="turnos"],[data-page="registro"]')
-          .forEach(btn => btn.style.display = 'none');
+        // Esconde card de Importar e botão Configurações no menu
+        document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = 'none');
 
-        // Esconde os labels da sidebar que ficam órfãos
-        document.querySelectorAll('.sidebar-label').forEach(lbl => lbl.style.display = 'none');
-
+        // Bloqueia acesso direto via showPage para páginas admin
         // Vai direto para a tela de operação
         showPage('operacao');
-      }
-      if (role === 'Administrador') {
+
+      } else if (role === 'Administrador') {
+        // Administrador: acesso total
         document.getElementById('btn-config').style.display = 'inline-flex';
+        // Garante que itens admin estejam visíveis
+        document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = '');
       }
+
       const roleEl = document.getElementById('topbar-role');
       if (roleEl) roleEl.textContent = role || '';
     });
@@ -949,32 +1029,35 @@
 
     // ---- Importação de Histórico ----
 
+    let _activeImportFields = [];
     const IMPORT_FIELDS = [
-      { key: 'data',          label: 'Data',            required: true  },
-      { key: 'turno',         label: 'Turno',           required: true  },
-      { key: 'id_bateria',    label: 'ID Bateria',      required: true  },
-      { key: 'dimensao',      label: 'Dimensão',        required: true  },
-      { key: 'tipo_montagem', label: 'Tipo Montagem',   required: true  },
-      { key: 'inicio',        label: 'Hora Início',     required: false },
-      { key: 'fim',           label: 'Hora Fim',        required: false },
-      { key: 'qtd_tracos',    label: 'Qtd Traços',      required: false },
-      { key: 'houve_atraso',  label: 'Houve Atraso',    required: false },
-      { key: 'motivo_atraso', label: 'Motivo Atraso',   required: false },
-      { key: 'total_paineis', label: 'Total Painéis',   required: false },
-      { key: 'paineis_2p',    label: 'Painéis 2P',      required: false },
-      { key: 'paineis_sp',    label: 'Painéis S/P',     required: false },
-      { key: 'm2_total',      label: 'm² Total',        required: false },
-      { key: 'm2_2p',         label: 'm² 2/P',          required: false },
-      { key: 'm2_sp',         label: 'm² S/P',          required: false },
-      { key: 'bercos_reais',  label: 'Berços Reais',    required: false },
-      { key: 'tempo_min',     label: 'Tempo (min)',      required: false },
+      { key: 'data', label: 'Data', required: true },
+      { key: 'turno', label: 'Turno', required: true },
+      { key: 'id_bateria', label: 'ID Bateria', required: true },
+      { key: 'dimensao', label: 'Dimensão', required: true },
+      { key: 'tipo_montagem', label: 'Tipo Montagem', required: true },
+      { key: 'inicio', label: 'Hora Início', required: false },
+      { key: 'fim', label: 'Hora Fim', required: false },
+      { key: 'qtd_tracos', label: 'Qtd Traços', required: false },
+      { key: 'houve_atraso', label: 'Houve Atraso', required: false },
+      { key: 'motivo_atraso', label: 'Motivo Atraso', required: false },
+      { key: 'total_paineis', label: 'Total Painéis', required: false },
+      { key: 'paineis_2p', label: 'Painéis 2P', required: false },
+      { key: 'paineis_sp', label: 'Painéis S/P', required: false },
+      { key: 'm2_total', label: 'm² Total', required: false },
+      { key: 'm2_2p', label: 'm² 2/P', required: false },
+      { key: 'm2_sp', label: 'm² S/P', required: false },
+      { key: 'bercos_reais', label: 'Berços Reais', required: false },
+      { key: 'tempo_min', label: 'Tempo (min)', required: false },
     ];
 
     let _importSheetHeaders = [];
     let _importSheetRows = [];
     let _importRegistros = [];
+    let _importDestino = null; // 'historico' | 'relatorio_injecao'
 
     function abrirImportacao() {
+      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
       document.getElementById('import-modal').style.display = 'flex';
       resetImportModal();
     }
@@ -983,8 +1066,49 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
-    function resetImportModal() {
+    function escolherDestino(destino) {
+      _importDestino = destino;
+      // Ajusta o título e os campos de mapeamento conforme o destino
+      const titulo = destino === 'historico'
+        ? '📥 IMPORTAR — REGISTRO DE BATERIAS'
+        : '📥 IMPORTAR — RELATÓRIO DE INJEÇÃO';
+      document.getElementById('import-modal-titulo').textContent = titulo;
+
+      // Redefine IMPORT_FIELDS dinamicamente conforme destino
+      if (destino === 'relatorio_injecao') {
+        _activeImportFields = [
+          { key: 'data', label: 'Data', required: true },
+          { key: 'id_bateria', label: 'ID Bateria', required: true },
+          { key: 'num_traco', label: 'Nº Traço', required: false },
+          { key: 'berco_ini', label: 'Berço Início', required: false },
+          { key: 'berco_fim', label: 'Berço Fim', required: false },
+          { key: 'densidade', label: 'Densidade', required: false },
+          { key: 'flow', label: 'Flow', required: false },
+          { key: 'obs', label: 'Observação', required: false },
+        ];
+      } else {
+        _activeImportFields = IMPORT_FIELDS; // campos originais do historico
+      }
+
+      // Atualiza label de destino visível no step-1
+      const labelEl = document.getElementById('import-destino-label');
+      if (labelEl) {
+        labelEl.textContent = destino === 'historico'
+          ? 'Destino: Registro de Baterias (historico.json)'
+          : 'Destino: Relatório de Injeção (relatorio_injecao.json)';
+        labelEl.style.color = destino === 'historico' ? 'var(--accent)' : 'var(--blue)';
+      }
+      document.getElementById('import-step-0').style.display = 'none';
       document.getElementById('import-step-1').style.display = 'block';
+    }
+
+    function resetImportModal() {
+      _importDestino = null;
+      _importSheetHeaders = [];
+      _importSheetRows = [];
+      _importRegistros = [];
+      document.getElementById('import-step-0').style.display = 'block';
+      document.getElementById('import-step-1').style.display = 'none';
       document.getElementById('import-step-2').style.display = 'none';
       document.getElementById('import-step-3').style.display = 'none';
       document.getElementById('import-mapping-area').style.display = 'none';
@@ -1011,7 +1135,7 @@
     function handleImportFile(file) {
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = function(e) {
+      reader.onload = function (e) {
         try {
           const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
           const ws = wb.Sheets[wb.SheetNames[0]];
@@ -1028,7 +1152,7 @@
 
           renderMappingGrid();
           document.getElementById('import-mapping-area').style.display = 'block';
-        } catch(err) {
+        } catch (err) {
           alert('Erro ao ler o arquivo: ' + err.message);
         }
       };
@@ -1039,9 +1163,9 @@
       const grid = document.getElementById('import-mapping-grid');
       const opts = ['— ignorar —', ..._importSheetHeaders];
 
-      grid.innerHTML = IMPORT_FIELDS.map(f => {
+      grid.innerHTML = _activeImportFields.map(f => {
         const guess = _importSheetHeaders.find(h =>
-          h.toLowerCase().replace(/[\s_\-]/g,'').includes(f.key.replace(/_/g,'')) ||
+          h.toLowerCase().replace(/[\s_\-]/g, '').includes(f.key.replace(/_/g, '')) ||
           h.toLowerCase().includes(f.label.toLowerCase().split(' ')[0])
         ) || '';
 
@@ -1071,54 +1195,76 @@
       const mapa = {};
       document.querySelectorAll('#import-mapping-grid select[data-field]').forEach(sel => {
         const field = sel.getAttribute('data-field');
-        const col   = sel.value;
+        const col = sel.value;
         if (col && col !== '— ignorar —') mapa[field] = col;
       });
 
-      const faltando = IMPORT_FIELDS.filter(f => f.required && !mapa[f.key]).map(f => f.label);
+      const faltando = _activeImportFields.filter(f => f.required && !mapa[f.key]).map(f => f.label);
       if (faltando.length) { alert('Mapeie os campos obrigatórios: ' + faltando.join(', ')); return; }
 
       const erros = [];
-      _importRegistros = _importSheetRows.map((row, i) => {
-        const dataISO   = excelSerialToISO(row[mapa['data']]);
-        if (!dataISO) erros.push('Linha ' + (i+2) + ': data inválida ("' + row[mapa['data']] + '")');
-        const inicioISO = mapa['inicio'] ? excelSerialToISO(row[mapa['inicio']]) : null;
-        const fimISO    = mapa['fim']    ? excelSerialToISO(row[mapa['fim']])    : null;
-        const tempoMin  = mapa['tempo_min']
-          ? parseFloat(row[mapa['tempo_min']]) || 0
-          : (inicioISO && fimISO ? (new Date(fimISO) - new Date(inicioISO)) / 60000 : 0);
-        const dimensao  = mapa['dimensao'] ? String(row[mapa['dimensao']]) : '';
-        const dim       = LW.DIMENSAO_OPTS.find(d => d.label === dimensao.trim());
-        const capacidade = dim ? dim.bercos : 0;
-        const houve     = mapa['houve_atraso'] ? String(row[mapa['houve_atraso']]).trim().toUpperCase() : 'NAO';
+      if (_importDestino === 'relatorio_injecao') {
+        // Monta linhas no formato do relatorio_injecao.json
+        _importRegistros = _importSheetRows.map((row, i) => {
+          const dataISO = excelSerialToISO(row[mapa['data']]);
+          if (!dataISO) erros.push('Linha ' + (i + 2) + ': data inválida');
+          return {
+            id_operacao: 'imp_' + Date.now() + '_' + i,
+            data: dataISO ? dataISO.split('T')[0] : '',
+            id_bateria: mapa['id_bateria'] ? String(row[mapa['id_bateria']]).trim() : '',
+            num_traco: mapa['num_traco'] ? parseInt(row[mapa['num_traco']]) || 1 : 1,
+            berco_ini: mapa['berco_ini'] ? String(row[mapa['berco_ini']]).trim() : '',
+            berco_fim: mapa['berco_fim'] ? String(row[mapa['berco_fim']]).trim() : '',
+            densidade: mapa['densidade'] ? String(row[mapa['densidade']]).trim() : '',
+            flow: mapa['flow'] ? String(row[mapa['flow']]).trim() : '',
+            obs: mapa['obs'] ? String(row[mapa['obs']]).trim() : '',
+          };
+        });
+      } else {
+        _importRegistros = _importSheetRows.map((row, i) => {
+          const dataISO = excelSerialToISO(row[mapa['data']]);
+          if (!dataISO) erros.push('Linha ' + (i + 2) + ': data inválida ("' + row[mapa['data']] + '")');
+          const inicioISO = mapa['inicio'] ? excelSerialToISO(row[mapa['inicio']]) : null;
+          const fimISO = mapa['fim'] ? excelSerialToISO(row[mapa['fim']]) : null;
+          const tempoMin = mapa['tempo_min']
+            ? parseFloat(row[mapa['tempo_min']]) || 0
+            : (inicioISO && fimISO ? (new Date(fimISO) - new Date(inicioISO)) / 60000 : 0);
+          const dimensao = mapa['dimensao'] ? String(row[mapa['dimensao']]) : '';
+          const dim = LW.DIMENSAO_OPTS.find(d => d.label === dimensao.trim());
+          const capacidade = dim ? dim.bercos : 0;
+          const houve = mapa['houve_atraso'] ? String(row[mapa['houve_atraso']]).trim().toUpperCase() : 'NAO';
 
-        return {
-          id:            'imp_' + Date.now() + '_' + i,
-          data:          dataISO ? dataISO.split('T')[0] : '',
-          turno:         mapa['turno']         ? String(row[mapa['turno']]).trim()            : '',
-          dimensao:      dimensao.trim(),
-          capacidade,
-          id_bateria:    mapa['id_bateria']    ? String(row[mapa['id_bateria']]).trim()       : '',
-          inicio:        inicioISO || '',
-          fim:           fimISO    || '',
-          qtd_tracos:    mapa['qtd_tracos']    ? parseInt(row[mapa['qtd_tracos']]) || 0       : 0,
-          houve_atraso:  houve === 'SIM' ? 'SIM' : 'NÃO',
-          motivo_atraso: mapa['motivo_atraso'] ? String(row[mapa['motivo_atraso']]).trim()    : '',
-          tipo_montagem: mapa['tipo_montagem'] ? String(row[mapa['tipo_montagem']]).trim()    : '',
-          total_paineis: mapa['total_paineis'] ? parseInt(row[mapa['total_paineis']]) || 0   : 0,
-          paineis_2p:    mapa['paineis_2p']    ? parseInt(row[mapa['paineis_2p']])    || 0   : 0,
-          paineis_sp:    mapa['paineis_sp']    ? parseInt(row[mapa['paineis_sp']])    || 0   : 0,
-          m2_total:      mapa['m2_total']      ? parseFloat(row[mapa['m2_total']])    || 0   : 0,
-          m2_2p:         mapa['m2_2p']         ? parseFloat(row[mapa['m2_2p']])       || 0   : 0,
-          m2_sp:         mapa['m2_sp']         ? parseFloat(row[mapa['m2_sp']])       || 0   : 0,
-          bercos_reais:  mapa['bercos_reais']  ? parseInt(row[mapa['bercos_reais']])  || capacidade : capacidade,
-          tempo_min:     tempoMin,
-        };
-      });
+          return {
+            id: 'imp_' + Date.now() + '_' + i,
+            data: dataISO ? dataISO.split('T')[0] : '',
+            turno: mapa['turno'] ? String(row[mapa['turno']]).trim() : '',
+            dimensao: dimensao.trim(),
+            capacidade,
+            id_bateria: mapa['id_bateria'] ? String(row[mapa['id_bateria']]).trim() : '',
+            inicio: inicioISO || '',
+            fim: fimISO || '',
+            qtd_tracos: mapa['qtd_tracos'] ? parseInt(row[mapa['qtd_tracos']]) || 0 : 0,
+            houve_atraso: houve === 'SIM' ? 'SIM' : 'NÃO',
+            motivo_atraso: mapa['motivo_atraso'] ? String(row[mapa['motivo_atraso']]).trim() : '',
+            tipo_montagem: mapa['tipo_montagem'] ? String(row[mapa['tipo_montagem']]).trim() : '',
+            total_paineis: mapa['total_paineis'] ? parseInt(row[mapa['total_paineis']]) || 0 : 0,
+            paineis_2p: mapa['paineis_2p'] ? parseInt(row[mapa['paineis_2p']]) || 0 : 0,
+            paineis_sp: mapa['paineis_sp'] ? parseInt(row[mapa['paineis_sp']]) || 0 : 0,
+            m2_total: mapa['m2_total'] ? parseFloat(row[mapa['m2_total']]) || 0 : 0,
+            m2_2p: mapa['m2_2p'] ? parseFloat(row[mapa['m2_2p']]) || 0 : 0,
+            m2_sp: mapa['m2_sp'] ? parseFloat(row[mapa['m2_sp']]) || 0 : 0,
+            bercos_reais: mapa['bercos_reais'] ? parseInt(row[mapa['bercos_reais']]) || capacidade : capacidade,
+            tempo_min: tempoMin,
+          };
+        });
+      }
 
-      const cols   = ['data','turno','id_bateria','dimensao','tipo_montagem','total_paineis','m2_total','houve_atraso'];
-      const labels = { data:'Data', turno:'Turno', id_bateria:'Bateria', dimensao:'Dimensão',
-        tipo_montagem:'Montagem', total_paineis:'Painéis', m2_total:'m²', houve_atraso:'Atraso' };
+      const cols = _importDestino === 'relatorio_injecao'
+        ? ['data', 'id_bateria', 'num_traco', 'berco_ini', 'berco_fim', 'densidade', 'flow', 'obs']
+        : ['data', 'turno', 'id_bateria', 'dimensao', 'tipo_montagem', 'total_paineis', 'm2_total', 'houve_atraso'];
+      const labels = _importDestino === 'relatorio_injecao'
+        ? { data: 'Data', id_bateria: 'Bateria', num_traco: 'Traço', berco_ini: 'B.Início', berco_fim: 'B.Fim', densidade: 'Densidade', flow: 'Flow', obs: 'Obs' }
+        : { data: 'Data', turno: 'Turno', id_bateria: 'Bateria', dimensao: 'Dimensão', tipo_montagem: 'Montagem', total_paineis: 'Painéis', m2_total: 'm²', houve_atraso: 'Atraso' };
       const preview = _importRegistros.slice(0, 8);
 
       const thStyle = 'padding:8px 12px;text-align:left;font-size:.75rem;color:var(--text-3);font-weight:600;white-space:nowrap;border-bottom:1px solid var(--border)';
@@ -1141,7 +1287,7 @@
       const errosDiv = document.getElementById('import-erros');
       if (erros.length) {
         errosDiv.style.display = 'block';
-        errosDiv.innerHTML = '<strong>Avisos:</strong> ' + erros.slice(0,5).join(' · ') + (erros.length > 5 ? ' ...' : '');
+        errosDiv.innerHTML = '<strong>Avisos:</strong> ' + erros.slice(0, 5).join(' · ') + (erros.length > 5 ? ' ...' : '');
       } else {
         errosDiv.style.display = 'none';
       }
@@ -1155,7 +1301,10 @@
       btn.disabled = true;
       btn.textContent = 'Importando...';
       try {
-        const res = await fetch('/importar-historico', {
+        const rota = _importDestino === 'relatorio_injecao'
+          ? '/importar-relatorio-injecao'
+          : '/importar-historico';
+        const res = await fetch(rota, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(_importRegistros),
@@ -1166,11 +1315,12 @@
         document.getElementById('import-step-2').style.display = 'none';
         document.getElementById('import-step-3').style.display = 'block';
         document.getElementById('import-result-icon').textContent = '✅';
-        document.getElementById('import-result-msg').textContent = json.inseridos + ' registros importados com sucesso!';
+        const destLabel = _importDestino === 'relatorio_injecao' ? 'Relatório de Injeção' : 'Registro de Baterias';
+        document.getElementById('import-result-msg').textContent = json.inseridos + ' registros importados para ' + destLabel + '!';
         document.getElementById('import-result-sub').textContent = json.duplicatas
-          ? json.duplicatas + ' duplicatas ignoradas (mesma data + bateria + turno já existentes).'
+          ? json.duplicatas + ' duplicatas ignoradas.'
           : 'Nenhuma duplicata encontrada.';
-      } catch(err) {
+      } catch (err) {
         document.getElementById('import-step-2').style.display = 'none';
         document.getElementById('import-step-3').style.display = 'block';
         document.getElementById('import-result-icon').textContent = '❌';
@@ -1187,6 +1337,7 @@
     let _cfgDados = null; // cópia local enquanto edita
 
     function abrirConfig() {
+      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
       // Lê o estado atual das variáveis já carregadas pelo data.js
       _cfgDados = {
         baterias: [...LW.BATERIA_IDS],
@@ -1330,18 +1481,133 @@
 
   </script>
   <!-- ============ MODAL IMPORTAÇÃO ============ -->
-  <div id="import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
-    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:680px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+  <!-- ============ MODAL EXPORTAÇÃO CSV ============ -->
+  <div id="export-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:640px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
-        <h2 style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">📥 IMPORTAR HISTÓRICO</h2>
-        <button onclick="fecharImportacao()" style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">⬇ EXPORTAR CSV</h2>
+        <button onclick="LWDash.fecharExportModal()" style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+      </div>
+
+      <!-- Período -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Período</div>
+        <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="radio" name="export-periodo" id="exp-radio-tudo" value="tudo" checked
+              onchange="LWDash.onExportPeriodoChange(this.value)"
+              style="accent-color:var(--accent);width:16px;height:16px">
+            <span style="font-size:.9rem">Exportar tudo</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="radio" name="export-periodo" id="exp-radio-periodo" value="periodo"
+              onchange="LWDash.onExportPeriodoChange(this.value)"
+              style="accent-color:var(--accent);width:16px;height:16px">
+            <span style="font-size:.9rem">Por período</span>
+          </label>
+        </div>
+        <div id="exp-periodo-inputs" style="display:none;align-items:center;gap:10px;flex-wrap:wrap">
+          <input class="form-input" type="date" id="exp-data-inicio" style="width:155px"
+            onchange="LWDash.atualizarPreviewCount()">
+          <span style="color:var(--text-3);font-size:.85rem">até</span>
+          <input class="form-input" type="date" id="exp-data-fim" style="width:155px"
+            onchange="LWDash.atualizarPreviewCount()">
+        </div>
+      </div>
+
+      <div style="height:1px;background:var(--border);margin-bottom:20px"></div>
+
+      <!-- Seleção de colunas -->
+      <div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em">Colunas</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="LWDash.selecionarTodasColunas(true)">Marcar todas</button>
+            <button class="btn btn-ghost btn-sm" onclick="LWDash.selecionarTodasColunas(false)">Desmarcar todas</button>
+          </div>
+        </div>
+        <div id="exp-colunas-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      </div>
+
+      <div style="height:1px;background:var(--border);margin-bottom:20px"></div>
+
+      <!-- Rodapé -->
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span id="exp-preview-count" style="font-size:.82rem;color:var(--text-3)"></span>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost" onclick="LWDash.fecharExportModal()">Cancelar</button>
+          <button class="btn btn-primary" onclick="LWDash.confirmarExport()">⬇ Baixar CSV</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="import-modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
+    <div
+      style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:680px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+        <h2 id="import-modal-titulo"
+          style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">📥 IMPORTAR
+          DOCUMENTO</h2>
+        <button onclick="fecharImportacao()"
+          style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+      </div>
+
+      <!-- Passo 0: escolher destino -->
+      <div id="import-step-0">
+        <p style="color:var(--text-2);font-size:.9rem;margin-bottom:24px">
+          Para qual tabela deseja importar os dados?
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+          <button onclick="escolherDestino('historico')" style="
+            background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius-lg);
+            padding:28px 20px;cursor:pointer;text-align:left;transition:border-color .15s,background .15s;
+          " onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,158,11,.06)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-3)'">
+            <div style="font-size:2rem;margin-bottom:10px">📋</div>
+            <div
+              style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:var(--text);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">
+              Registro de Baterias
+            </div>
+            <div style="font-size:.8rem;color:var(--text-3);line-height:1.5">
+              Importa dados de produção: baterias, painéis, m², tempo e atrasos.<br>
+              Destino: <code style="color:var(--accent);font-family:var(--font-mono)">historico.json</code>
+            </div>
+          </button>
+
+          <button onclick="escolherDestino('relatorio_injecao')" style="
+            background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius-lg);
+            padding:28px 20px;cursor:pointer;text-align:left;transition:border-color .15s,background .15s;
+          " onmouseover="this.style.borderColor='var(--blue)';this.style.background='rgba(59,130,246,.06)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-3)'">
+            <div style="font-size:2rem;margin-bottom:10px">🧾</div>
+            <div
+              style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:var(--text);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">
+              Relatório de Injeção
+            </div>
+            <div style="font-size:.8rem;color:var(--text-3);line-height:1.5">
+              Importa dados de traços: berços, densidade, flow e observações.<br>
+              Destino: <code style="color:var(--blue);font-family:var(--font-mono)">relatorio_injecao.json</code>
+            </div>
+          </button>
+
+        </div>
       </div>
 
       <!-- Passo 1: selecionar arquivo -->
-      <div id="import-step-1">
+      <div id="import-step-1" style="display:none">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <button class="btn btn-ghost btn-sm" onclick="resetImportModal()">← Voltar</button>
+          <span style="font-size:.85rem;color:var(--text-3)" id="import-destino-label"></span>
+        </div>
         <p style="color:var(--text-2);font-size:.9rem;margin-bottom:20px">
-          Selecione uma planilha Excel com os dados históricos. O sistema vai detectar as colunas automaticamente e mostrar um preview antes de importar.
+          Selecione a planilha Excel. O sistema vai detectar as colunas automaticamente e mostrar um preview antes de
+          importar.
         </p>
 
         <!-- Drop zone -->
@@ -1350,20 +1616,22 @@
           text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
           background:var(--bg-2)
         " onclick="document.getElementById('import-file-input').click()"
-           ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(99,102,241,.06)'"
-           ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg-2)'"
-           ondrop="handleImportDrop(event)">
+          ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(99,102,241,.06)'"
+          ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg-2)'"
+          ondrop="handleImportDrop(event)">
           <div style="font-size:2.5rem;margin-bottom:12px">📂</div>
           <div style="color:var(--text);font-weight:600;margin-bottom:6px">Arraste o arquivo aqui</div>
           <div style="color:var(--text-3);font-size:.85rem">ou clique para selecionar — .xlsx, .xls</div>
         </div>
-        <input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleImportFile(this.files[0])">
+        <input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none"
+          onchange="handleImportFile(this.files[0])">
 
         <!-- Mapeamento de colunas -->
         <div id="import-mapping-area" style="display:none;margin-top:24px">
           <div class="card-title" style="margin-bottom:14px">Mapeamento de Colunas</div>
           <p style="color:var(--text-3);font-size:.82rem;margin-bottom:14px">
-            Associe cada campo do sistema com a coluna correspondente da sua planilha. Campos com <span style="color:var(--accent)">*</span> são obrigatórios.
+            Associe cada campo do sistema com a coluna correspondente da sua planilha. Campos com <span
+              style="color:var(--accent)">*</span> são obrigatórios.
           </p>
           <div id="import-mapping-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
 
@@ -1386,10 +1654,13 @@
             <tbody id="import-preview-body"></tbody>
           </table>
         </div>
-        <div id="import-erros" style="display:none;background:rgba(239,68,68,.08);border:1px solid var(--red-dim);border-radius:var(--radius);padding:12px;margin-bottom:16px;font-size:.82rem;color:var(--red)"></div>
+        <div id="import-erros"
+          style="display:none;background:rgba(239,68,68,.08);border:1px solid var(--red-dim);border-radius:var(--radius);padding:12px;margin-bottom:16px;font-size:.82rem;color:var(--red)">
+        </div>
         <div style="display:flex;justify-content:flex-end;gap:10px">
           <button class="btn btn-ghost" onclick="fecharImportacao()">Cancelar</button>
-          <button class="btn btn-success" id="btn-confirmar-import" onclick="confirmarImportacao()">✓ Importar Registros</button>
+          <button class="btn btn-success" id="btn-confirmar-import" onclick="confirmarImportacao()">✓ Importar
+            Registros</button>
         </div>
       </div>
 

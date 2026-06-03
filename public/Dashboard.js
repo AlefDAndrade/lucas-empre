@@ -277,22 +277,47 @@
   function initRegistro() {
     document.getElementById('btn-registro-filtrar').addEventListener('click', renderRegistro);
     document.getElementById('reg-busca').addEventListener('input', renderRegistro);
+    // Novos filtros — aplicam ao mudar
+    ['reg-turno', 'reg-montagem', 'reg-dimensao', 'reg-tracos', 'reg-capacidade', 'reg-atraso', 'reg-data-inicio', 'reg-data-fim', 'reg-id-bateria'].forEach(id => {
+      document.getElementById(id).addEventListener('change', renderRegistro);
+    });
+    // Botão limpar
+    document.getElementById('btn-registro-limpar').addEventListener('click', () => {
+      ['reg-busca', 'reg-id-bateria', 'reg-data-inicio', 'reg-data-fim'].forEach(id => document.getElementById(id).value = '');
+      ['reg-turno', 'reg-montagem', 'reg-dimensao', 'reg-tracos', 'reg-capacidade', 'reg-atraso'].forEach(id => document.getElementById(id).selectedIndex = 0);
+      renderRegistro();
+    });
     renderRegistro();
   }
 
   async function renderRegistro() {
     const busca = document.getElementById('reg-busca').value.toLowerCase();
     const turno = document.getElementById('reg-turno').value;
+    const montagem = document.getElementById('reg-montagem').value;
+    const dimensao = document.getElementById('reg-dimensao').value;
+    const tracos = document.getElementById('reg-tracos').value;
+    const capacidade = document.getElementById('reg-capacidade').value;
+    const idBateria = document.getElementById('reg-id-bateria').value.toLowerCase();
+    const atraso = document.getElementById('reg-atraso').value;
+    const dataInicio = document.getElementById('reg-data-inicio').value;  // 'YYYY-MM-DD' ou ''
+    const dataFim = document.getElementById('reg-data-fim').value;
+
     const s = await LW.getStats();
     let data = s.data;
 
     if (busca) data = data.filter(b =>
       b.id_bateria.toLowerCase().includes(busca) ||
-      b.data.includes(busca) ||
       (b.motivo_atraso || '').toLowerCase().includes(busca)
     );
+    if (idBateria) data = data.filter(b => b.id_bateria.toLowerCase().includes(idBateria));
     if (turno) data = data.filter(b => b.turno === turno);
-
+    if (montagem) data = data.filter(b => b.tipo_montagem === montagem);
+    if (dimensao) data = data.filter(b => b.dimensao === dimensao);
+    if (tracos) data = data.filter(b => b.qtd_tracos === parseInt(tracos));
+    if (capacidade) data = data.filter(b => b.capacidade === parseInt(capacidade));
+    if (atraso) data = data.filter(b => b.houve_atraso === atraso);
+    if (dataInicio) data = data.filter(b => b.data >= dataInicio);
+    if (dataFim) data = data.filter(b => b.data <= dataFim);
     // Sort by date desc
     data = [...data].sort((a, b) => b.data.localeCompare(a.data) || b.inicio?.localeCompare(a.inicio || ''));
 
@@ -331,69 +356,203 @@
     `).join('');
     document.getElementById('reg-count').textContent = data.length + ' registros';
   }
-  async function renderRelatorio() {
-    const s = await LW.getStats();
-    let data = [...s.data].sort((a, b) =>
-      b.data.localeCompare(a.data) || (b.inicio || '').localeCompare(a.inicio || '')
-    );
+  function initRelatorio() {
+    document.getElementById('btn-relatorio-filtrar').addEventListener('click', renderRelatorio);
+    document.getElementById('rel-busca').addEventListener('input', renderRelatorio);
+    ['rel-data-inicio', 'rel-data-fim', 'rel-id-bateria', 'rel-num-traco'].forEach(id => {
+      document.getElementById(id).addEventListener('change', renderRelatorio);
+    });
+    document.getElementById('btn-relatorio-limpar').addEventListener('click', () => {
+      ['rel-busca', 'rel-id-bateria', 'rel-data-inicio', 'rel-data-fim'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('rel-num-traco').selectedIndex = 0;
+      renderRelatorio();
+    });
+    renderRelatorio();
+  }
 
+  async function renderRelatorio() {
     const tbody = document.getElementById('relatorio-tbody');
-    if (!data.length) {
+    if (!tbody) return;
+
+    const busca = document.getElementById('rel-busca')?.value.toLowerCase() || '';
+    const idBateria = document.getElementById('rel-id-bateria')?.value.toLowerCase() || '';
+    const numTraco = document.getElementById('rel-num-traco')?.value || '';
+    const dataInicio = document.getElementById('rel-data-inicio')?.value || '';
+    const dataFim = document.getElementById('rel-data-fim')?.value || '';
+
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:20px">Carregando...</td></tr>`;
+
+    let linhas = await LW.getRelatorioInjecao();
+
+    if (busca) linhas = linhas.filter(l => (l.obs || '').toLowerCase().includes(busca) || (l.id_bateria || '').toLowerCase().includes(busca));
+    if (idBateria) linhas = linhas.filter(l => (l.id_bateria || '').toLowerCase().includes(idBateria));
+    if (numTraco) linhas = linhas.filter(l => l.num_traco === parseInt(numTraco));
+    if (dataInicio) linhas = linhas.filter(l => l.data >= dataInicio);
+    if (dataFim) linhas = linhas.filter(l => l.data <= dataFim);
+
+    if (!linhas.length) {
       tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
+      document.getElementById('rel-count').textContent = '0 registros';
       return;
     }
 
-    const linhas = [];
-    data.forEach(b => {
-      if (b.tracos && b.tracos.length > 0) {
-        b.tracos.forEach(t => {
-          linhas.push({ b, t });
-        });
-      } else {
-        linhas.push({ b, t: null });
-      }
-    });
+    const sorted = [...linhas].sort((a, b) =>
+      b.data.localeCompare(a.data) ||
+      (b.id_operacao || '').localeCompare(a.id_operacao || '') ||
+      (a.num_traco - b.num_traco)
+    );
 
-    tbody.innerHTML = linhas.map(({ b, t }) => `
+    tbody.innerHTML = sorted.map(l => `
       <tr>
-        <td class="mono">${b.data ? b.data.split('-').reverse().join('/') : '—'}</td>
-        <td>${b.id_bateria || '—'}</td>
-        <td>${t ? t.num : '—'}</td>
-        <td class="mono">${t ? (t.berco_ini || '—') : '—'}</td>
-        <td class="mono">${t ? (t.berco_fim || '—') : '—'}</td>
-        <td>${t ? (t.densidade || '—') : '—'}</td>
-        <td>${t ? (t.flow || '—') : '—'}</td>
-        <td>${t ? (t.obs || '—') : '—'}</td>
+        <td class="mono">${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
+        <td>${l.id_bateria || '—'}</td>
+        <td>${l.num_traco || '—'}</td>
+        <td class="mono">${l.berco_ini || '—'}</td>
+        <td class="mono">${l.berco_fim || '—'}</td>
+        <td>${l.densidade || '—'}</td>
+        <td>${l.flow || '—'}</td>
+        <td>${l.obs || '—'}</td>
       </tr>
     `).join('');
+    document.getElementById('rel-count').textContent = linhas.length + ' registros';
   }
 
   // ---- Export CSV ----
 
-  async function exportCSV() {
-    const s = await LW.getStats();
-    const cols = ['data', 'turno', 'id_bateria', 'dimensao', 'tipo_montagem', 'inicio', 'fim',
-      'tempo_min', 'qtd_tracos', 'houve_atraso', 'motivo_atraso',
-      'total_paineis', 'paineis_2p', 'paineis_sp', 'm2_total', 'm2_2p', 'm2_sp'];
-    const header = cols.join(';');
-    const rows = s.data.map(b =>
-      cols.map(c => {
-        const v = b[c];
-        if (c === 'inicio' || c === 'fim') return v ? LW.formatTime(v) : '';
-        return v !== undefined && v !== null ? String(v).replace(/;/g, ',') : '';
+  const EXPORT_COLUNAS = [
+    { campo: 'data',          header: 'Data',             padrao: true,  fmt: v => v ? v.split('-').reverse().join('/') : '' },
+    { campo: 'turno',         header: 'Turno',            padrao: true  },
+    { campo: 'id_bateria',    header: 'ID Bateria',       padrao: true  },
+    { campo: 'dimensao',      header: 'Dimensão',         padrao: true  },
+    { campo: 'capacidade',    header: 'Cap. Berços',      padrao: true  },
+    { campo: 'tipo_montagem', header: 'Tipo Montagem',    padrao: true  },
+    { campo: 'inicio',        header: 'Hora Início',      padrao: true,  fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } },
+    { campo: 'fim',           header: 'Hora Fim',         padrao: true,  fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } },
+    { campo: 'tempo_min',     header: 'Duração (min)',    padrao: true,  fmt: v => v ? String(Math.round(v)) : '0' },
+    { campo: 'qtd_tracos',    header: 'Qtd Traços',       padrao: true  },
+    { campo: 'houve_atraso',  header: 'Houve Atraso',     padrao: true  },
+    { campo: 'motivo_atraso', header: 'Motivo Atraso',    padrao: true  },
+    { campo: 'silo',          header: 'Silo EPS',         padrao: false },
+    { campo: 'expansao',      header: 'Expansão EPS',     padrao: false },
+    { campo: 'bercos_reais',  header: 'Berços Reais',     padrao: true  },
+    { campo: 'total_paineis', header: 'Total Painéis',    padrao: true  },
+    { campo: 'paineis_2p',    header: 'Painéis 2/P',      padrao: true  },
+    { campo: 'paineis_sp',    header: 'Painéis S/P',      padrao: true  },
+    { campo: 'm2_total',      header: 'm² Total',         padrao: true,  fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0' },
+    { campo: 'm2_2p',         header: 'm² 2/P',           padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0' },
+    { campo: 'm2_sp',         header: 'm² S/P',           padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0' },
+  ];
+
+  function escaparCelula(valor) {
+    const str = valor !== undefined && valor !== null ? String(valor) : '';
+    if (str.includes(';') || str.includes('"') || str.includes('\n')) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }
+
+  function gerarDownloadCSV(dados, colsSel, sufixo) {
+    const cabecalho = colsSel.map(c => escaparCelula(c.header)).join(';');
+    const linhas = dados.map(b =>
+      colsSel.map(({ campo, fmt }) => {
+        const v = b[campo];
+        const val = fmt ? fmt(v) : (v !== undefined && v !== null ? String(v) : '');
+        return escaparCelula(val);
       }).join(';')
     );
-    const csv = '\uFEFF' + [header, ...rows].join('\n'); // BOM for Excel
+    const csv = 'sep=;\r\n' + [cabecalho, ...linhas].join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'lightwall_injecao_' + new Date().toISOString().split('T')[0] + '.csv';
+    a.download = 'lightwall_baterias_' + sufixo + '.csv';
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  // ---- Public ----
-  window.LWDash = { initDashboard, initTurnos, initRegistro, exportCSV, renderRelatorio };
+  // Compatibilidade — exporta tudo com colunas padrão
+  async function exportCSV() {
+    const s = await LW.getStats();
+    gerarDownloadCSV(s.data, EXPORT_COLUNAS.filter(c => c.padrao), new Date().toISOString().split('T')[0]);
+  }
 
+  async function abrirExportModal() {
+    const grid = document.getElementById('exp-colunas-grid');
+    grid.innerHTML = EXPORT_COLUNAS.map((c, i) =>
+      '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 10px;' +
+      'border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2)">' +
+      '<input type="checkbox" id="exp-col-' + i + '" ' + (c.padrao ? 'checked' : '') +
+      ' style="accent-color:var(--accent);width:15px;height:15px" onchange="LWDash.atualizarPreviewCount()">' +
+      '<span style="font-size:.85rem">' + c.header + '</span></label>'
+    ).join('');
+    document.getElementById('exp-radio-tudo').checked = true;
+    document.getElementById('exp-periodo-inputs').style.display = 'none';
+    document.getElementById('exp-data-inicio').value = '';
+    document.getElementById('exp-data-fim').value = '';
+    await atualizarPreviewCount();
+    document.getElementById('export-modal').style.display = 'flex';
+  }
+
+  function fecharExportModal() {
+    document.getElementById('export-modal').style.display = 'none';
+  }
+
+  function onExportPeriodoChange(valor) {
+    document.getElementById('exp-periodo-inputs').style.display = valor === 'periodo' ? 'flex' : 'none';
+    atualizarPreviewCount();
+  }
+
+  function selecionarTodasColunas(marcar) {
+    EXPORT_COLUNAS.forEach((_, i) => {
+      const el = document.getElementById('exp-col-' + i);
+      if (el) el.checked = marcar;
+    });
+    atualizarPreviewCount();
+  }
+
+  async function atualizarPreviewCount() {
+    const s = await LW.getStats();
+    let dados = s.data;
+    const radio = document.querySelector('input[name="export-periodo"]:checked');
+    if (radio && radio.value === 'periodo') {
+      const ini = document.getElementById('exp-data-inicio').value;
+      const fim = document.getElementById('exp-data-fim').value;
+      if (ini) dados = dados.filter(b => b.data >= ini);
+      if (fim) dados = dados.filter(b => b.data <= fim);
+    }
+    const qtdCols = EXPORT_COLUNAS.filter((_, i) => {
+      const el = document.getElementById('exp-col-' + i);
+      return el && el.checked;
+    }).length;
+    const el = document.getElementById('exp-preview-count');
+    if (el) el.textContent = dados.length + ' registros · ' + qtdCols + ' colunas selecionadas';
+  }
+
+  async function confirmarExport() {
+    const s = await LW.getStats();
+    let dados = s.data;
+    let sufixo = 'completo';
+    const radio = document.querySelector('input[name="export-periodo"]:checked');
+    if (radio && radio.value === 'periodo') {
+      const ini = document.getElementById('exp-data-inicio').value;
+      const fim = document.getElementById('exp-data-fim').value;
+      if (ini) dados = dados.filter(b => b.data >= ini);
+      if (fim) dados = dados.filter(b => b.data <= fim);
+      if (ini || fim) sufixo = (ini || 'inicio') + '_a_' + (fim || 'fim');
+    }
+    const colsSel = EXPORT_COLUNAS.filter((_, i) => {
+      const el = document.getElementById('exp-col-' + i);
+      return el && el.checked;
+    });
+    if (!colsSel.length) { alert('Selecione ao menos uma coluna.'); return; }
+    gerarDownloadCSV(dados, colsSel, sufixo);
+    fecharExportModal();
+  }
+
+  // ---- Public ----
+  window.LWDash = {
+    initDashboard, initTurnos, initRegistro, initRelatorio, renderRelatorio,
+    exportCSV, abrirExportModal, fecharExportModal, onExportPeriodoChange,
+    selecionarTodasColunas, atualizarPreviewCount, confirmarExport,
+  };
 })();

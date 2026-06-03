@@ -18,6 +18,8 @@
     fim: null,
     status: 'idle',      // idle | running | finished
     tracos: [],
+    silo: '',
+    expansao: '',
   };
 
   let timerInterval = null;
@@ -111,6 +113,12 @@
       state.bercos_reais = e.target.value;
       recalcPaineis();
       persist();
+    });
+    $('op-silo').addEventListener('change', e => {
+      state.silo = e.target.value; persist();
+    });
+    $('op-expansao').addEventListener('change', e => {
+      state.expansao = e.target.value; persist();
     });
     $('op-motivo').addEventListener('input', e => {
       state.motivo_atraso = e.target.value; persist();
@@ -217,7 +225,7 @@
 
   function addTraco() {
     const num = state.tracos.length + 1;
-    state.tracos.push({ num, berco_ini: '', berco_fim: '', densidade: '', flow: '', obs: '' });
+    state.tracos.push({ id: 'traco_' + Date.now() + '_' + num, num, berco_ini: '', berco_fim: '', densidade: '', flow: '', obs: '' });
     renderTracos();
     persist();
   }
@@ -284,6 +292,8 @@
       { label: 'Injeção finalizada', ok: !!state.fim },
       { label: 'Motivo do atraso', ok: state.houve_atraso === 'NÃO' || !!state.motivo_atraso },
       { label: 'Ao menos 1 traço', ok: state.tracos.length > 0 },
+      { label: 'Silo de EPS informado', ok: !!state.silo },
+      { label: 'Expansão informada', ok: !!state.expansao },
     ];
 
     const allOk = checks.every(c => c.ok);
@@ -332,13 +342,18 @@
       qtd_tracos: state.tracos.length,
       houve_atraso: state.houve_atraso,
       motivo_atraso: state.motivo_atraso || '',
+      silo: state.silo || '',
+      expansao: state.expansao || '',
       tipo_montagem: state.tipo_montagem,
       bercos_reais: bercos,
       ...calc,
       tracos: state.tracos,
     };
 
-    LW.registrarOperacao(record)
+    Promise.all([
+      LW.registrarOperacao(record),
+      LW.registrarRelatorioInjecao(record),
+    ])
       .then(() => {
         LW.clearOperacaoAtual();
         clearInterval(timerInterval);
@@ -382,6 +397,8 @@
       fim: null,
       status: 'idle',
       tracos: [],
+      silo: '',
+      expansao: '',
     };
   }
 
@@ -392,7 +409,9 @@
     $('op-montagem').value = state.tipo_montagem || '';
     $('op-id-bateria').value = state.id_bateria || '';
     $('op-bercos-reais').value = state.bercos_reais || '';
+    $('op-silo').value = state.silo || '';
     $('op-motivo').value = state.motivo_atraso || '';
+    $('op-expansao').value = state.expansao || '';
 
     updateCapacidade();
 

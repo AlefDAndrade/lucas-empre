@@ -4200,5 +4200,45 @@
     "m2_sp": 73.2,
     "bercos_reais": 20,
     "tempo_min": 0
+  },
+  {
+    "id": "op_1780446020583",
+    "data": "2026-06-02",
+    "turno": "1º TURNO",
+    "dimensao": "9 cm",
+    "capacidade": 20,
+    "id_bateria": "B3",
+    "inicio": "2026-06-03T00:19:38.255Z",
+    "fim": "2026-06-03T00:20:18.783Z",
+    "tempo_min": 0.6754666666666667,
+    "qtd_tracos": 2,
+    "houve_atraso": "NÃO",
+    "motivo_atraso": "",
+    "tipo_montagem": "HÍBRIDA",
+    "bercos_reais": 20,
+    "total_paineis": 40,
+    "paineis_2p": 20,
+    "paineis_sp": 20,
+    "m2_total": 73.2,
+    "m2_2p": 36.6,
+    "m2_sp": 36.6,
+    "tracos": [
+      {
+        "num": 1,
+        "berco_ini": "1",
+        "berco_fim": "10",
+        "densidade": "455",
+        "flow": "45",
+        "obs": "nada"
+      },
+      {
+        "num": 2,
+        "berco_ini": "11",
+        "berco_fim": "19",
+        "densidade": "455",
+        "flow": "45",
+        "obs": " ver"
+      }
+    ]
   }
 ]
