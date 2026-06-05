@@ -654,62 +654,24 @@
       <div class="page-body">
 
         <div class="card mb-4" style="padding:16px 20px">
-          <!-- Linha 1: busca + botões -->
-          <div
-            style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;margin-bottom:12px">
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <input class="form-input" type="text" id="reg-busca" placeholder="Buscar por ID, motivo..."
-                style="width:240px">
-              <button class="btn btn-outline-accent" id="btn-registro-filtrar">Filtrar</button>
-              <button class="btn btn-ghost btn-sm" id="btn-registro-limpar">✕ Limpar</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:12px">
-              <span style="font-size:.78rem;color:var(--text-3)" id="reg-count"></span>
-              <button class="btn btn-ghost btn-sm" onclick="LWDash.abrirExportModal()">⬇ Exportar CSV</button>
-            </div>
-          </div>
-          <!-- Linha 2: filtros -->
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <!-- Período — separado conforme spec -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
             <input class="form-input" type="date" id="reg-data-inicio" style="width:150px" title="Data início">
             <span style="color:var(--text-3);font-size:.85rem">até</span>
             <input class="form-input" type="date" id="reg-data-fim" style="width:150px" title="Data fim">
-            <select class="form-select" id="reg-turno" style="width:145px">
-              <option value="">Todos os turnos</option>
-              <option>1º TURNO</option>
-              <option>2º TURNO</option>
-              <option>3º TURNO</option>
-            </select>
-            <select class="form-select" id="reg-montagem" style="width:130px">
-              <option value="">Tipo montagem</option>
-              <option>2/P</option>
-              <option>S/P</option>
-              <option>HÍBRIDA</option>
-            </select>
-            <select class="form-select" id="reg-dimensao" style="width:120px">
-              <option value="">Dimensão</option>
-              <option>7,5 cm</option>
-              <option>9 cm</option>
-              <option>12 cm</option>
-            </select>
-            <select class="form-select" id="reg-tracos" style="width:120px">
-              <option value="">Qtd traços</option>
-              <option value="1">1 traço</option>
-              <option value="2">2 traços</option>
-              <option value="3">3 traços</option>
-              <option value="4">4 traços</option>
-            </select>
-            <select class="form-select" id="reg-capacidade" style="width:130px">
-              <option value="">Cap. berço</option>
-              <option value="18">18 berços</option>
-              <option value="20">20 berços</option>
-              <option value="22">22 berços</option>
-            </select>
-            <input class="form-input" type="text" id="reg-id-bateria" placeholder="ID Bateria" style="width:120px">
-            <select class="form-select" id="reg-atraso" style="width:120px">
-              <option value="">Atraso</option>
-              <option value="SIM">Com atraso</option>
-              <option value="NÃO">Sem atraso</option>
-            </select>
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+              <span style="font-size:.78rem;color:var(--text-3)" id="reg-count"></span>
+              <button class="btn btn-ghost btn-sm" id="btn-limpar-filtros-registro" style="display:none"
+                onclick="limparTodosFiltros('filtros-registro')">✕ Limpar Todos</button>
+              <button class="btn btn-ghost btn-sm" onclick="LWDash.abrirExportModal()">⬇ Exportar Excel (.xlsx)</button>
+            </div>
+          </div>
+          <!-- Filtros hierárquicos -->
+          <div id="filtros-registro" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+          <!-- Chips de filtros ativos -->
+          <div id="chips-filtros-registro"
+            style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;align-items:center">
+            <span style="color:var(--text-3);font-size:.78rem">Nenhum filtro ativo</span>
           </div>
         </div>
 
@@ -758,40 +720,23 @@
       <div class="page-body">
 
         <div class="card mb-4" style="padding:16px 20px">
-          <!-- Linha 1: busca + botões -->
-          <div
-            style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;margin-bottom:12px">
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <input class="form-input" type="text" id="rel-busca" placeholder="Buscar em observações..."
-                style="width:240px">
-              <button class="btn btn-outline-accent" id="btn-relatorio-filtrar">Filtrar</button>
-              <button class="btn btn-ghost btn-sm" id="btn-relatorio-limpar">✕ Limpar</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:12px">
-              <span style="font-size:.78rem;color:var(--text-3)" id="rel-count"></span>
-            </div>
-          </div>
-          <!-- Linha 2: filtros -->
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <!-- Período — separado conforme spec -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
             <input class="form-input" type="date" id="rel-data-inicio" style="width:150px" title="Data início">
             <span style="color:var(--text-3);font-size:.85rem">até</span>
             <input class="form-input" type="date" id="rel-data-fim" style="width:150px" title="Data fim">
-            <input class="form-input" type="text" id="rel-id-bateria" placeholder="ID Bateria" style="width:120px">
-            <select class="form-select" id="rel-num-traco" style="width:130px">
-              <option value="">Nº do traço</option>
-              <option value="1">Traço 1</option>
-              <option value="2">Traço 2</option>
-              <option value="3">Traço 3</option>
-              <option value="4">Traço 4</option>
-              <option value="5">Traço 5</option>
-              <option value="6">Traço 6</option>
-              <option value="7">Traço 7</option>
-              <option value="8">Traço 8</option>
-              <option value="9">Traço 9</option>
-              <option value="10">Traço 10</option>
-              <option value="11">Traço 11</option>
-              <option value="12">Traço 12</option>
-            </select>
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+              <span style="font-size:.78rem;color:var(--text-3)" id="rel-count"></span>
+              <button class="btn btn-ghost btn-sm" id="btn-limpar-filtros-relatorio" style="display:none"
+                onclick="limparTodosFiltros('filtros-relatorio')">✕ Limpar Todos</button>
+            </div>
+          </div>
+          <!-- Filtros hierárquicos -->
+          <div id="filtros-relatorio" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+          <!-- Chips de filtros ativos -->
+          <div id="chips-filtros-relatorio"
+            style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;align-items:center">
+            <span style="color:var(--text-3);font-size:.78rem">Nenhum filtro ativo</span>
           </div>
         </div>
 
@@ -981,6 +926,9 @@
       }
       if (pageId === 'registro') {
         LWDash.initRegistro();
+      }
+      if (pageId === 'relatorio') {
+        LWDash.initRelatorio();
       }
       if (pageId === 'dashboard') {
         // redraw charts on tab switch (canvas needs layout)
@@ -1226,9 +1174,12 @@
           if (!dataISO) erros.push('Linha ' + (i + 2) + ': data inválida ("' + row[mapa['data']] + '")');
           const inicioISO = mapa['inicio'] ? excelSerialToISO(row[mapa['inicio']]) : null;
           const fimISO = mapa['fim'] ? excelSerialToISO(row[mapa['fim']]) : null;
-          const tempoMin = mapa['tempo_min']
-            ? parseFloat(row[mapa['tempo_min']]) || 0
-            : (inicioISO && fimISO ? (new Date(fimISO) - new Date(inicioISO)) / 60000 : 0);
+          let tempoMin = 0;
+          if (mapa['tempo_min'] && row[mapa['tempo_min']]) {
+            tempoMin = parseFloat(row[mapa['tempo_min']]) || 0;
+          } else if (inicioISO && fimISO) {
+            tempoMin = (new Date(fimISO) - new Date(inicioISO)) / 60000;
+          }
           const dimensao = mapa['dimensao'] ? String(row[mapa['dimensao']]) : '';
           const dim = LW.DIMENSAO_OPTS.find(d => d.label === dimensao.trim());
           const capacidade = dim ? dim.bercos : 0;
@@ -1486,7 +1437,7 @@
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:640px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
-        <h2 style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">⬇ EXPORTAR CSV</h2>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">⬇ EXPORTAR EXCEL (.XLSX)</h2>
         <button onclick="LWDash.fecharExportModal()" style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
       </div>
 
@@ -1537,7 +1488,7 @@
         <span id="exp-preview-count" style="font-size:.82rem;color:var(--text-3)"></span>
         <div style="display:flex;gap:10px">
           <button class="btn btn-ghost" onclick="LWDash.fecharExportModal()">Cancelar</button>
-          <button class="btn btn-primary" onclick="LWDash.confirmarExport()">⬇ Baixar CSV</button>
+          <button class="btn btn-primary" onclick="LWDash.confirmarExport()">⬇ Baixar Excel (.xlsx)</button>
         </div>
       </div>
 

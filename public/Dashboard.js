@@ -274,56 +274,240 @@
 
   // ---- Registro de Baterias (table) ----
 
-  function initRegistro() {
-    document.getElementById('btn-registro-filtrar').addEventListener('click', renderRegistro);
-    document.getElementById('reg-busca').addEventListener('input', renderRegistro);
-    // Novos filtros — aplicam ao mudar
-    ['reg-turno', 'reg-montagem', 'reg-dimensao', 'reg-tracos', 'reg-capacidade', 'reg-atraso', 'reg-data-inicio', 'reg-data-fim', 'reg-id-bateria'].forEach(id => {
-      document.getElementById(id).addEventListener('change', renderRegistro);
+  // ================================================================
+  //  ENGINE DE FILTROS HIERÁRQUICOS
+  //  Compartilhada entre Registro de Baterias e Relatório de Injeção
+  // ================================================================
+
+  // ---- Estado dos filtros (Sets para multi-seleção) ----
+  const _filtrosRegistro = {
+    data_inicio: null, data_fim: null,
+    id_bateria: new Set(), turno: new Set(),
+    dimensao: new Set(), tipo_montagem: new Set(), atraso: new Set(),
+  };
+
+  const _filtrosRelatorio = {
+    data_inicio: null, data_fim: null,
+    id_bateria: new Set(), num_traco: new Set(),
+    dimensao: new Set(), turno: new Set(),
+  };
+
+  // ---- Extrai valores únicos não-vazios de uma lista de objetos ----
+  function _unicos(lista, campo) {
+    return [...new Set(
+      lista.map(r => r[campo]).filter(v => v !== null && v !== undefined && v !== '')
+    )].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
+  }
+
+  // ---- Gera categorias de filtro para Registro de Baterias ----
+  function gerarCategoriasRegistro(dados) {
+    return [
+      { key: 'id_bateria', label: 'ID da Bateria', opcoes: _unicos(dados, 'id_bateria') },
+      { key: 'dimensao', label: 'Dimensão', opcoes: _unicos(dados, 'dimensao') },
+      { key: 'turno', label: 'Turno', opcoes: _unicos(dados, 'turno') },
+      { key: 'tipo_montagem', label: 'Tipo de Montagem', opcoes: _unicos(dados, 'tipo_montagem') },
+      { key: 'atraso', label: 'Atraso', opcoes: _unicos(dados, 'houve_atraso') },
+    ].filter(c => c.opcoes.length > 0);
+  }
+
+  // ---- Gera categorias de filtro para Relatório de Injeção ----
+  function gerarCategoriasRelatorio(linhas) {
+    return [
+      { key: 'id_bateria', label: 'ID da Bateria', opcoes: _unicos(linhas, 'id_bateria') },
+      { key: 'num_traco', label: 'Nº Traço', opcoes: _unicos(linhas, 'num_traco').map(String) },
+      { key: 'dimensao', label: 'Dimensão', opcoes: _unicos(linhas, 'dimensao') },
+      { key: 'turno', label: 'Turno', opcoes: _unicos(linhas, 'turno') },
+    ].filter(c => c.opcoes.length > 0);
+  }
+
+  // ---- Constrói a UI de filtros hierárquicos ----
+  // containerEl: id do div onde renderizar
+  // cats: array de { key, label, opcoes[] }
+  // filtrosObj: objeto de estado (_filtrosRegistro ou _filtrosRelatorio)
+  // onChangeCb: função a chamar após cada alteração
+  function buildFiltrosUI(containerId, cats, filtrosObj, onChangeCb) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    cats.forEach(cat => {
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:relative;display:inline-block';
+
+      // Botão da categoria
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-ghost btn-sm';
+      btn.style.cssText = 'gap:5px;border-color:var(--border-2)';
+      const ativos = filtrosObj[cat.key]?.size || 0;
+      btn.innerHTML = `${cat.label}${ativos ? ` <span style="background:var(--accent);color:#000;border-radius:10px;padding:1px 6px;font-size:.65rem;font-weight:700">${ativos}</span>` : ''} <span style="opacity:.5;font-size:.7rem">▾</span>`;
+
+      // Dropdown
+      const dropdown = document.createElement('div');
+      dropdown.style.cssText = [
+        'position:absolute;top:calc(100% + 4px);left:0;z-index:200',
+        'background:var(--bg-card);border:1px solid var(--border-2);border-radius:var(--radius-lg)',
+        'min-width:180px;max-height:280px;overflow-y:auto;display:none',
+        'box-shadow:0 8px 32px rgba(0,0,0,.5)',
+      ].join(';');
+
+      cat.opcoes.forEach(op => {
+        const item = document.createElement('label');
+        item.style.cssText = [
+          'display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer',
+          'font-size:.84rem;color:var(--text-2);transition:background .1s',
+        ].join(';');
+        item.onmouseover = () => item.style.background = 'var(--bg-3)';
+        item.onmouseout = () => item.style.background = '';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = String(op);
+        cb.checked = filtrosObj[cat.key]?.has(String(op)) || false;
+        cb.style.cssText = 'accent-color:var(--accent);width:14px;height:14px;cursor:pointer';
+
+        cb.addEventListener('change', () => {
+          if (cb.checked) filtrosObj[cat.key].add(String(op));
+          else filtrosObj[cat.key].delete(String(op));
+          // Atualiza badge no botão
+          const n = filtrosObj[cat.key].size;
+          btn.innerHTML = `${cat.label}${n ? ` <span style="background:var(--accent);color:#000;border-radius:10px;padding:1px 6px;font-size:.65rem;font-weight:700">${n}</span>` : ''} <span style="opacity:.5;font-size:.7rem">▾</span>`;
+          atualizarChips(containerId, filtrosObj, cats, onChangeCb);
+          onChangeCb();
+        });
+
+        item.appendChild(cb);
+        item.appendChild(document.createTextNode(String(op)));
+        dropdown.appendChild(item);
+      });
+
+      // Toggle dropdown ao clicar no botão
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const aberto = dropdown.style.display === 'block';
+        // Fecha todos os outros dropdowns
+        document.querySelectorAll('.lw-filter-dropdown').forEach(d => d.style.display = 'none');
+        dropdown.style.display = aberto ? 'none' : 'block';
+      });
+
+      // Fecha ao clicar fora
+      document.addEventListener('click', () => { dropdown.style.display = 'none'; }, { passive: true });
+
+      dropdown.classList.add('lw-filter-dropdown');
+      wrapper.appendChild(btn);
+      wrapper.appendChild(dropdown);
+      container.appendChild(wrapper);
     });
-    // Botão limpar
-    document.getElementById('btn-registro-limpar').addEventListener('click', () => {
-      ['reg-busca', 'reg-id-bateria', 'reg-data-inicio', 'reg-data-fim'].forEach(id => document.getElementById(id).value = '');
-      ['reg-turno', 'reg-montagem', 'reg-dimensao', 'reg-tracos', 'reg-capacidade', 'reg-atraso'].forEach(id => document.getElementById(id).selectedIndex = 0);
-      renderRegistro();
+  }
+
+  // ---- Atualiza área de chips de filtros ativos ----
+  function atualizarChips(containerId, filtrosObj, cats, onChangeCb) {
+    const chipsId = 'chips-' + containerId;
+    const limparId = 'btn-limpar-' + containerId;
+    const chipsEl = document.getElementById(chipsId);
+    const limparEl = document.getElementById(limparId);
+    if (!chipsEl) return;
+
+    // Coleta todos os filtros ativos
+    const chips = [];
+    cats.forEach(cat => {
+      filtrosObj[cat.key]?.forEach(val => {
+        chips.push({ key: cat.key, val, label: `${cat.label}: ${val}` });
+      });
     });
+
+    if (!chips.length) {
+      chipsEl.innerHTML = '<span style="color:var(--text-3);font-size:.78rem">Nenhum filtro ativo</span>';
+      if (limparEl) limparEl.style.display = 'none';
+      return;
+    }
+
+    if (limparEl) limparEl.style.display = 'inline-flex';
+
+    chipsEl.innerHTML = chips.map(c => `
+      <span style="
+        display:inline-flex;align-items:center;gap:5px;
+        background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);
+        border-radius:20px;padding:3px 10px;font-size:.76rem;color:var(--accent);
+      ">
+        ${c.label}
+        <button onclick="removerFiltro('${containerId}','${c.key}','${c.val}')"
+          style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:.8rem;padding:0;line-height:1;opacity:.7"
+          title="Remover">✕</button>
+      </span>
+    `).join('');
+  }
+
+  // ---- Remove um filtro individual via chip ----
+  window.removerFiltro = function (containerId, key, val) {
+    const filtrosObj = containerId === 'filtros-registro' ? _filtrosRegistro : _filtrosRelatorio;
+    filtrosObj[key]?.delete(val);
+    // Rebuild UI para refletir estado
+    const rebuildFn = containerId === 'filtros-registro' ? initRegistro : initRelatorio;
+    rebuildFn();
+  };
+
+  // ---- Limpa todos os filtros de um container ----
+  window.limparTodosFiltros = function (containerId) {
+    const filtrosObj = containerId === 'filtros-registro' ? _filtrosRegistro : _filtrosRelatorio;
+    Object.keys(filtrosObj).forEach(k => {
+      if (filtrosObj[k] instanceof Set) filtrosObj[k].clear();
+      else filtrosObj[k] = null;
+    });
+    // Reseta inputs de data
+    const prefix = containerId === 'filtros-registro' ? 'reg' : 'rel';
+    const ini = document.getElementById(`${prefix}-data-inicio`);
+    const fim = document.getElementById(`${prefix}-data-fim`);
+    if (ini) ini.value = '';
+    if (fim) fim.value = '';
+    const rebuildFn = containerId === 'filtros-registro' ? initRegistro : initRelatorio;
+    rebuildFn();
+  };
+
+  // ================================================================
+  //  REGISTRO DE BATERIAS
+  // ================================================================
+
+  async function initRegistro() {
+    const s = await LW.getStats();
+    const cats = gerarCategoriasRegistro(s.data);
+    buildFiltrosUI('filtros-registro', cats, _filtrosRegistro, renderRegistro);
+    atualizarChips('filtros-registro', _filtrosRegistro, cats, renderRegistro);
+
+    ['reg-data-inicio', 'reg-data-fim'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.removeEventListener('change', _onDataRegistro);
+      el.addEventListener('change', _onDataRegistro);
+    });
+
+    renderRegistro();
+  }
+
+  function _onDataRegistro(e) {
+    _filtrosRegistro[e.target.id === 'reg-data-inicio' ? 'data_inicio' : 'data_fim'] = e.target.value || null;
     renderRegistro();
   }
 
   async function renderRegistro() {
-    const busca = document.getElementById('reg-busca').value.toLowerCase();
-    const turno = document.getElementById('reg-turno').value;
-    const montagem = document.getElementById('reg-montagem').value;
-    const dimensao = document.getElementById('reg-dimensao').value;
-    const tracos = document.getElementById('reg-tracos').value;
-    const capacidade = document.getElementById('reg-capacidade').value;
-    const idBateria = document.getElementById('reg-id-bateria').value.toLowerCase();
-    const atraso = document.getElementById('reg-atraso').value;
-    const dataInicio = document.getElementById('reg-data-inicio').value;  // 'YYYY-MM-DD' ou ''
-    const dataFim = document.getElementById('reg-data-fim').value;
-
     const s = await LW.getStats();
-    let data = s.data;
+    let data = [...s.data];
 
-    if (busca) data = data.filter(b =>
-      b.id_bateria.toLowerCase().includes(busca) ||
-      (b.motivo_atraso || '').toLowerCase().includes(busca)
-    );
-    if (idBateria) data = data.filter(b => b.id_bateria.toLowerCase().includes(idBateria));
-    if (turno) data = data.filter(b => b.turno === turno);
-    if (montagem) data = data.filter(b => b.tipo_montagem === montagem);
-    if (dimensao) data = data.filter(b => b.dimensao === dimensao);
-    if (tracos) data = data.filter(b => b.qtd_tracos === parseInt(tracos));
-    if (capacidade) data = data.filter(b => b.capacidade === parseInt(capacidade));
-    if (atraso) data = data.filter(b => b.houve_atraso === atraso);
-    if (dataInicio) data = data.filter(b => b.data >= dataInicio);
-    if (dataFim) data = data.filter(b => b.data <= dataFim);
-    // Sort by date desc
-    data = [...data].sort((a, b) => b.data.localeCompare(a.data) || b.inicio?.localeCompare(a.inicio || ''));
+    const f = _filtrosRegistro;
+    if (f.data_inicio) data = data.filter(b => b.data >= f.data_inicio);
+    if (f.data_fim) data = data.filter(b => b.data <= f.data_fim);
+    if (f.id_bateria.size) data = data.filter(b => f.id_bateria.has(b.id_bateria));
+    if (f.turno.size) data = data.filter(b => f.turno.has(b.turno));
+    if (f.dimensao.size) data = data.filter(b => f.dimensao.has(b.dimensao));
+    if (f.tipo_montagem.size) data = data.filter(b => f.tipo_montagem.has(b.tipo_montagem));
+    if (f.atraso.size) data = data.filter(b => f.atraso.has(b.houve_atraso));
+
+    data = [...data].sort((a, b) => b.data.localeCompare(a.data) || (b.inicio || '').localeCompare(a.inicio || ''));
 
     const tbody = document.getElementById('registro-tbody');
+    document.getElementById('reg-count').textContent = data.length + ' registros';
+
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="19" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
       return;
     }
 
@@ -338,35 +522,44 @@
         <td class="mono">${b.fim ? LW.formatTime(b.fim) : '—'}</td>
         <td class="mono">${LW.formatDuration(b.tempo_min)}</td>
         <td>${b.qtd_tracos || 0}</td>
-        <td>
-          ${b.houve_atraso === 'SIM'
+        <td>${b.houve_atraso === 'SIM'
         ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
-        : '<span class="badge badge-green">✓ NÃO</span>'}
-        </td>
+        : '<span class="badge badge-green">✓ NÃO</span>'}</td>
         <td>${b.motivo_atraso || '—'}</td>
         <td><span class="badge ${b.tipo_montagem === '2/P' ? 'badge-blue' : b.tipo_montagem === 'S/P' ? 'badge-green' : 'badge-amber'}">${b.tipo_montagem || '—'}</span></td>
         <td>${b.total_paineis || 0}</td>
-        <td>${b.paineis_2p ? b.paineis_2p : 0}</td>
-        <td>${b.paineis_sp ? b.paineis_sp : 0}</td>
+        <td>${b.paineis_2p || 0}</td>
+        <td>${b.paineis_sp || 0}</td>
         <td>${(b.m2_total || 0).toFixed(2)}</td>
         <td>${(b.m2_2p || 0).toFixed(2)}</td>
         <td>${(b.m2_sp || 0).toFixed(2)}</td>
         <td>${b.bercos_reais || '—'}</td>
       </tr>
     `).join('');
-    document.getElementById('reg-count').textContent = data.length + ' registros';
   }
-  function initRelatorio() {
-    document.getElementById('btn-relatorio-filtrar').addEventListener('click', renderRelatorio);
-    document.getElementById('rel-busca').addEventListener('input', renderRelatorio);
-    ['rel-data-inicio', 'rel-data-fim', 'rel-id-bateria', 'rel-num-traco'].forEach(id => {
-      document.getElementById(id).addEventListener('change', renderRelatorio);
+
+  // ================================================================
+  //  RELATÓRIO DE INJEÇÃO
+  // ================================================================
+
+  async function initRelatorio() {
+    const linhas = await LW.getRelatorioInjecao();
+    const cats = gerarCategoriasRelatorio(linhas);
+    buildFiltrosUI('filtros-relatorio', cats, _filtrosRelatorio, renderRelatorio);
+    atualizarChips('filtros-relatorio', _filtrosRelatorio, cats, renderRelatorio);
+
+    ['rel-data-inicio', 'rel-data-fim'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.removeEventListener('change', _onDataRelatorio);
+      el.addEventListener('change', _onDataRelatorio);
     });
-    document.getElementById('btn-relatorio-limpar').addEventListener('click', () => {
-      ['rel-busca', 'rel-id-bateria', 'rel-data-inicio', 'rel-data-fim'].forEach(id => document.getElementById(id).value = '');
-      document.getElementById('rel-num-traco').selectedIndex = 0;
-      renderRelatorio();
-    });
+
+    renderRelatorio();
+  }
+
+  function _onDataRelatorio(e) {
+    _filtrosRelatorio[e.target.id === 'rel-data-inicio' ? 'data_inicio' : 'data_fim'] = e.target.value || null;
     renderRelatorio();
   }
 
@@ -374,25 +567,22 @@
     const tbody = document.getElementById('relatorio-tbody');
     if (!tbody) return;
 
-    const busca = document.getElementById('rel-busca')?.value.toLowerCase() || '';
-    const idBateria = document.getElementById('rel-id-bateria')?.value.toLowerCase() || '';
-    const numTraco = document.getElementById('rel-num-traco')?.value || '';
-    const dataInicio = document.getElementById('rel-data-inicio')?.value || '';
-    const dataFim = document.getElementById('rel-data-fim')?.value || '';
-
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:20px">Carregando...</td></tr>`;
 
     let linhas = await LW.getRelatorioInjecao();
 
-    if (busca) linhas = linhas.filter(l => (l.obs || '').toLowerCase().includes(busca) || (l.id_bateria || '').toLowerCase().includes(busca));
-    if (idBateria) linhas = linhas.filter(l => (l.id_bateria || '').toLowerCase().includes(idBateria));
-    if (numTraco) linhas = linhas.filter(l => l.num_traco === parseInt(numTraco));
-    if (dataInicio) linhas = linhas.filter(l => l.data >= dataInicio);
-    if (dataFim) linhas = linhas.filter(l => l.data <= dataFim);
+    const f = _filtrosRelatorio;
+    if (f.data_inicio) linhas = linhas.filter(l => l.data >= f.data_inicio);
+    if (f.data_fim) linhas = linhas.filter(l => l.data <= f.data_fim);
+    if (f.id_bateria.size) linhas = linhas.filter(l => f.id_bateria.has(l.id_bateria));
+    if (f.num_traco.size) linhas = linhas.filter(l => f.num_traco.has(String(l.num_traco)));
+    if (f.dimensao.size) linhas = linhas.filter(l => f.dimensao.has(l.dimensao));
+    if (f.turno.size) linhas = linhas.filter(l => f.turno.has(l.turno));
+
+    document.getElementById('rel-count').textContent = linhas.length + ' registros';
 
     if (!linhas.length) {
       tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
-      document.getElementById('rel-count').textContent = '0 registros';
       return;
     }
 
@@ -414,66 +604,91 @@
         <td>${l.obs || '—'}</td>
       </tr>
     `).join('');
-    document.getElementById('rel-count').textContent = linhas.length + ' registros';
   }
+
 
   // ---- Export CSV ----
 
   const EXPORT_COLUNAS = [
-    { campo: 'data',          header: 'Data',             padrao: true,  fmt: v => v ? v.split('-').reverse().join('/') : '' },
-    { campo: 'turno',         header: 'Turno',            padrao: true  },
-    { campo: 'id_bateria',    header: 'ID Bateria',       padrao: true  },
-    { campo: 'dimensao',      header: 'Dimensão',         padrao: true  },
-    { campo: 'capacidade',    header: 'Cap. Berços',      padrao: true  },
-    { campo: 'tipo_montagem', header: 'Tipo Montagem',    padrao: true  },
-    { campo: 'inicio',        header: 'Hora Início',      padrao: true,  fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } },
-    { campo: 'fim',           header: 'Hora Fim',         padrao: true,  fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } },
-    { campo: 'tempo_min',     header: 'Duração (min)',    padrao: true,  fmt: v => v ? String(Math.round(v)) : '0' },
-    { campo: 'qtd_tracos',    header: 'Qtd Traços',       padrao: true  },
-    { campo: 'houve_atraso',  header: 'Houve Atraso',     padrao: true  },
-    { campo: 'motivo_atraso', header: 'Motivo Atraso',    padrao: true  },
-    { campo: 'silo',          header: 'Silo EPS',         padrao: false },
-    { campo: 'expansao',      header: 'Expansão EPS',     padrao: false },
-    { campo: 'bercos_reais',  header: 'Berços Reais',     padrao: true  },
-    { campo: 'total_paineis', header: 'Total Painéis',    padrao: true  },
-    { campo: 'paineis_2p',    header: 'Painéis 2/P',      padrao: true  },
-    { campo: 'paineis_sp',    header: 'Painéis S/P',      padrao: true  },
-    { campo: 'm2_total',      header: 'm² Total',         padrao: true,  fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0' },
-    { campo: 'm2_2p',         header: 'm² 2/P',           padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0' },
-    { campo: 'm2_sp',         header: 'm² S/P',           padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0' },
+    { campo: 'data', header: 'Data', padrao: true, fmt: v => v ? v.split('-').reverse().join('/') : '' },
+    { campo: 'turno', header: 'Turno', padrao: true },
+    { campo: 'id_bateria', header: 'ID Bateria', padrao: true },
+    { campo: 'dimensao', header: 'Dimensão', padrao: true },
+    { campo: 'capacidade', header: 'Cap. Berços', padrao: true },
+    { campo: 'tipo_montagem', header: 'Tipo Montagem', padrao: true },
+    { campo: 'inicio', header: 'Hora Início', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
+    { campo: 'fim', header: 'Hora Fim', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
+    { campo: 'tempo_min', header: 'Duração', padrao: true, fmt: v => {
+      if (!v || typeof v !== 'number') return '—';
+      const totalSegundos = Math.round(v * 60);
+      const m = Math.floor(totalSegundos / 60);
+      const s = totalSegundos % 60;
+      return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+    } },
+    { campo: 'qtd_tracos', header: 'Qtd Traços', padrao: true },
+    { campo: 'houve_atraso', header: 'Houve Atraso', padrao: true },
+    { campo: 'motivo_atraso', header: 'Motivo Atraso', padrao: true },
+    { campo: 'silo', header: 'Silo EPS', padrao: false },
+    { campo: 'expansao', header: 'Expansão EPS', padrao: false },
+    { campo: 'bercos_reais', header: 'Berços Reais', padrao: true },
+    { campo: 'total_paineis', header: 'Total Painéis', padrao: true },
+    { campo: 'paineis_2p', header: 'Painéis 2/P', padrao: true },
+    { campo: 'paineis_sp', header: 'Painéis S/P', padrao: true },
+    { campo: 'm2_total', header: 'm² Total', padrao: true, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0,00' },
+    { campo: 'm2_2p', header: 'm² 2/P', padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0,00' },
+    { campo: 'm2_sp', header: 'm² S/P', padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0,00' },
   ];
 
-  function escaparCelula(valor) {
-    const str = valor !== undefined && valor !== null ? String(valor) : '';
-    if (str.includes(';') || str.includes('"') || str.includes('\n')) {
-      return '"' + str.replace(/"/g, '""') + '"';
-    }
-    return str;
-  }
+  function gerarDownloadXLSX(dados, colsSel, sufixo) {
+    // 1. Prepara os dados para o Excel
+    const dadosExcel = dados.map(item => {
+      const linha = {};
+      colsSel.forEach(col => {
+        const v = item[col.campo];
+        linha[col.header] = col.fmt ? col.fmt(v) : (v !== undefined && v !== null ? v : '');
+      });
+      return linha;
+    });
 
-  function gerarDownloadCSV(dados, colsSel, sufixo) {
-    const cabecalho = colsSel.map(c => escaparCelula(c.header)).join(';');
-    const linhas = dados.map(b =>
-      colsSel.map(({ campo, fmt }) => {
-        const v = b[campo];
-        const val = fmt ? fmt(v) : (v !== undefined && v !== null ? String(v) : '');
-        return escaparCelula(val);
-      }).join(';')
-    );
-    const csv = 'sep=;\r\n' + [cabecalho, ...linhas].join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'lightwall_baterias_' + sufixo + '.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    // 2. Cria uma Planilha (Worksheet)
+    const ws = XLSX.utils.json_to_sheet(dadosExcel);
+
+    // 3. Ajuste Automático de Largura das Colunas
+    const colWidths = colsSel.map(col => {
+      const headerLen = col.header.length;
+      const maxDataLen = dadosExcel.reduce((max, row) => {
+        const val = String(row[col.header] || '');
+        return Math.max(max, val.length);
+      }, headerLen);
+      return { wch: maxDataLen + 4 }; // Adiciona uma folga
+    });
+    ws['!cols'] = colWidths;
+
+    // 4. Congelar Cabeçalho (Primeira Linha)
+    // Usamos split e activePane para garantir compatibilidade máxima
+    ws['!views'] = [
+      {
+        state: 'frozen',
+        xSplit: 0,
+        ySplit: 1, // Congela 1 linha
+        topLeftCell: 'A2',
+        activePane: 'bottomLeft'
+      }
+    ];
+
+    // 5. Cria um Livro (Workbook) e adiciona a planilha
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Produção");
+
+    // 6. Gera o arquivo e inicia o download
+    const nomeArquivo = 'lightwall_baterias_' + sufixo + '.xlsx';
+    XLSX.writeFile(wb, nomeArquivo);
   }
 
   // Compatibilidade — exporta tudo com colunas padrão
-  async function exportCSV() {
+  async function exportXLSX() {
     const s = await LW.getStats();
-    gerarDownloadCSV(s.data, EXPORT_COLUNAS.filter(c => c.padrao), new Date().toISOString().split('T')[0]);
+    gerarDownloadXLSX(s.data, EXPORT_COLUNAS.filter(c => c.padrao), new Date().toISOString().split('T')[0]);
   }
 
   async function abrirExportModal() {
@@ -545,14 +760,14 @@
       return el && el.checked;
     });
     if (!colsSel.length) { alert('Selecione ao menos uma coluna.'); return; }
-    gerarDownloadCSV(dados, colsSel, sufixo);
+    gerarDownloadXLSX(dados, colsSel, sufixo);
     fecharExportModal();
   }
 
   // ---- Public ----
   window.LWDash = {
     initDashboard, initTurnos, initRegistro, initRelatorio, renderRelatorio,
-    exportCSV, abrirExportModal, fecharExportModal, onExportPeriodoChange,
+    exportCSV: exportXLSX, abrirExportModal, fecharExportModal, onExportPeriodoChange,
     selecionarTodasColunas, atualizarPreviewCount, confirmarExport,
   };
 })();
