@@ -51,7 +51,7 @@
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
-        Registrar Injeção
+        Registrar Operação
       </button>
 
       <div class="sidebar-label" style="margin-top:8px">Análise</div>
@@ -79,7 +79,7 @@
           <line x1="16" y1="13" x2="8" y2="13" />
           <line x1="16" y1="17" x2="8" y2="17" />
         </svg>
-        Registro de Baterias
+        Relatorio de Baterias
       </button>
       <button class="nav-item" data-page="relatorio" onclick="showPage('relatorio',this)">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -89,6 +89,14 @@
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
         Relatórios de Injeção
+      </button>
+
+      <div class="sidebar-label" style="margin-top:8px">Ajustes</div>
+      <button class="nav-item" data-page="ajustes-receita" onclick="showPage('ajustes-receita',this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 2.2" />
+        </svg>
+        Ajustes de Receita
       </button>
     </nav>
 
@@ -104,7 +112,7 @@
         <div class="menu-grid">
           <div class="menu-card" onclick="showPage('operacao')">
             <div class="menu-card-icon">⏱</div>
-            <div class="menu-card-title">Registrar Injeção</div>
+            <div class="menu-card-title">Registrar Operação</div>
             <div class="menu-card-desc">Iniciar e finalizar uma operação de injeção de bateria com registro de traços e
               controle de tempo.</div>
           </div>
@@ -122,7 +130,7 @@
           </div>
           <div class="menu-card" onclick="showPage('registro')">
             <div class="menu-card-icon">📋</div>
-            <div class="menu-card-title">Registro de Baterias</div>
+            <div class="menu-card-title">Relatorio de Baterias</div>
             <div class="menu-card-desc">Histórico completo de todas as injeções registradas com filtros e exportação em
               CSV.</div>
           </div>
@@ -145,7 +153,7 @@
     <!-- ============ PAGE: OPERAÇÃO ============ -->
     <main class="main" id="page-operacao">
       <div class="page-header">
-        <h1 class="page-title">Registro de <span>Injeção</span></h1>
+        <h1 class="page-title">Registro de <span>Operação</span></h1>
         <p class="page-desc" id="op-data">Carregando...</p>
       </div>
 
@@ -633,12 +641,13 @@
       </div>
     </main>
 
-    <!-- ============ PAGE: REGISTRO DE BATERIAS ============ -->
+    <!-- ============ PAGE: Relatorio de Baterias ============ -->
     <main class="main" id="page-registro">
       <div class="page-header">
         <h1 class="page-title">Registro de <span>Baterias</span></h1>
-        <p class="page-desc">Histórico completo de injeções</p>
+        <p class="page-desc">Histórico completo de injeções &nbsp;·&nbsp; <span style="color:var(--accent);font-size:.82rem">🔗 Clique em qualquer linha para ver os traços vinculados no Relatório de Injeção</span></p>
       </div>
+
 
       <div class="page-body">
 
@@ -742,8 +751,14 @@
                 <th>Densidade</th>
                 <th>Flow</th>
                 <th>Densidade EPS</th>
-                <th>Silo EPS</th>
                 <th>Expansão</th>
+                <th>Silo EPS</th>
+                <th>Cimento</th>
+                <th>Água</th>
+                <th>eps_real</th>
+                <th>Superplástico</th>
+                <th>Incorporador</th>
+                <th>Tempo de Batida</th>
                 <th>Observações</th> <!-- Nova -->
               </tr>
             </thead>
@@ -753,6 +768,186 @@
               </tr>
             </tbody>
           </table>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- ============ PAGE: REGISTRO DE AJUSTES NA RECEITA ============ -->
+    <main class="main" id="page-ajustes-receita">
+      <div class="page-header">
+        <h1 class="page-title">Ajustes de <span>Receita</span></h1>
+        <p class="page-desc">Registro de insumos e correções aplicadas durante a produção</p>
+      </div>
+
+      <div class="page-body">
+
+        <!-- Formulário de Novo Ajuste -->
+        <div class="card mb-4">
+          <div style="padding:20px;border-bottom:1px solid var(--border)">
+            <h3 style="font-size:1.1rem;margin-bottom:16px;color:var(--text)">Registrar Novo Ajuste</h3>
+          </div>
+
+          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+
+            <!-- ID da Bateria -->
+            <div class="form-group">
+              <label class="form-label">ID da Bateria *</label>
+              <select class="form-input" id="ajuste-bateria-id" required>
+                <option selected disabled hidden>Selecione...</option>
+              </select>
+            </div>
+
+            <!-- Identificação do Traço Original -->
+            <div class="form-group">
+              <label class="form-label">Traço Original *</label>
+              <select class="form-input" id="ajuste-traco-original" required>
+                <option selected disabled hidden>Selecione...</option>
+              </select>
+            </div>
+
+            <!-- Data e Hora do Ajuste -->
+            <div class="form-group">
+              <label class="form-label">Data/Hora do Ajuste *</label>
+              <input class="form-input" type="datetime-local" id="ajuste-data-hora" required>
+            </div>
+
+            <!-- Motivo do Ajuste -->
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Motivo do Ajuste *</label>
+              <select class="form-input" id="ajuste-motivo" required>
+                <option selected disabled hidden>Selecione...</option>
+                <option>Densidade inadequada</option>
+                <option>Flow incorreto</option>
+                <option>Expansão anômala</option>
+                <option>Temperatura fora do controle</option>
+                <option>Pressão inadequada</option>
+                <option>Qualidade visual inferior</option>
+                <option>Reação química lenta</option>
+                <option>Reação química rápida</option>
+                <option>Outros motivos</option>
+              </select>
+            </div>
+
+            <!-- Descrição adicional do motivo -->
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Descrição do Problema (opcional)</label>
+              <textarea class="form-input" id="ajuste-descricao-problema" 
+                style="min-height:80px;resize:vertical;font-family:var(--font-mono);font-size:.85rem"
+                placeholder="Descreva em detalhes o problema detectado..."></textarea>
+            </div>
+          </div>
+
+          <!-- Separador -->
+          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Materiais Adicionados</h4>
+          </div>
+
+          <!-- Lista de Materiais Adicionados -->
+          <div id="ajuste-materiais-container" style="padding:16px 20px">
+            <!-- Será preenchido dinamicamente -->
+          </div>
+
+          <div style="padding:0 20px 16px;text-align:center">
+            <button class="btn btn-ghost" onclick="adicionarMaterialAjuste()">+ Adicionar Material</button>
+          </div>
+
+          <!-- Separador -->
+          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Tempo de Batida Adicional</h4>
+          </div>
+
+          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+            <div class="form-group">
+              <label class="form-label">Tempo Adicional (segundos)</label>
+              <input class="form-input" type="number" id="ajuste-tempo-adicional" min="0" value="0">
+            </div>
+          </div>
+
+          <!-- Separador -->
+          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Resultados Antes do Ajuste</h4>
+          </div>
+
+          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px">
+            <div class="form-group">
+              <label class="form-label">Densidade (g/cm³)</label>
+              <input class="form-input" type="number" id="ajuste-densidade-antes" step="0.01" placeholder="Ex: 0.35">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Flow (cm)</label>
+              <input class="form-input" type="number" id="ajuste-flow-antes" step="0.1" placeholder="Ex: 25.5">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Densidade EPS (g/cm³)</label>
+              <input class="form-input" type="number" id="ajuste-dens-eps-antes" step="0.01" placeholder="Ex: 0.18">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expansão (%)</label>
+              <input class="form-input" type="number" id="ajuste-expansao-antes" step="0.1" placeholder="Ex: 2.3">
+            </div>
+          </div>
+
+          <!-- Separador -->
+          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Resultados Após Ajuste</h4>
+          </div>
+
+          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px">
+            <div class="form-group">
+              <label class="form-label">Densidade (g/cm³)</label>
+              <input class="form-input" type="number" id="ajuste-densidade-depois" step="0.01" placeholder="Ex: 0.35">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Flow (cm)</label>
+              <input class="form-input" type="number" id="ajuste-flow-depois" step="0.1" placeholder="Ex: 25.5">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Densidade EPS (g/cm³)</label>
+              <input class="form-input" type="number" id="ajuste-dens-eps-depois" step="0.01" placeholder="Ex: 0.18">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expansão (%)</label>
+              <input class="form-input" type="number" id="ajuste-expansao-depois" step="0.1" placeholder="Ex: 2.3">
+            </div>
+          </div>
+
+          <!-- Botões de ação -->
+          <div style="padding:20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn-secondary" onclick="limparFormularioAjuste()">Limpar</button>
+            <button class="btn btn-primary" onclick="salvarAjusteReceita()">Salvar Ajuste</button>
+          </div>
+        </div>
+
+        <!-- Histórico de Ajustes -->
+        <div class="card">
+          <div style="padding:20px;border-bottom:1px solid var(--border)">
+            <h3 style="font-size:1.1rem;margin:0;color:var(--text)">Histórico de Ajustes</h3>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data/Hora</th>
+                  <th>ID Bateria</th>
+                  <th>Traço</th>
+                  <th>Motivo</th>
+                  <th>Materiais</th>
+                  <th>Tempo Adic.</th>
+                  <th>Densidade Ant.</th>
+                  <th>Densidade Dep.</th>
+                  <th>Melhoria</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="ajustes-tbody">
+                <tr>
+                  <td colspan="10" style="text-align:center;color:var(--text-3);padding:30px">Nenhum ajuste registrado</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
       </div>
@@ -1012,7 +1207,7 @@
       _importDestino = destino;
       // Ajusta o título e os campos de mapeamento conforme o destino
       const titulo = destino === 'historico'
-        ? '📥 IMPORTAR — REGISTRO DE BATERIAS'
+        ? '📥 IMPORTAR — Relatorio de Baterias'
         : '📥 IMPORTAR — RELATÓRIO DE INJEÇÃO';
       document.getElementById('import-modal-titulo').textContent = titulo;
 
@@ -1039,7 +1234,7 @@
       const labelEl = document.getElementById('import-destino-label');
       if (labelEl) {
         labelEl.textContent = destino === 'historico'
-          ? 'Destino: Registro de Baterias (historico.json)'
+          ? 'Destino: Relatorio de Baterias (historico.json)'
           : 'Destino: Relatório de Injeção (relatorio_injecao.json)';
         labelEl.style.color = destino === 'historico' ? 'var(--accent)' : 'var(--blue)';
       }
@@ -1157,6 +1352,7 @@
             id_operacao: 'imp_' + Date.now() + '_' + i,
             data: dataISO ? dataISO.split('T')[0] : '',
             id_bateria: mapa['id_bateria'] ? String(row[mapa['id_bateria']]).trim() : '',
+            turno: mapa['turno'] ? String(row[mapa['turno']]).trim() : '',
             num_traco: mapa['num_traco'] ? parseInt(row[mapa['num_traco']]) || 1 : 1,
             berco_ini: mapa['berco_ini'] ? String(row[mapa['berco_ini']]).trim() : '',
             berco_fim: mapa['berco_fim'] ? String(row[mapa['berco_fim']]).trim() : '',
@@ -1166,6 +1362,11 @@
             obs: mapa['obs'] ? String(row[mapa['obs']]).trim() : '',
             silo: mapa['silo'] ? String(row[mapa['silo']]).trim() : '',
             expansao: mapa['expansao'] ? String(row[mapa['expansao']]).trim() : '',
+            cimento: mapa['cimento'] ? String(row[mapa['cimento']]).trim() : '',
+            agua: mapa['agua_real'] ? String(row[mapa['agua_real']]).trim() : '',
+            superplast: mapa['superplast_real'] ? String(row[mapa['superplast_real']]).trim() : '',
+            incorporador: mapa['incorporador_real'] ? String(row[mapa['incorporador_real']]).trim() : '',
+            tempo_batida: mapa['tempo_batida'] ? parseFloat(row[mapa['tempo_batida']]) || 0 : 0
           };
         });
       } else {
@@ -1267,7 +1468,7 @@
         document.getElementById('import-step-2').style.display = 'none';
         document.getElementById('import-step-3').style.display = 'block';
         document.getElementById('import-result-icon').textContent = '✅';
-        const destLabel = _importDestino === 'relatorio_injecao' ? 'Relatório de Injeção' : 'Registro de Baterias';
+        const destLabel = _importDestino === 'relatorio_injecao' ? 'Relatório de Injeção' : 'Relatorio de Baterias';
         document.getElementById('import-result-msg').textContent = json.inseridos + ' registros importados para ' + destLabel + '!';
         document.getElementById('import-result-sub').textContent = json.duplicatas
           ? json.duplicatas + ' duplicatas ignoradas.'
@@ -1524,7 +1725,7 @@
             <div style="font-size:2rem;margin-bottom:10px">📋</div>
             <div
               style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:var(--text);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">
-              Registro de Baterias
+              Relatorio de Baterias
             </div>
             <div style="font-size:.8rem;color:var(--text-3);line-height:1.5">
               Importa dados de produção: baterias, painéis, m², tempo e atrasos.<br>
@@ -1626,7 +1827,7 @@
 
     </div>
   </div>
-
+  <script src="ajustes-receita.js"></script>
 </body>
 
 </html>

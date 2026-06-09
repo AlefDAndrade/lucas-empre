@@ -272,7 +272,7 @@ h4 {
 }
 
 .form-label {
-  font-size: .72rem;
+  font-size: .67rem;
   font-weight: 600;
   letter-spacing: .07em;
   text-transform: uppercase;
@@ -600,6 +600,14 @@ tbody tr:hover td {
   background: rgba(255, 255, 255, .02);
 }
 
+/* Linhas clicáveis do Registro de Baterias */
+#registro-tbody tr[onclick]:hover td {
+  background: rgba(59, 130, 246, .07);
+}
+#registro-tbody tr[onclick] {
+  transition: background .15s;
+}
+
 td.mono {
   font-family: var(--font-mono);
   font-size: .8rem;
@@ -729,22 +737,103 @@ td.mono {
 .traco-row {
   background: var(--bg-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  display: grid;
-  grid-template-columns: 50px 1fr 1fr 80px 80px 1fr 36px;
-  gap: 10px;
-  align-items: end;
-  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-.traco-num {
-  font-family: var(--font-display);
-  font-size: 1.3rem;
-  font-weight: 800;
+/* Cabeçalho do traço: número + campos essenciais + botão remover */
+.traco-card-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px 16px 12px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.traco-num-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
   color: var(--accent);
-  text-align: center;
-  padding-top: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  padding-bottom: 10px;
+  min-width: 56px;
+}
+
+.traco-num-label strong {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.traco-header-fields {
+  display: grid;
+  grid-template-columns: 80px 80px 120px 1fr;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.traco-remove-btn {
+  padding: 10px;
+  color: var(--red);
+  border: 1px solid transparent;
+  background: none;
+  font-size: 1rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all .15s;
+  line-height: 1;
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 1px;
+}
+
+/* Separador de seção interna */
+.traco-section-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 10px 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.traco-section-label::before {
+  content: '';
+  display: block;
+  width: 3px;
+  height: 11px;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0.6;
+}
+
+/* Grids de campos por seção */
+.traco-fields-grid {
+  display: grid;
+  gap: 10px;
+  padding: 10px 16px 14px;
+}
+
+.traco-fields-grid--6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.traco-fields-grid--4 {
+  grid-template-columns: repeat(3, 1fr) 2fr;
+}
+
+.traco-obs-field {
+  grid-column: span 1;
 }
 
 .traco-add-btn {
@@ -884,12 +973,24 @@ td.mono {
     grid-template-columns: 1fr;
   }
 
-  .traco-row {
-    grid-template-columns: 1fr 1fr 1fr;
+  .traco-card-header {
+    flex-wrap: wrap;
   }
 
-  .traco-num {
-    display: none;
+  .traco-header-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .traco-fields-grid--6 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .traco-fields-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .traco-obs-field {
+    grid-column: span 2;
   }
 
   .page-body {

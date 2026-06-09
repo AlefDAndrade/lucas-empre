@@ -228,6 +228,14 @@
       num,
       berco_ini: '',
       berco_fim: '',
+      // Receita real pesada
+      cimento_real: '',
+      agua_real: '',
+      eps_real: '',
+      superplast_real: '',
+      incorporador_real: '',
+      tempo_batida: '',
+      // Resultado
       densidade: '',
       flow: '',
       obs: '',
@@ -253,61 +261,100 @@
       const row = document.createElement('div');
       row.className = 'traco-row';
       row.innerHTML = `
-        <div class="form-group">
-          <label class="form-label">Nº</label>
-          <div class="traco-num">${t.num}</div>
+        <!-- Cabeçalho do traço -->
+        <div class="traco-card-header">
+          <span class="traco-num-label">Traço <strong>Nº ${t.num}</strong></span>
+          <div class="traco-header-fields">
+            <div class="form-group traco-header-field">
+              <label class="form-label">Berço Início <span class="required">*</span></label>
+              <input class="form-input" type="number" min="1" max="22" value="${t.berco_ini}"
+                oninput="LWOp.updateTraco(${i},'berco_ini',this.value)" placeholder="1">
+            </div>
+            <div class="form-group traco-header-field">
+              <label class="form-label">Berço Fim <span class="required">*</span></label>
+              <input class="form-input" type="number" min="1" max="22" value="${t.berco_fim}"
+                oninput="LWOp.updateTraco(${i},'berco_fim',this.value)" placeholder="22">
+            </div>
+            <div class="form-group traco-header-field">
+              <label class="form-label">Silo <span class="required">*</span></label>
+              <select class="form-select" onchange="LWOp.updateTraco(${i}, 'silo', this.value)">
+                <option value=""></option>
+                <option value="Silo 1" ${t.silo === 'Silo 1' ? 'selected' : ''}>Silo 1</option>
+                <option value="Silo 2" ${t.silo === 'Silo 2' ? 'selected' : ''}>Silo 2</option>
+                <option value="Silo 3" ${t.silo === 'Silo 3' ? 'selected' : ''}>Silo 3</option>
+                <option value="Silo 4" ${t.silo === 'Silo 4' ? 'selected' : ''}>Silo 4</option>
+              </select>
+            </div>
+            <div class="form-group traco-header-field">
+              <label class="form-label">Expansão do EPS <span class="required">*</span></label>
+              <select class="form-select" onchange="LWOp.updateTraco(${i}, 'expansao', this.value)">
+                <option value=""></option>
+                <option value="1ª expansão" ${t.expansao === '1ª expansão' ? 'selected' : ''}>1ª expansão</option>
+                <option value="2ª expansão" ${t.expansao === '2ª expansão' ? 'selected' : ''}>2ª expansão</option>
+              </select>
+            </div>
+          </div>
+          <button class="traco-remove-btn" onclick="LWOp.removeTraco(${i})" title="Remover traço">✕</button>
         </div>
-        <div class="form-group">
-          <label class="form-label">Berço Início <span class="required">*</span></label>
-          <input class="form-input" type="number" min="1" max="22" value="${t.berco_ini}"
-            oninput="LWOp.updateTraco(${i},'berco_ini',this.value)" placeholder="1">
+
+        <!-- Seção: Receita Real Pesada -->
+        <div class="traco-section-label">⚖ Receita Real Pesada</div>
+        <div class="traco-fields-grid traco-fields-grid--6">
+          <div class="form-group">
+            <label class="form-label">Cimento (kg)</label>
+            <input class="form-input" type="number" step="0.01" value="${t.cimento_real}"
+              oninput="LWOp.updateTraco(${i},'cimento_real',this.value)" placeholder="kg">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Água (kg)</label>
+            <input class="form-input" type="number" step="0.01" value="${t.agua_real}"
+              oninput="LWOp.updateTraco(${i},'agua_real',this.value)" placeholder="kg">
+          </div>
+          <div class="form-group">
+            <label class="form-label">EPS (kg)</label>
+            <input class="form-input" type="number" step="0.01" value="${t.eps_real}"
+              oninput="LWOp.updateTraco(${i},'eps_real',this.value)" placeholder="kg">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Superplast. (kg)</label>
+            <input class="form-input" type="number" step="0.001" value="${t.superplast_real}"
+              oninput="LWOp.updateTraco(${i},'superplast_real',this.value)" placeholder="kg">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Incorp. de Ar (kg)</label>
+            <input class="form-input" type="number" step="0.001" value="${t.incorporador_real}"
+              oninput="LWOp.updateTraco(${i},'incorporador_real',this.value)" placeholder="kg">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tempo de Batida (s)</label>
+            <input class="form-input" type="number" step="1" value="${t.tempo_batida}"
+              oninput="LWOp.updateTraco(${i},'tempo_batida',this.value)" placeholder="seg">
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Berço Fim <span class="required">*</span></label>
-          <input class="form-input" type="number" min="1" max="22" value="${t.berco_fim}"
-            oninput="LWOp.updateTraco(${i},'berco_fim',this.value)" placeholder="22">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Densidade</label>
-          <input class="form-input" type="number" step="0.01" value="${t.densidade}"
-            oninput="LWOp.updateTraco(${i},'densidade',this.value)" placeholder="kg/m³">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Flow</label>
-          <input class="form-input" type="number" value="${t.flow}"
-            oninput="LWOp.updateTraco(${i},'flow',this.value)" placeholder="mm">
-        </div>
-        <div class="form-group" style="grid-column:span 1">
-          <label class="form-label">Observações</label>
-          <input class="form-input" type="text" value="${t.obs}"
-            oninput="LWOp.updateTraco(${i},'obs',this.value)" placeholder="Ajustes, falhas...">
-        </div>
-        <div style="display:flex;align-items:flex-end;padding-bottom:2px">
-          <button class="btn btn-ghost btn-sm" onclick="LWOp.removeTraco(${i})" title="Remover traço"
-            style="padding:8px;color:var(--red);border-color:var(--red-dim)">✕</button>
-        </div>
-        <div class="form-group" style="grid-column:2/4">
-          <label class="form-label">Silo<span class="required">*</span></label>
-          <select class="form-select" onchange="LWOp.updateTraco(${i}, 'silo', this.value)">
-            <option value=""></option>
-            <option value="Silo 1" ${t.silo === 'Silo 1' ? 'selected' : ''}>Silo 1</option>
-            <option value="Silo 2" ${t.silo === 'Silo 2' ? 'selected' : ''}>Silo 2</option>
-            <option value="Silo 3" ${t.silo === 'Silo 3' ? 'selected' : ''}>Silo 3</option>
-            <option value="Silo 4" ${t.silo === 'Silo 4' ? 'selected' : ''}>Silo 4</option>
-          </select>
-        </div>
-        <div class="form-group" style="grid-column:span 2">
-          <label class="form-label">Expansão do EPS <span class="required">*</span></label>
-          <select class="form-select" onchange="LWOp.updateTraco(${i}, 'expansao', this.value)">
-            <option value=""></option>
-            <option value="1ª expansão" ${t.expansao === '1ª expansão' ? 'selected' : ''}>1ª expansão</option>
-            <option value="2ª expansão" ${t.expansao === '2ª expansão' ? 'selected' : ''}>2ª expansão</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Densidade EPS</label>
-          <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
-            oninput="LWOp.updateTraco(${i},'densidadeEPS',this.value)" placeholder="">
+
+        <!-- Seção: Resultado -->
+        <div class="traco-section-label">📊 Resultado Obtido</div>
+        <div class="traco-fields-grid traco-fields-grid--4">
+          <div class="form-group">
+            <label class="form-label">Densidade EPS</label>
+            <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
+              oninput="LWOp.updateTraco(${i},'densidadeEPS',this.value)" placeholder="kg/m³">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Densidade Obtida</label>
+            <input class="form-input" type="number" step="0.01" value="${t.densidade}"
+              oninput="LWOp.updateTraco(${i},'densidade',this.value)" placeholder="kg/m³">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Flow (mm)</label>
+            <input class="form-input" type="number" value="${t.flow}"
+              oninput="LWOp.updateTraco(${i},'flow',this.value)" placeholder="mm">
+          </div>
+          <div class="form-group traco-obs-field">
+            <label class="form-label">Observações</label>
+            <input class="form-input" type="text" value="${t.obs}"
+              oninput="LWOp.updateTraco(${i},'obs',this.value)" placeholder="Ajustes, correções, falhas...">
+          </div>
         </div>
       `;
       container.appendChild(row);

@@ -1,0 +1,426 @@
+{
+  "_comentario": "Receitas dimensionadas por placa. Base: densidade EPS 12 kg/m³. Para outras densidades, o campo eps_kg é ajustado automaticamente conforme densidade_eps selecionada.",
+  "_instrucoes": "Para adicionar uma nova receita, inclua um novo objeto no array 'receitas' seguindo o mesmo padrão. O campo 'placas' define a quantidade de placas por traço.",
+  "receitas": [
+    {
+      "id": "r01",
+      "nome": "1 Placa",
+      "placas": 1,
+      "cimento_kg": 58.33,
+      "agua_kg": 23.61,
+      "eps_kg_base": 1.44,
+      "superplast_kg": 0.211,
+      "incorporador_ar_kg": 0.261,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  1.08,
+        "10": 1.20,
+        "11": 1.32,
+        "12": 1.44,
+        "13": 1.56,
+        "14": 1.69,
+        "15": 1.81,
+        "16": 1.93
+      }
+    },
+    {
+      "id": "r02",
+      "nome": "2 Placas",
+      "placas": 2,
+      "cimento_kg": 116.67,
+      "agua_kg": 47.22,
+      "eps_kg_base": 2.89,
+      "superplast_kg": 0.422,
+      "incorporador_ar_kg": 0.522,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  2.17,
+        "10": 2.41,
+        "11": 2.65,
+        "12": 2.89,
+        "13": 3.13,
+        "14": 3.37,
+        "15": 3.61,
+        "16": 3.85
+      }
+    },
+    {
+      "id": "r03",
+      "nome": "3 Placas",
+      "placas": 3,
+      "cimento_kg": 175.00,
+      "agua_kg": 70.83,
+      "eps_kg_base": 4.33,
+      "superplast_kg": 0.633,
+      "incorporador_ar_kg": 0.783,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  3.25,
+        "10": 3.61,
+        "11": 3.97,
+        "12": 4.33,
+        "13": 4.69,
+        "14": 5.06,
+        "15": 5.42,
+        "16": 5.78
+      }
+    },
+    {
+      "id": "r04",
+      "nome": "4 Placas",
+      "placas": 4,
+      "cimento_kg": 233.33,
+      "agua_kg": 94.44,
+      "eps_kg_base": 5.78,
+      "superplast_kg": 0.844,
+      "incorporador_ar_kg": 1.044,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  4.33,
+        "10": 4.81,
+        "11": 5.30,
+        "12": 5.78,
+        "13": 6.26,
+        "14": 6.74,
+        "15": 7.22,
+        "16": 7.70
+      }
+    },
+    {
+      "id": "r05",
+      "nome": "5 Placas",
+      "placas": 5,
+      "cimento_kg": 291.67,
+      "agua_kg": 118.06,
+      "eps_kg_base": 7.22,
+      "superplast_kg": 1.056,
+      "incorporador_ar_kg": 1.306,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  5.42,
+        "10": 6.02,
+        "11": 6.62,
+        "12": 7.22,
+        "13": 7.82,
+        "14": 8.43,
+        "15": 9.03,
+        "16": 9.63
+      }
+    },
+    {
+      "id": "r06",
+      "nome": "6 Placas",
+      "placas": 6,
+      "cimento_kg": 350.00,
+      "agua_kg": 141.67,
+      "eps_kg_base": 8.67,
+      "superplast_kg": 1.267,
+      "incorporador_ar_kg": 1.567,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  6.50,
+        "10": 7.22,
+        "11": 7.94,
+        "12": 8.67,
+        "13": 9.39,
+        "14": 10.11,
+        "15": 10.83,
+        "16": 11.56
+      }
+    },
+    {
+      "id": "r07",
+      "nome": "7 Placas",
+      "placas": 7,
+      "cimento_kg": 408.33,
+      "agua_kg": 165.28,
+      "eps_kg_base": 10.11,
+      "superplast_kg": 1.478,
+      "incorporador_ar_kg": 1.828,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  7.58,
+        "10": 8.43,
+        "11": 9.27,
+        "12": 10.11,
+        "13": 10.95,
+        "14": 11.80,
+        "15": 12.64,
+        "16": 13.48
+      }
+    },
+    {
+      "id": "r08",
+      "nome": "8 Placas",
+      "placas": 8,
+      "cimento_kg": 466.67,
+      "agua_kg": 188.89,
+      "eps_kg_base": 11.56,
+      "superplast_kg": 1.689,
+      "incorporador_ar_kg": 2.089,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  8.67,
+        "10": 9.63,
+        "11": 10.59,
+        "12": 11.56,
+        "13": 12.52,
+        "14": 13.48,
+        "15": 14.44,
+        "16": 15.41
+      }
+    },
+    {
+      "id": "r09",
+      "nome": "9 Placas",
+      "placas": 9,
+      "cimento_kg": 525.00,
+      "agua_kg": 212.50,
+      "eps_kg_base": 13.00,
+      "superplast_kg": 1.900,
+      "incorporador_ar_kg": 2.350,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  9.75,
+        "10": 10.83,
+        "11": 11.92,
+        "12": 13.00,
+        "13": 14.08,
+        "14": 15.17,
+        "15": 16.25,
+        "16": 17.33
+      }
+    },
+    {
+      "id": "r10",
+      "nome": "10 Placas",
+      "placas": 10,
+      "cimento_kg": 583.33,
+      "agua_kg": 236.11,
+      "eps_kg_base": 14.44,
+      "superplast_kg": 2.111,
+      "incorporador_ar_kg": 2.611,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  10.83,
+        "10": 12.04,
+        "11": 13.24,
+        "12": 14.44,
+        "13": 15.65,
+        "14": 16.85,
+        "15": 18.06,
+        "16": 19.26
+      }
+    },
+    {
+      "id": "r11",
+      "nome": "11 Placas",
+      "placas": 11,
+      "cimento_kg": 641.67,
+      "agua_kg": 259.72,
+      "eps_kg_base": 15.89,
+      "superplast_kg": 2.322,
+      "incorporador_ar_kg": 2.872,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  11.92,
+        "10": 13.24,
+        "11": 14.56,
+        "12": 15.89,
+        "13": 17.21,
+        "14": 18.54,
+        "15": 19.86,
+        "16": 21.19
+      }
+    },
+    {
+      "id": "r12",
+      "nome": "12 Placas",
+      "placas": 12,
+      "cimento_kg": 700.00,
+      "agua_kg": 283.33,
+      "eps_kg_base": 17.33,
+      "superplast_kg": 2.533,
+      "incorporador_ar_kg": 3.133,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  13.00,
+        "10": 14.44,
+        "11": 15.89,
+        "12": 17.33,
+        "13": 18.78,
+        "14": 20.22,
+        "15": 21.67,
+        "16": 23.11
+      }
+    },
+    {
+      "id": "r13",
+      "nome": "13 Placas",
+      "placas": 13,
+      "cimento_kg": 758.33,
+      "agua_kg": 306.94,
+      "eps_kg_base": 18.78,
+      "superplast_kg": 2.744,
+      "incorporador_ar_kg": 3.394,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  14.08,
+        "10": 15.65,
+        "11": 17.21,
+        "12": 18.78,
+        "13": 20.34,
+        "14": 21.91,
+        "15": 23.47,
+        "16": 25.04
+      }
+    },
+    {
+      "id": "r14",
+      "nome": "14 Placas",
+      "placas": 14,
+      "cimento_kg": 816.67,
+      "agua_kg": 330.56,
+      "eps_kg_base": 20.22,
+      "superplast_kg": 2.956,
+      "incorporador_ar_kg": 3.656,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  15.17,
+        "10": 16.85,
+        "11": 18.54,
+        "12": 20.22,
+        "13": 21.91,
+        "14": 23.59,
+        "15": 25.28,
+        "16": 26.96
+      }
+    },
+    {
+      "id": "r15",
+      "nome": "15 Placas",
+      "placas": 15,
+      "cimento_kg": 875.00,
+      "agua_kg": 354.17,
+      "eps_kg_base": 21.67,
+      "superplast_kg": 3.167,
+      "incorporador_ar_kg": 3.917,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  16.25,
+        "10": 18.06,
+        "11": 19.86,
+        "12": 21.67,
+        "13": 23.47,
+        "14": 25.28,
+        "15": 27.08,
+        "16": 28.89
+      }
+    },
+    {
+      "id": "r16",
+      "nome": "16 Placas",
+      "placas": 16,
+      "cimento_kg": 933.33,
+      "agua_kg": 377.78,
+      "eps_kg_base": 23.11,
+      "superplast_kg": 3.378,
+      "incorporador_ar_kg": 4.178,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  17.33,
+        "10": 19.26,
+        "11": 21.19,
+        "12": 23.11,
+        "13": 25.04,
+        "14": 26.96,
+        "15": 28.89,
+        "16": 30.81
+      }
+    },
+    {
+      "id": "r17",
+      "nome": "17 Placas",
+      "placas": 17,
+      "cimento_kg": 991.67,
+      "agua_kg": 401.39,
+      "eps_kg_base": 24.56,
+      "superplast_kg": 3.589,
+      "incorporador_ar_kg": 4.439,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  18.42,
+        "10": 20.46,
+        "11": 22.51,
+        "12": 24.56,
+        "13": 26.60,
+        "14": 28.65,
+        "15": 30.69,
+        "16": 32.74
+      }
+    },
+    {
+      "id": "r18",
+      "nome": "18 Placas",
+      "placas": 18,
+      "cimento_kg": 1050.00,
+      "agua_kg": 425.00,
+      "eps_kg_base": 26.00,
+      "superplast_kg": 3.800,
+      "incorporador_ar_kg": 4.700,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  19.50,
+        "10": 21.67,
+        "11": 23.83,
+        "12": 26.00,
+        "13": 28.17,
+        "14": 30.33,
+        "15": 32.50,
+        "16": 34.67
+      }
+    },
+    {
+      "id": "r19",
+      "nome": "19 Placas",
+      "placas": 19,
+      "cimento_kg": 1108.33,
+      "agua_kg": 448.61,
+      "eps_kg_base": 27.44,
+      "superplast_kg": 4.011,
+      "incorporador_ar_kg": 4.961,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  20.58,
+        "10": 22.87,
+        "11": 25.16,
+        "12": 27.44,
+        "13": 29.73,
+        "14": 32.02,
+        "15": 34.31,
+        "16": 36.59
+      }
+    },
+    {
+      "id": "r20",
+      "nome": "20 Placas",
+      "placas": 20,
+      "cimento_kg": 1166.67,
+      "agua_kg": 472.22,
+      "eps_kg_base": 28.89,
+      "superplast_kg": 4.222,
+      "incorporador_ar_kg": 5.222,
+      "densidade_eps_base": 12,
+      "eps_por_densidade": {
+        "9":  21.67,
+        "10": 24.07,
+        "11": 26.48,
+        "12": 28.89,
+        "13": 31.30,
+        "14": 33.70,
+        "15": 36.11,
+        "16": 38.52
+      }
+    }
+  ]
+}

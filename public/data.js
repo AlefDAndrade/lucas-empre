@@ -196,11 +196,17 @@ async function registrarRelatorioInjecao(record) {
     data: record.data,
     turno: record.turno,
     id_bateria: record.id_bateria,
-    dimensao: record.dimensao,
-    tipo_montagem: record.tipo_montagem,
     num_traco: t.num,
     berco_ini: t.berco_ini || '',
     berco_fim: t.berco_fim || '',
+    // Receita real pesada
+    cimento_real: t.cimento_real || '',
+    agua_real: t.agua_real || '',
+    eps_real: t.eps_real || '',
+    superplast_real: t.superplast_real || '',
+    incorporador_real: t.incorporador_real || '',
+    tempo_batida: t.tempo_batida || '',
+    // Resultado
     densidade: t.densidade || '',
     flow: t.flow || '',
     obs: t.obs || '',
@@ -218,6 +224,23 @@ async function registrarRelatorioInjecao(record) {
   });
   const json = await res.json();
   if (!json.ok) throw new Error(json.erro || 'Erro ao registrar relatório de injeção');
+}
+
+async function registrarTracosBase(linhas) {
+  // Função desativada conforme solicitação para não salvar mais em tracos_registro.json
+  return Promise.resolve({ ok: true });
+}
+
+async function getTracosBase(filtros = {}) {
+  try {
+    const res = await fetch('tracos_registro.json');
+    if (!res.ok) return [];
+    let dados = await res.json();
+    if (filtros.id_bateria) dados = dados.filter(t => t.id_bateria === filtros.id_bateria);
+    if (filtros.dataInicio) dados = dados.filter(t => t.data >= filtros.dataInicio);
+    if (filtros.dataFim) dados = dados.filter(t => t.data <= filtros.dataFim);
+    return dados;
+  } catch (_) { return []; }
 }
 
 async function getRelatorioInjecao() {
@@ -346,6 +369,8 @@ window.LW = {
   // Relatório de Injeção
   registrarRelatorioInjecao,
   getRelatorioInjecao,
+  registrarTracosBase,
+  getTracosBase,
 
   // Dados e analytics
   registrarOperacao, getStats,

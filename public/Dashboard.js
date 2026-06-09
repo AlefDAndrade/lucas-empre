@@ -291,7 +291,11 @@
     id_bateria: new Set(), num_traco: new Set(),
     dimensao: new Set(), turno: new Set(),
     silo: new Set(), expansao: new Set(),
+    id_traco: new Set(), // filtro de navegação via Registro de Baterias
   };
+
+  // Data de corte: produções anteriores a esta data não possuem vínculo de traço
+  const TRACO_CUTOFF_DATE = '2026-06-05';
 
   // ---- Extrai valores únicos não-vazios de uma lista de objetos ----
   function _unicos(lista, campo) {
@@ -414,9 +418,16 @@
     const chips = [];
     cats.forEach(cat => {
       filtrosObj[cat.key]?.forEach(val => {
-        chips.push({ key: cat.key, val, label: `${cat.label}: ${val}` });
+        chips.push({ key: cat.key, val, label: `${cat.label}: ${val}`, tipo: 'normal' });
       });
     });
+
+    // Chips especiais de navegação por traço (id_traco)
+    if (containerId === 'filtros-relatorio' && filtrosObj.id_traco && filtrosObj.id_traco.size) {
+      filtrosObj.id_traco.forEach(val => {
+        chips.push({ key: 'id_traco', val, label: `🔗 Traço: ${val}`, tipo: 'traco' });
+      });
+    }
 
     if (!chips.length) {
       chipsEl.innerHTML = '<span style="color:var(--text-3);font-size:.78rem">Nenhum filtro ativo</span>';
@@ -426,18 +437,23 @@
 
     if (limparEl) limparEl.style.display = 'inline-flex';
 
-    chipsEl.innerHTML = chips.map(c => `
+    chipsEl.innerHTML = chips.map(c => {
+      const isTraco = c.tipo === 'traco';
+      const bg = isTraco ? 'rgba(59,130,246,.12)' : 'rgba(245,158,11,.12)';
+      const border = isTraco ? 'rgba(59,130,246,.35)' : 'rgba(245,158,11,.3)';
+      const color = isTraco ? 'var(--blue,#3b82f6)' : 'var(--accent)';
+      return `
       <span style="
         display:inline-flex;align-items:center;gap:5px;
-        background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);
-        border-radius:20px;padding:3px 10px;font-size:.76rem;color:var(--accent);
+        background:${bg};border:1px solid ${border};
+        border-radius:20px;padding:3px 10px;font-size:.76rem;color:${color};
       ">
         ${c.label}
         <button onclick="removerFiltro('${containerId}','${c.key}','${c.val}')"
-          style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:.8rem;padding:0;line-height:1;opacity:.7"
+          style="background:none;border:none;cursor:pointer;color:${color};font-size:.8rem;padding:0;line-height:1;opacity:.7"
           title="Remover">✕</button>
-      </span>
-    `).join('');
+      </span>`;
+    }).join('');
   }
 
   // ---- Remove um filtro individual via chip ----
@@ -514,8 +530,13 @@
       return;
     }
 
-    tbody.innerHTML = data.map(b => `
-      <tr>
+    // Mapa temporário para lookup por índice (evita serializar JSON em atributos HTML)
+    window._lwRegistroMapTemp = {};
+    tbody.innerHTML = data.map((b, idx) => {
+      window._lwRegistroMapTemp[idx] = b;
+      return `
+      <tr style="cursor:pointer" title="Clique para ver os traços desta bateria no Relatório de Injeção"
+        onclick="LWDash.navegarParaTracosDoRegistro(window._lwRegistroMapTemp[${idx}])">
         <td class="mono">${b.data ? b.data.split('-').reverse().join('/') : '—'}</td>
         <td><span class="badge badge-gray">${b.turno || '—'}</span></td>
         <td>${b.dimensao || '—'}</td>
@@ -526,8 +547,8 @@
         <td class="mono">${LW.formatDuration(b.tempo_min)}</td>
         <td>${b.qtd_tracos || 0}</td>
         <td>${b.houve_atraso === 'SIM'
-        ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
-        : '<span class="badge badge-green">✓ NÃO</span>'}</td>
+          ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
+          : '<span class="badge badge-green">✓ NÃO</span>'}</td>
         <td>${b.motivo_atraso || '—'}</td>
         <td><span class="badge ${b.tipo_montagem === '2/P' ? 'badge-blue' : b.tipo_montagem === 'S/P' ? 'badge-green' : 'badge-amber'}">${b.tipo_montagem || '—'}</span></td>
         <td>${b.total_paineis || 0}</td>
@@ -538,8 +559,8 @@
         <td>${(b.m2_sp || 0).toFixed(2)}</td>
         <td>${b.bercos_reais || '—'}</td>
         <td>${b.placas_cimenticia || 0}</td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
   }
 
   // ================================================================
@@ -580,10 +601,19 @@
     if (f.data_fim) linhas = linhas.filter(l => l.data <= f.data_fim);
     if (f.id_bateria.size) linhas = linhas.filter(l => f.id_bateria.has(l.id_bateria));
     if (f.num_traco.size) linhas = linhas.filter(l => f.num_traco.has(String(l.num_traco)));
+    if (f.id_traco && f.id_traco.size) linhas = linhas.filter(l => l.id_traco && f.id_traco.has(l.id_traco));
     if (f.dimensao.size) linhas = linhas.filter(l => f.dimensao.has(l.dimensao));
     if (f.turno.size) linhas = linhas.filter(l => f.turno.has(l.turno));
     if (f.silo.size) linhas = linhas.filter(l => f.silo.has(l.silo));
     if (f.expansao.size) linhas = linhas.filter(l => f.expansao.has(l.expansao));
+    if (f.cimento_real) linhas = linhas.filter(l => f.cimento_real.has(String(l.cimento_real)));
+    if (f.densidade_eps) linhas = linhas.filter(l => f.densidade_eps.has(String(l.densidade_eps)));
+    if (f.flow) linhas = linhas.filter(l => f.flow.has(String(l.flow)));
+    if (f.agua_real) linhas = linhas.filter(l => f.agua_real.has(String(l.agua_real)));
+    if (f.eps_real) linhas = linhas.filter(l => f.eps_real.has(String(l.eps_real)));
+    if (f.superplastico) linhas = linhas.filter(l => f.superplast_real.has(String(l.superplast_real)));
+    if (f.incorporador) linhas = linhas.filter(l => f.incorporador_real.has(String(l.incorporador_real)));
+    if (f.tempo_batida) linhas = linhas.filter(l => f.tempo_batida.has(String(l.tempo_batida)))
 
     document.getElementById('rel-count').textContent = linhas.length + ' registros';
 
@@ -608,9 +638,16 @@
         <td>${l.densidade || '—'}</td>
         <td>${l.flow || '—'}</td>
         <td>${l.densidade_eps || '—'}</td>
-        <td><span class="badge badge-gray">${l.silo || '—'}</span></td>
         <td><span class="badge badge-blue">${l.expansao || '—'}</span></td>
+        <td><span class="badge badge-gray">${l.silo || '—'}</span></td>
+        <td>${l.cimento_real || '—'}</td>
+        <td>${l.agua_real || '—'}</td>
+        <td>${l.eps_real || '—'}</td>
+        <td>${l.superplast_real || '—'}</td>
+        <td>${l.incorporador_real || '—'}</td>
+        <td>${l.tempo_batida ? LW.formatDuration(l.tempo_batida) : '—'}</td>
         <td>${l.obs || '—'}</td>
+        
       </tr>
     `).join('');
   }
@@ -772,9 +809,109 @@
     fecharExportModal();
   }
 
+  // ================================================================
+  //  NAVEGAÇÃO: Registro de Baterias → Relatório de Injeção por Traços
+  // ================================================================
+
+  /**
+   * Navega do Registro de Baterias para o Relatório de Injeção,
+   * aplicando automaticamente filtros pelos traços vinculados à bateria.
+   * @param {object} bateria - Registro completo da bateria (historico.json)
+   */
+  async function navegarParaTracosDoRegistro(bateria) {
+    // Verifica se a produção é anterior ao corte de rastreamento de traços
+    if (!bateria.data || bateria.data < TRACO_CUTOFF_DATE) {
+      _mostrarAvisoSemTraco(bateria);
+      return;
+    }
+
+    // Verifica se o registro possui traços vinculados
+    const tracos = bateria.tracos;
+    if (!tracos || !Array.isArray(tracos) || tracos.length === 0) {
+      _mostrarAvisoSemTraco(bateria);
+      return;
+    }
+
+    // Extrai os IDs de traço
+    const idsTraco = tracos.map(t => t.id).filter(Boolean);
+    if (!idsTraco.length) {
+      _mostrarAvisoSemTraco(bateria);
+      return;
+    }
+
+    // Limpa filtros anteriores do Relatório de Injeção
+    Object.keys(_filtrosRelatorio).forEach(k => {
+      if (_filtrosRelatorio[k] instanceof Set) _filtrosRelatorio[k].clear();
+      else _filtrosRelatorio[k] = null;
+    });
+
+    // Aplica os IDs de traço como filtro de navegação
+    idsTraco.forEach(id => _filtrosRelatorio.id_traco.add(id));
+
+    // Reseta inputs de data do relatório
+    const ini = document.getElementById('rel-data-inicio');
+    const fim = document.getElementById('rel-data-fim');
+    if (ini) ini.value = '';
+    if (fim) fim.value = '';
+
+    // Navega para a página do Relatório de Injeção
+    if (typeof showPage === 'function') {
+      showPage('relatorio');
+    } else {
+      window.LWDash.initRelatorio();
+    }
+  }
+
+  /**
+   * Exibe um aviso visual informando que o registro não possui vínculo de traço.
+   */
+  function _mostrarAvisoSemTraco(bateria) {
+    const dataFormatada = bateria.data
+      ? bateria.data.split('-').reverse().join('/')
+      : '(data desconhecida)';
+    const msg = `Esta produção (${bateria.id_bateria || ''} — ${dataFormatada}) foi registrada antes da implantação do sistema de rastreamento de traços e não possui vínculo de traço disponível.`;
+
+    // Usa o modal de mensagem existente se disponível, senão alert simples
+    if (typeof LWOp !== 'undefined' && LWOp.showToast) {
+      LWOp.showToast(msg, 'warn');
+    } else {
+      // Exibe um toast não-bloqueante inline
+      _mostrarToastAviso(msg);
+    }
+  }
+
+  /**
+   * Toast não-bloqueante para avisos de sem-traço.
+   */
+  function _mostrarToastAviso(msg) {
+    const existing = document.getElementById('lw-traco-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'lw-traco-toast';
+    toast.style.cssText = [
+      'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999',
+      'background:var(--surface-2,#1e293b);border:1px solid rgba(245,158,11,.4)',
+      'color:var(--accent,#f59e0b);border-radius:10px;padding:14px 20px',
+      'font-size:.85rem;max-width:520px;text-align:center',
+      'box-shadow:0 8px 32px rgba(0,0,0,.4);line-height:1.5',
+      'display:flex;align-items:flex-start;gap:10px',
+    ].join(';');
+    toast.innerHTML = `
+      <span style="font-size:1.2rem;flex-shrink:0">⚠️</span>
+      <span>${msg}</span>
+      <button onclick="document.getElementById('lw-traco-toast').remove()"
+        style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:1rem;padding:0;margin-left:8px;flex-shrink:0;opacity:.7">✕</button>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 7000);
+  }
+
+
   // ---- Public ----
   window.LWDash = {
     initDashboard, initTurnos, initRegistro, initRelatorio, renderRelatorio,
+    navegarParaTracosDoRegistro,
     exportCSV: exportXLSX, abrirExportModal, fecharExportModal, onExportPeriodoChange,
     selecionarTodasColunas, atualizarPreviewCount, confirmarExport,
   };
