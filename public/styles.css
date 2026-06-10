@@ -1074,3 +1074,128 @@ td.mono {
   height: 1px;
   background: var(--border);
 }
+/* ============================================================
+   AJUSTES DE INSUMOS
+   ============================================================ */
+
+/* Linha de input + botão "+" lado a lado */
+.insumo-group {
+  position: relative;
+}
+
+.insumo-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.insumo-input-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Botão "+" de ajuste */
+.btn-ajuste {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+
+.btn-ajuste:hover {
+  background: var(--accent-dark, #2563eb);
+  transform: scale(1.08);
+}
+
+.btn-ajuste:active {
+  transform: scale(.95);
+}
+
+/* Exibição da fórmula de ajustes abaixo do campo */
+.insumo-ajustes-display {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ajustes-formula {
+  font-size: .72rem;
+  color: var(--text-3, #94a3b8);
+  font-family: var(--font-mono, monospace);
+  letter-spacing: .02em;
+}
+
+.ajustes-total-badge {
+  display: inline-block;
+  font-size: .7rem;
+  font-weight: 600;
+  color: var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  width: fit-content;
+}
+
+/* Painel de ajuste (inline, abaixo do campo) */
+.ajuste-painel {
+  margin-top: 8px;
+  background: var(--surface-2, #1e293b);
+  border: 1px solid var(--border, #334155);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+  animation: fadeInDown .15s ease;
+  z-index: 10;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ajuste-painel-titulo {
+  font-size: .75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-2, #94a3b8);
+  margin-bottom: 8px;
+}
+
+.ajuste-qty-input {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.ajuste-painel-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: .78rem;
+  height: auto;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border, #334155);
+  color: var(--text-2, #94a3b8);
+}
+
+.btn-ghost:hover {
+  background: var(--surface-3, #334155);
+}

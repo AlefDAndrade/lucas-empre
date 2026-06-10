@@ -91,6 +91,14 @@
         Relatórios de Injeção
       </button>
 
+      <button class="nav-item" data-page="qualidade-tracos" onclick="showPage('qualidade-tracos',this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          <polyline points="9 11 12 14 22 4"/>
+        </svg>
+        Qualidade dos Traços
+      </button>
+
       <div class="sidebar-label" style="margin-top:8px">Ajustes</div>
       <button class="nav-item" data-page="ajustes-receita" onclick="showPage('ajustes-receita',this)">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -773,6 +781,131 @@
       </div>
     </main>
 
+    <!-- ============ PAGE: QUALIDADE DOS TRAÇOS ============ -->
+    <main class="main" id="page-qualidade-tracos">
+      <div class="page-header">
+        <h1 class="page-title">Qualidade dos <span>Traços</span></h1>
+        <p class="page-desc">Análise de ajustes, estabilidade de receitas e consumo de insumos</p>
+      </div>
+      <div class="page-body">
+        <!-- Filtros -->
+        <div class="card mb-4" style="padding:16px 20px">
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:.75rem">Data Início</label>
+              <input class="form-input" type="date" id="qt-data-inicio" style="height:36px;font-size:.84rem;padding:6px 10px">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:.75rem">Data Fim</label>
+              <input class="form-input" type="date" id="qt-data-fim" style="height:36px;font-size:.84rem;padding:6px 10px">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:.75rem">Bateria</label>
+              <select class="form-input" id="qt-bateria" style="height:36px;font-size:.84rem;padding:6px 10px">
+                <option value="">Todas</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:.75rem">Turno</label>
+              <select class="form-input" id="qt-turno" style="height:36px;font-size:.84rem;padding:6px 10px">
+                <option value="">Todos</option>
+                <option>1º TURNO</option>
+                <option>2º TURNO</option>
+                <option>3º TURNO</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label" style="font-size:.75rem">Tipo de Montagem</label>
+              <select class="form-input" id="qt-tipo-montagem" style="height:36px;font-size:.84rem;padding:6px 10px">
+                <option value="">Todos</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="btn-qt-filtrar" style="height:36px;align-self:flex-end">Filtrar</button>
+          </div>
+        </div>
+        <!-- Linha 1: Taxa de Acerto + Média + Donut -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="card" style="padding:20px">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px">Traços do Período</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="color:var(--text-2);font-size:.85rem">Total de Traços</span>
+                <span id="qt-total-tracos" style="font-size:1.3rem;font-weight:700;color:var(--text);font-family:var(--font-mono)">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="color:var(--text-2);font-size:.85rem">Sem Ajuste</span>
+                <span id="qt-sem-ajuste" style="font-size:1.1rem;font-weight:600;color:#10b981;font-family:var(--font-mono)">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="color:var(--text-2);font-size:.85rem">Com Ajuste</span>
+                <span id="qt-com-ajuste" style="font-size:1.1rem;font-weight:600;color:#f59e0b;font-family:var(--font-mono)">—</span>
+              </div>
+              <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+                <span style="color:var(--text-2);font-size:.85rem;font-weight:600">Taxa de Acerto</span>
+                <span id="qt-taxa-acerto" style="font-size:1.6rem;font-weight:800;color:var(--accent);font-family:var(--font-mono)">—%</span>
+              </div>
+              <div style="background:var(--bg-3);border-radius:6px;height:6px;overflow:hidden">
+                <div id="qt-taxa-bar" style="height:100%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:6px;transition:width .5s;width:0%"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:16px">Média de Ajustes por Traço</div>
+            <div id="qt-media-ajustes" style="font-size:3.5rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1">—</div>
+            <div style="color:var(--text-3);font-size:.75rem;margin-top:8px">ajustes / traço</div>
+            <div style="margin-top:16px;color:var(--text-2);font-size:.8rem">
+              <span id="qt-total-ajustes-num" style="font-weight:600;color:var(--text)">—</span> ajustes registrados
+            </div>
+          </div>
+          <div class="card" style="padding:20px">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px">Distribuição dos Ajustes</div>
+            <div style="display:flex;align-items:center;gap:16px;justify-content:center">
+              <canvas id="qt-donut" width="110" height="110"></canvas>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="width:10px;height:10px;border-radius:50%;background:#10b981;flex-shrink:0"></div>
+                  <div>
+                    <div style="font-size:.75rem;color:var(--text-3)">Sem ajuste</div>
+                    <div id="qt-donut-sem" style="font-size:1rem;font-weight:700;color:#10b981;font-family:var(--font-mono)">—</div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="width:10px;height:10px;border-radius:50%;background:#f59e0b;flex-shrink:0"></div>
+                  <div>
+                    <div style="font-size:.75rem;color:var(--text-3)">Com ajuste</div>
+                    <div id="qt-donut-com" style="font-size:1rem;font-weight:700;color:#f59e0b;font-family:var(--font-mono)">—</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Linha 2: Ranking Materiais + Receitas Instáveis -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="card" style="padding:20px">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Materiais Mais Ajustados</div>
+            <div id="qt-ranking-materiais"><div style="color:var(--text-3);font-size:.84rem;text-align:center;padding:20px 0">Calculando...</div></div>
+          </div>
+          <div class="card" style="padding:20px">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Receitas Mais Instáveis</div>
+            <div id="qt-ranking-receitas"><div style="color:var(--text-3);font-size:.84rem;text-align:center;padding:20px 0">Calculando...</div></div>
+          </div>
+        </div>
+        <!-- Consumo Planejado x Real -->
+        <div class="card mb-4" style="padding:20px">
+          <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Consumo Planejado × Real por Insumo</div>
+          <div id="qt-consumo-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+            <div style="color:var(--text-3);font-size:.84rem">Calculando...</div>
+          </div>
+        </div>
+        <!-- Evolução da Qualidade -->
+        <div class="card" style="padding:20px">
+          <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Evolução da Qualidade — % de Traços Ajustados por Mês</div>
+          <canvas id="qt-evolucao-chart" style="width:100%;height:160px;display:block"></canvas>
+        </div>
+      </div>
+    </main>
+
     <!-- ============ PAGE: REGISTRO DE AJUSTES NA RECEITA ============ -->
     <main class="main" id="page-ajustes-receita">
       <div class="page-header">
@@ -1121,6 +1254,13 @@
       if (pageId === 'dashboard') {
         // redraw charts on tab switch (canvas needs layout)
         setTimeout(() => LWDash.initDashboard(), 50);
+      }
+      if (pageId === 'qualidade-tracos' && !window._qualidadeInit) {
+        window._qualidadeInit = true;
+        LWQualidade.init();
+      }
+      if (pageId === 'qualidade-tracos') {
+        LWQualidade.render();
       }
       if (pageId === 'relatorio' && !window._relatorioInit) {
         window._relatorioInit = true;
@@ -1828,6 +1968,7 @@
     </div>
   </div>
   <script src="ajustes-receita.js"></script>
+  <script src="qualidade-tracos.js"></script>
 </body>
 
 </html>

@@ -221,6 +221,43 @@
     }
   }
 
+  // Cria estrutura de insumo com suporte a ajustes
+  function criarInsumo(valorOriginal) {
+    const original = valorOriginal === '' ? '' : parseFloat(valorOriginal) || 0;
+    return {
+      original,
+      ajustes: [],
+      get total() {
+        if (this.original === '') return '';
+        return this.ajustes.reduce((s, a) => s + a, parseFloat(this.original) || 0);
+      }
+    };
+  }
+
+  // Retorna o total de um insumo (serializado, sem getter)
+  function totalInsumo(insumo) {
+    if (insumo.original === '') return '';
+    return insumo.ajustes.reduce((s, a) => s + a, parseFloat(insumo.original) || 0);
+  }
+
+  // Migra traços antigos (campos _real simples) para nova estrutura com ajustes
+  function migrarTraco(t) {
+    const insumos = ['cimento', 'agua', 'eps', 'superplast', 'incorporador'];
+    insumos.forEach(key => {
+      const realKey = key + '_real';
+      if (t[realKey] !== undefined && (typeof t[realKey] === 'string' || typeof t[realKey] === 'number')) {
+        t[realKey] = { original: t[realKey], ajustes: [] };
+      }
+    });
+    // Migrar densidade e flow se necessário
+    ['densidade', 'flow'].forEach(key => {
+      if (t[key] !== undefined && typeof t[key] !== 'object') {
+        t[key + '_insumo'] = { original: t[key], ajustes: [] };
+      }
+    });
+    return t;
+  }
+
   function addTraco() {
     const num = state.tracos.length + 1;
     state.tracos.push({
@@ -228,14 +265,17 @@
       num,
       berco_ini: '',
       berco_fim: '',
-      // Receita real pesada
-      cimento_real: '',
-      agua_real: '',
-      eps_real: '',
-      superplast_real: '',
-      incorporador_real: '',
+      // Receita real pesada — nova estrutura com ajustes
+      cimento_real:      { original: '', ajustes: [] },
+      agua_real:         { original: '', ajustes: [] },
+      eps_real:          { original: '', ajustes: [] },
+      superplast_real:   { original: '', ajustes: [] },
+      incorporador_real: { original: '', ajustes: [] },
       tempo_batida: '',
       // Resultado
+      densidade_insumo: { original: '', ajustes: [] },
+      flow_insumo:      { original: '', ajustes: [] },
+      // campos legados mantidos por compatibilidade
       densidade: '',
       flow: '',
       obs: '',
@@ -254,10 +294,58 @@
     persist();
   }
 
+  // Formata a exibição dos ajustes: "9,5 + 0,5 + 0,3 = 10,3"
+  function formatAjustesDisplay(insumo, decimais) {
+    if (!insumo || insumo.original === '') return '';
+    const orig = parseFloat(insumo.original) || 0;
+    if (!insumo.ajustes || insumo.ajustes.length === 0) return '';
+    const partes = [orig.toFixed(decimais), ...insumo.ajustes.map(a => a.toFixed(decimais))];
+    const tot = totalInsumo(insumo);
+    return partes.join(' + ') + ' = ' + (tot !== '' ? parseFloat(tot).toFixed(decimais) : '');
+  }
+
+  // Renderiza campo de insumo com botão de ajuste
+  function renderCampoInsumo(t, i, fieldKey, label, step, decimais, placeholder) {
+    const insumo = t[fieldKey] || { original: '', ajustes: [] };
+    const valorExibido = insumo.original;
+    const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
+    const displayAjustes = temAjustes ? formatAjustesDisplay(insumo, decimais) : '';
+    const total = temAjustes ? totalInsumo(insumo) : '';
+
+    return `
+      <div class="form-group insumo-group">
+        <label class="form-label">${label}</label>
+        <div class="insumo-input-row">
+          <input class="form-input" type="number" step="${step}"
+            value="${valorExibido}"
+            oninput="LWOp.updateInsumoOriginal(${i},'${fieldKey}',this.value)"
+            placeholder="${placeholder}">
+          <button class="btn-ajuste" title="Adicionar ajuste" onclick="LWOp.abrirAjuste(${i},'${fieldKey}',this)">+</button>
+        </div>
+        ${temAjustes ? `
+          <div class="insumo-ajustes-display">
+            <span class="ajustes-formula">${displayAjustes}</span>
+            <span class="ajustes-total-badge">Total: ${parseFloat(total).toFixed(decimais)}</span>
+          </div>` : ''}
+        <div class="ajuste-painel" id="ajuste-painel-${i}-${fieldKey}" style="display:none">
+          <div class="ajuste-painel-titulo">Adicionar ajuste</div>
+          <label class="form-label">Quantidade:</label>
+          <input class="form-input ajuste-qty-input" type="number" step="${step}"
+            id="ajuste-input-${i}-${fieldKey}" placeholder="0" value="">
+          <div class="ajuste-painel-btns">
+            <button class="btn btn-primary btn-sm" onclick="LWOp.salvarAjuste(${i},'${fieldKey}')">Salvar</button>
+            <button class="btn btn-ghost btn-sm" onclick="LWOp.fecharAjuste(${i},'${fieldKey}')">Cancelar</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
   function renderTracos() {
     const container = $('tracos-container');
     container.innerHTML = '';
     state.tracos.forEach((t, i) => {
+      // Garante migração de traços antigos
+      migrarTraco(t);
       const row = document.createElement('div');
       row.className = 'traco-row';
       row.innerHTML = `
@@ -300,31 +388,11 @@
         <!-- Seção: Receita Real Pesada -->
         <div class="traco-section-label">⚖ Receita Real Pesada</div>
         <div class="traco-fields-grid traco-fields-grid--6">
-          <div class="form-group">
-            <label class="form-label">Cimento (kg)</label>
-            <input class="form-input" type="number" step="0.01" value="${t.cimento_real}"
-              oninput="LWOp.updateTraco(${i},'cimento_real',this.value)" placeholder="kg">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Água (kg)</label>
-            <input class="form-input" type="number" step="0.01" value="${t.agua_real}"
-              oninput="LWOp.updateTraco(${i},'agua_real',this.value)" placeholder="kg">
-          </div>
-          <div class="form-group">
-            <label class="form-label">EPS (kg)</label>
-            <input class="form-input" type="number" step="0.01" value="${t.eps_real}"
-              oninput="LWOp.updateTraco(${i},'eps_real',this.value)" placeholder="kg">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Superplast. (kg)</label>
-            <input class="form-input" type="number" step="0.001" value="${t.superplast_real}"
-              oninput="LWOp.updateTraco(${i},'superplast_real',this.value)" placeholder="kg">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Incorp. de Ar (kg)</label>
-            <input class="form-input" type="number" step="0.001" value="${t.incorporador_real}"
-              oninput="LWOp.updateTraco(${i},'incorporador_real',this.value)" placeholder="kg">
-          </div>
+          ${renderCampoInsumo(t, i, 'cimento_real',      'Cimento (kg)',        '0.01',  2, 'kg')}
+          ${renderCampoInsumo(t, i, 'agua_real',         'Água (kg)',           '0.01',  2, 'kg')}
+          ${renderCampoInsumo(t, i, 'eps_real',          'EPS (kg)',            '0.01',  2, 'kg')}
+          ${renderCampoInsumo(t, i, 'superplast_real',   'Superplast. (kg)',    '0.001', 3, 'kg')}
+          ${renderCampoInsumo(t, i, 'incorporador_real', 'Incorp. de Ar (kg)',  '0.001', 3, 'kg')}
           <div class="form-group">
             <label class="form-label">Tempo de Batida (s)</label>
             <input class="form-input" type="number" step="1" value="${t.tempo_batida}"
@@ -340,16 +408,8 @@
             <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
               oninput="LWOp.updateTraco(${i},'densidadeEPS',this.value)" placeholder="kg/m³">
           </div>
-          <div class="form-group">
-            <label class="form-label">Densidade Obtida</label>
-            <input class="form-input" type="number" step="0.01" value="${t.densidade}"
-              oninput="LWOp.updateTraco(${i},'densidade',this.value)" placeholder="kg/m³">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Flow (mm)</label>
-            <input class="form-input" type="number" value="${t.flow}"
-              oninput="LWOp.updateTraco(${i},'flow',this.value)" placeholder="mm">
-          </div>
+          ${renderCampoInsumo(t, i, 'densidade_insumo', 'Densidade Obtida', '0.01', 2, 'kg/m³')}
+          ${renderCampoInsumo(t, i, 'flow_insumo',      'Flow (mm)',        '1',    0, 'mm')}
           <div class="form-group traco-obs-field">
             <label class="form-label">Observações</label>
             <input class="form-input" type="text" value="${t.obs}"
@@ -428,7 +488,20 @@
       tipo_montagem: state.tipo_montagem,
       bercos_reais: bercos,
       ...calc,
-      tracos: state.tracos,
+      tracos: state.tracos.map(t => ({
+        ...t,
+        // Expõe os totais calculados como campos planos para relatórios
+        cimento_total:      totalInsumo(t.cimento_real),
+        agua_total:         totalInsumo(t.agua_real),
+        eps_total:          totalInsumo(t.eps_real),
+        superplast_total:   totalInsumo(t.superplast_real),
+        incorporador_total: totalInsumo(t.incorporador_real),
+        densidade_total:    totalInsumo(t.densidade_insumo),
+        flow_total:         totalInsumo(t.flow_insumo),
+        // Compatibilidade: também atualiza os campos legados
+        densidade: totalInsumo(t.densidade_insumo) !== '' ? totalInsumo(t.densidade_insumo) : t.densidade,
+        flow:      totalInsumo(t.flow_insumo)      !== '' ? totalInsumo(t.flow_insumo)      : t.flow,
+      })),
     };
 
     Promise.all([
@@ -532,6 +605,52 @@
     updateTraco(i, field, value) {
       state.tracos[i][field] = value;
       persist();
+    },
+    // Atualiza o valor original de um insumo com estrutura {original, ajustes}
+    updateInsumoOriginal(i, field, value) {
+      const insumo = state.tracos[i][field];
+      if (insumo && typeof insumo === 'object' && 'ajustes' in insumo) {
+        insumo.original = value;
+      } else {
+        state.tracos[i][field] = { original: value, ajustes: [] };
+      }
+      persist();
+    },
+    // Abre o painel de ajuste para um insumo específico
+    abrirAjuste(i, field, btn) {
+      // Fecha qualquer painel aberto
+      document.querySelectorAll('.ajuste-painel').forEach(p => {
+        if (p.id !== `ajuste-painel-${i}-${field}`) p.style.display = 'none';
+      });
+      const painel = document.getElementById(`ajuste-painel-${i}-${field}`);
+      if (!painel) return;
+      const isOpen = painel.style.display !== 'none';
+      painel.style.display = isOpen ? 'none' : 'block';
+      if (!isOpen) {
+        const input = document.getElementById(`ajuste-input-${i}-${field}`);
+        if (input) { input.value = ''; setTimeout(() => input.focus(), 50); }
+      }
+    },
+    // Salva o ajuste e recalcula o total
+    salvarAjuste(i, field) {
+      const input = document.getElementById(`ajuste-input-${i}-${field}`);
+      if (!input) return;
+      const qty = parseFloat(input.value);
+      if (isNaN(qty)) { input.focus(); return; }
+
+      let insumo = state.tracos[i][field];
+      if (!insumo || typeof insumo !== 'object' || !('ajustes' in insumo)) {
+        insumo = { original: '', ajustes: [] };
+        state.tracos[i][field] = insumo;
+      }
+      insumo.ajustes.push(qty);
+      persist();
+      renderTracos();
+    },
+    // Fecha o painel sem salvar
+    fecharAjuste(i, field) {
+      const painel = document.getElementById(`ajuste-painel-${i}-${field}`);
+      if (painel) painel.style.display = 'none';
     },
     removeTraco,
     closeModal() {
