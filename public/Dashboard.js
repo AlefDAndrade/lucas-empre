@@ -606,15 +606,6 @@
     if (f.turno.size) linhas = linhas.filter(l => f.turno.has(l.turno));
     if (f.silo.size) linhas = linhas.filter(l => f.silo.has(l.silo));
     if (f.expansao.size) linhas = linhas.filter(l => f.expansao.has(l.expansao));
-    if (f.cimento_real) linhas = linhas.filter(l => f.cimento_real.has(String(l.cimento_real)));
-    if (f.densidade_eps) linhas = linhas.filter(l => f.densidade_eps.has(String(l.densidade_eps)));
-    if (f.flow) linhas = linhas.filter(l => f.flow.has(String(l.flow)));
-    if (f.agua_real) linhas = linhas.filter(l => f.agua_real.has(String(l.agua_real)));
-    if (f.eps_real) linhas = linhas.filter(l => f.eps_real.has(String(l.eps_real)));
-    if (f.superplastico) linhas = linhas.filter(l => f.superplast_real.has(String(l.superplast_real)));
-    if (f.incorporador) linhas = linhas.filter(l => f.incorporador_real.has(String(l.incorporador_real)));
-    if (f.tempo_batida) linhas = linhas.filter(l => f.tempo_batida.has(String(l.tempo_batida)))
-
     document.getElementById('rel-count').textContent = linhas.length + ' registros';
 
     if (!linhas.length) {

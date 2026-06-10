@@ -655,8 +655,6 @@
     removeTraco,
     closeModal() {
       $('success-modal').style.display = 'none';
-    }, _repopulate() {
-      populateSelects();
     }
   };
 

@@ -99,20 +99,10 @@ function waitConfig(fn) {
 
 // ---- LocalStorage helpers ----
 
-const DB_KEY_BATERIAS = 'lw_baterias';
-const DB_KEY_INJECOES = 'lw_injecoes';
 const DB_KEY_OP_CURRENT = 'lw_op_current';
 
-function loadDB(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function saveDB(key, data) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
+// Nota: DB_KEY_BATERIAS e DB_KEY_INJECOES foram descontinuados em favor de persistência no servidor.
+// loadDB e saveDB foram removidos por falta de uso.
 
 function getOperacaoAtual() {
   try {
@@ -130,11 +120,6 @@ function clearOperacaoAtual() {
 }
 
 // ---- Calculation helpers ----
-
-function getBercosByDimensao(dim) {
-  const found = DIMENSAO_OPTS.find(d => d.label === dim);
-  return found ? found.bercos : 20;
-}
 
 function calcPaineis(tipoMontagem, bercos) {
   const map = MONTAGEM_MAP[tipoMontagem];
@@ -160,12 +145,6 @@ function formatTime(date) {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function formatDate(date) {
-  if (!date) return '';
-  const d = new Date(date);
-  return d.toLocaleDateString('pt-BR');
-}
-
 function diffMinutes(start, end) {
   const s = new Date(start), e = new Date(end);
   return (e - s) / 60000;
@@ -176,10 +155,6 @@ function formatDuration(minutes) {
   const m = Math.floor(minutes);
   const s = Math.round((minutes - m) * 60);
   return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
-}
-
-function formatM2(v) {
-  return typeof v === 'number' ? v.toFixed(2) + ' m²' : '—';
 }
 
 // ---- Seeder — import data from original spreadsheet ----
@@ -224,23 +199,6 @@ async function registrarRelatorioInjecao(record) {
   });
   const json = await res.json();
   if (!json.ok) throw new Error(json.erro || 'Erro ao registrar relatório de injeção');
-}
-
-async function registrarTracosBase(linhas) {
-  // Função desativada conforme solicitação para não salvar mais em tracos_registro.json
-  return Promise.resolve({ ok: true });
-}
-
-async function getTracosBase(filtros = {}) {
-  try {
-    const res = await fetch('tracos_registro.json');
-    if (!res.ok) return [];
-    let dados = await res.json();
-    if (filtros.id_bateria) dados = dados.filter(t => t.id_bateria === filtros.id_bateria);
-    if (filtros.dataInicio) dados = dados.filter(t => t.data >= filtros.dataInicio);
-    if (filtros.dataFim) dados = dados.filter(t => t.data <= filtros.dataFim);
-    return dados;
-  } catch (_) { return []; }
 }
 
 async function getRelatorioInjecao() {
@@ -356,21 +314,18 @@ window.LW = {
   loadConfig,
   waitConfig,
 
-  // Storage (operação em andamento permanece em localStorage)
-  loadDB, saveDB, DB_KEY_INJECOES,
+  // Storage
   getOperacaoAtual, saveOperacaoAtual, clearOperacaoAtual,
 
   // Cálculos
-  getBercosByDimensao, calcPaineis,
+  calcPaineis,
 
   // Formatação
-  formatTime, formatDate, diffMinutes, formatDuration, formatM2,
+  formatTime, diffMinutes, formatDuration,
 
   // Relatório de Injeção
   registrarRelatorioInjecao,
   getRelatorioInjecao,
-  registrarTracosBase,
-  getTracosBase,
 
   // Dados e analytics
   registrarOperacao, getStats,

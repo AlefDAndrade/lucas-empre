@@ -1151,30 +1151,25 @@
 
       <!-- ---- IDs de Bateria ---- -->
       <div style="margin-bottom:28px">
-        <div class="card-title">IDs de Bateria</div>
-        <div id="cfg-baterias-lista" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
-        <div style="display:flex;gap:8px">
-          <input class="form-input" id="cfg-bateria-novo" placeholder="Novo ID (ex: B13)" style="max-width:200px">
-          <button class="btn btn-outline-accent btn-sm" onclick="cfgAdicionarBateria()">+ Adicionar</button>
-        </div>
-      </div>
-
-      <hr class="divider">
-
-      <!-- ---- Dimensões ---- -->
-      <div style="margin-bottom:28px">
-        <div class="card-title">Dimensões</div>
-        <div id="cfg-dimensoes-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
-        <div style="display:flex;gap:8px;align-items:flex-end">
-          <div class="form-group">
-            <label class="form-label">Label (ex: 15 cm)</label>
-            <input class="form-input" id="cfg-dim-label" placeholder="15 cm" style="width:130px">
+        <div class="card-title">Baterias Cadastradas</div>
+        <div id="cfg-baterias-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px"></div>
+        <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+          <div style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">Nova Bateria</div>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">ID da Bateria</label>
+              <input class="form-input" id="cfg-bateria-novo" placeholder="Ex: B14" style="width:130px">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Dimensão</label>
+              <input class="form-input" id="cfg-bateria-label" placeholder="Ex: 15 cm" style="width:130px">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Qtd. Berços</label>
+              <input class="form-input" type="number" id="cfg-bateria-bercos" placeholder="20" style="width:90px">
+            </div>
+            <button class="btn btn-outline-accent btn-sm" onclick="cfgAdicionarBateria()">+ Adicionar</button>
           </div>
-          <div class="form-group">
-            <label class="form-label">Berços</label>
-            <input class="form-input" type="number" id="cfg-dim-bercos" placeholder="20" style="width:90px">
-          </div>
-          <button class="btn btn-outline-accent btn-sm" onclick="cfgAdicionarDimensao()">+ Adicionar</button>
         </div>
       </div>
 
@@ -1522,8 +1517,11 @@
             tempoMin = (new Date(fimISO) - new Date(inicioISO)) / 60000;
           }
           const dimensao = mapa['dimensao'] ? String(row[mapa['dimensao']]) : '';
-          const dim = LW.DIMENSAO_OPTS.find(d => d.label === dimensao.trim());
-          const capacidade = dim ? dim.bercos : 0;
+          const idBateria = mapa['id_bateria'] ? String(row[mapa['id_bateria']]).trim() : '';
+          // Busca berços primeiro pela bateria (nova estrutura), depois pela dimensão (retrocompat)
+          const bateriaObj = LW.BATERIA_IDS.find(b => b.id === idBateria);
+          const dimObj = LW.DIMENSAO_OPTS.find(d => d.label === dimensao.trim());
+          const capacidade = (bateriaObj?.bercos) || (dimObj?.bercos) || 0;
           const houve = mapa['houve_atraso'] ? String(row[mapa['houve_atraso']]).trim().toUpperCase() : 'NAO';
 
           return {
@@ -1632,9 +1630,9 @@
     function abrirConfig() {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
       // Lê o estado atual das variáveis já carregadas pelo data.js
+      // BATERIA_IDS agora é array de objetos {id, label, bercos}
       _cfgDados = {
-        baterias: [...LW.BATERIA_IDS],
-        dimensoes: LW.DIMENSAO_OPTS.map(d => ({ label: d.label, bercos: d.bercos })),
+        baterias: LW.BATERIA_IDS.map(b => ({ id: b.id, label: b.label || '', bercos: b.bercos || 20 })),
         montagens: Object.entries(LW.MONTAGEM_MAP).map(([label, v]) => ({
           label,
           paineis_2p_por_berco: v.paineis_2p_por_berco,
@@ -1651,25 +1649,17 @@
     }
 
     function cfgRenderTudo() {
-      // Baterias
+      // Baterias (agora com dimensão e berços integrados)
       const lb = document.getElementById('cfg-baterias-lista');
-      lb.innerHTML = _cfgDados.baterias.map((id, i) => `
-    <span style="display:inline-flex;align-items:center;gap:5px;background:var(--bg-3);border:1px solid var(--border-2);border-radius:4px;padding:4px 10px;font-size:.8rem;font-family:var(--font-mono)">
-      ${id}
-      <button onclick="cfgRemoverBateria(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;line-height:1;padding:0 2px">✕</button>
-    </span>
-  `).join('');
-
-      // Dimensões
-      const ld = document.getElementById('cfg-dimensoes-lista');
-      ld.innerHTML = _cfgDados.dimensoes.map((d, i) => `
+      lb.innerHTML = _cfgDados.baterias.map((b, i) => `
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px">
-      <span style="font-family:var(--font-mono);font-size:.85rem;color:var(--accent);min-width:70px">${d.label}</span>
-      <span style="font-size:.82rem;color:var(--text-2)">${d.bercos} berços</span>
-      <span style="font-size:.75rem;color:var(--text-3);margin-left:4px">→ ${d.bercos * 2} painéis máx.</span>
-      <button onclick="cfgRemoverDimensao(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
+      <span style="font-family:var(--font-mono);font-size:.9rem;font-weight:700;color:var(--accent);min-width:80px">${b.id}</span>
+      <span style="font-size:.82rem;color:var(--text-2);min-width:60px">${b.label || '—'}</span>
+      <span style="font-size:.82rem;color:var(--text-2)">${b.bercos} berços</span>
+      <span style="font-size:.75rem;color:var(--text-3);margin-left:4px">→ ${b.bercos * 2} painéis máx.</span>
+      <button onclick="cfgRemoverBateria(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
     </div>
-  `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhuma dimensão cadastrada.</span>';
+  `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhuma bateria cadastrada.</span>';
 
       // Montagens
       const lm = document.getElementById('cfg-montagem-lista');
@@ -1684,38 +1674,33 @@
     }
 
     function cfgAdicionarBateria() {
-      const input = document.getElementById('cfg-bateria-novo');
-      const val = input.value.trim();
-      if (!val) return alert('Digite um ID válido.');
-      if (_cfgDados.baterias.includes(val)) return alert('Este ID já existe.');
-      _cfgDados.baterias.push(val);
-      input.value = '';
+      const inputId = document.getElementById('cfg-bateria-novo');
+      const inputLabel = document.getElementById('cfg-bateria-label');
+      const inputBercos = document.getElementById('cfg-bateria-bercos');
+
+      const id = inputId.value.trim().toUpperCase();
+      const label = inputLabel.value.trim();
+      const bercos = parseInt(inputBercos.value);
+
+      if (!id) return alert('Digite o ID da bateria (ex: B14).');
+      if (!label) return alert('Digite a dimensão da bateria (ex: 15 cm).');
+      if (!bercos || bercos < 1) return alert('Digite a quantidade de berços válida.');
+      if (_cfgDados.baterias.find(b => b.id === id)) return alert('Este ID de bateria já existe.');
+
+      _cfgDados.baterias.push({ id, label, bercos });
+      inputId.value = '';
+      inputLabel.value = '';
+      inputBercos.value = '';
       cfgRenderTudo();
     }
 
     function cfgRemoverBateria(i) {
-      if (!confirm(`Remover a bateria "${_cfgDados.baterias[i]}"?`)) return;
+      if (!confirm(`Remover a bateria "${_cfgDados.baterias[i].id}"?`)) return;
       _cfgDados.baterias.splice(i, 1);
       cfgRenderTudo();
     }
 
-    function cfgAdicionarDimensao() {
-      const label = document.getElementById('cfg-dim-label').value.trim();
-      const bercos = parseInt(document.getElementById('cfg-dim-bercos').value);
-      if (!label) return alert('Digite um label para a dimensão.');
-      if (!bercos || bercos < 1) return alert('Digite um número de berços válido.');
-      if (_cfgDados.dimensoes.find(d => d.label === label)) return alert('Essa dimensão já existe.');
-      _cfgDados.dimensoes.push({ label, bercos });
-      document.getElementById('cfg-dim-label').value = '';
-      document.getElementById('cfg-dim-bercos').value = '';
-      cfgRenderTudo();
-    }
-
-    function cfgRemoverDimensao(i) {
-      if (!confirm(`Remover a dimensão "${_cfgDados.dimensoes[i].label}"?`)) return;
-      _cfgDados.dimensoes.splice(i, 1);
-      cfgRenderTudo();
-    }
+    // cfgAdicionarDimensao e cfgRemoverDimensao removidos — dimensão agora pertence à bateria
 
     function cfgAdicionarMontagem() {
       const label = document.getElementById('cfg-mont-label').value.trim().toUpperCase();
@@ -1737,13 +1722,20 @@
     }
 
     async function cfgSalvar() {
-      if (!_cfgDados.baterias.length) return alert('Adicione ao menos um ID de bateria.');
-      if (!_cfgDados.dimensoes.length) return alert('Adicione ao menos uma dimensão.');
+      if (!_cfgDados.baterias.length) return alert('Adicione ao menos uma bateria.');
       if (!_cfgDados.montagens.length) return alert('Adicione ao menos um tipo de montagem.');
+
+      // Nova estrutura: dimensão e berços ficam dentro de cada bateria
+      // Reconstruímos DIMENSAO_OPTS a partir das baterias (para retrocompatibilidade)
+      const uniqueDims = new Map();
+      _cfgDados.baterias.forEach(b => {
+        if (b.label && b.bercos) uniqueDims.set(b.label, b.bercos);
+      });
+      const dimensoesOpcoes = Array.from(uniqueDims.entries()).map(([label, bercos]) => ({ label, bercos }));
 
       const cfg = {
         baterias: { ids: _cfgDados.baterias },
-        dimensoes: { opcoes: _cfgDados.dimensoes },
+        dimensoes: { opcoes: dimensoesOpcoes }, // mantido para compatibilidade com registros antigos
         tipos_montagem: {
           opcoes: _cfgDados.montagens.map(m => ({
             label: m.label,
@@ -1765,8 +1757,9 @@
         return alert('Erro ao salvar: ' + e.message);
       }
 
-      // Atualiza variáveis em memória igual antes...
-      // (restante do código de atualização do LW permanece igual)
+      // Atualiza variáveis em memória imediatamente (sem reload)
+      LW.BATERIA_IDS.length = 0;
+      _cfgDados.baterias.forEach(b => LW.BATERIA_IDS.push(b));
 
       fecharConfig();
       alert('Configurações salvas com sucesso!');
