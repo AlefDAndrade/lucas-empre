@@ -235,8 +235,18 @@
   }
 
   // Retorna o total de um insumo (serializado, sem getter)
-  function totalInsumo(insumo) {
-    if (insumo.original === '') return '';
+  function totalInsumo(insumo, fieldKey) {
+    const temOriginal = insumo.original !== '' && insumo.original !== null;
+    const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
+    if (!temOriginal && !temAjustes) return '';
+
+    // Para Densidade e Flow, o ajuste sobrescreve o valor anterior (não soma)
+    const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
+    if (isResultado) {
+      if (temAjustes) return insumo.ajustes[insumo.ajustes.length - 1];
+      return parseFloat(insumo.original) || 0;
+    }
+
     return insumo.ajustes.reduce((s, a) => s + a, parseFloat(insumo.original) || 0);
   }
 
@@ -255,15 +265,22 @@
         t[key + '_insumo'] = { original: t[key], ajustes: [] };
       }
     });
+    // Migrar tempo_batida se necessário
+    if (t.tempo_batida !== undefined && (typeof t.tempo_batida === 'string' || typeof t.tempo_batida === 'number')) {
+      t.tempo_batida = { original: t.tempo_batida, ajustes: [] };
+    }
     return t;
   }
 
   function addTraco() {
     const num = state.tracos.length + 1;
+    const prevTraco = state.tracos[state.tracos.length - 1];
+    const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
+
     state.tracos.push({
       id: 'traco_' + Date.now() + '_' + num,
       num,
-      berco_ini: '',
+      berco_ini: sugeridoIni,
       berco_fim: '',
       // Receita real pesada — nova estrutura com ajustes
       cimento_real:      { original: '', ajustes: [] },
@@ -271,7 +288,7 @@
       eps_real:          { original: '', ajustes: [] },
       superplast_real:   { original: '', ajustes: [] },
       incorporador_real: { original: '', ajustes: [] },
-      tempo_batida: '',
+      tempo_batida: { original: '', ajustes: [] },
       // Resultado
       densidade_insumo: { original: '', ajustes: [] },
       flow_insumo:      { original: '', ajustes: [] },
@@ -294,23 +311,155 @@
     persist();
   }
 
-  // Formata a exibição dos ajustes: "9,5 + 0,5 + 0,3 = 10,3"
-  function formatAjustesDisplay(insumo, decimais) {
-    if (!insumo || insumo.original === '') return '';
-    const orig = parseFloat(insumo.original) || 0;
-    if (!insumo.ajustes || insumo.ajustes.length === 0) return '';
-    const partes = [orig.toFixed(decimais), ...insumo.ajustes.map(a => a.toFixed(decimais))];
-    const tot = totalInsumo(insumo);
+  // Formata a exibição dos ajustes: "9,5 + 0,5 + 0,3 = 10,3" ou "9,5 → 10,0 → 10,5"
+  function formatAjustesDisplay(insumo, decimais, fieldKey) {
+    if (!insumo || !insumo.ajustes || insumo.ajustes.length === 0) return '';
+    const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
+    const orig = parseFloat(insumo.original);
+    const tot = totalInsumo(insumo, fieldKey);
+
+    if (isResultado) {
+      // Mostra evolução dos valores: original → ajuste1 → ajuste2
+      const partes = [];
+      if (!isNaN(orig)) partes.push(orig.toFixed(decimais));
+      partes.push(...insumo.ajustes.map(a => parseFloat(a).toFixed(decimais)));
+      return partes.join(' → ');
+    }
+
+    if (insumo.original === '') return '';
+    const origStr = orig.toFixed(decimais);
+    const partes = [origStr, ...insumo.ajustes.map(a => parseFloat(a).toFixed(decimais))];
     return partes.join(' + ') + ' = ' + (tot !== '' ? parseFloat(tot).toFixed(decimais) : '');
+  }
+
+  // ---- Duration Picker de Batida ----
+
+  // Converte segundos totais → { h, m, s }
+  function segParaHMS(seg) {
+    const s = Math.max(0, Math.round(seg));
+    return { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60), s: s % 60 };
+  }
+
+  // Converte { h, m, s } → segundos totais
+  function hmsParaSeg(h, m, s) {
+    return (parseInt(h) || 0) * 3600 + (parseInt(m) || 0) * 60 + (parseInt(s) || 0);
+  }
+
+  // Formata segundos como "Xh Ym Zs" ou "Ym Zs" ou "Zs"
+  function formatDuracao(seg) {
+    if (seg === '' || seg === null) return '—';
+    const { h, m, s } = segParaHMS(parseInt(seg));
+    if (h > 0) return `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+    if (m > 0) return `${m}m ${String(s).padStart(2,'0')}s`;
+    return `${s}s`;
+  }
+
+  function renderCampoTempoBatida(t, i) {
+    const insumo = t.tempo_batida || { original: '', ajustes: [] };
+    const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
+    const total = totalInsumo(insumo, 'tempo_batida');
+
+    // Valor exibido no picker: se tem ajustes usa total, senão usa original
+    const segAtual = total !== '' ? parseInt(total) : (insumo.original !== '' ? parseInt(insumo.original) : 0);
+    const temValor = insumo.original !== '' || temAjustes;
+    const { h, m, s } = segParaHMS(segAtual);
+
+    const formula = temAjustes ? (() => {
+      const partes = [parseFloat(insumo.original) || 0, ...insumo.ajustes].map(v => formatDuracao(v));
+      return partes.join(' + ') + ' = ' + formatDuracao(parseInt(total));
+    })() : '';
+
+    return `
+      <div class="form-group insumo-group tempo-batida-group" id="tempo-batida-group-${i}">
+        <label class="form-label">⏱ Tempo de Batida</label>
+        <div class="duration-picker">
+          <div class="duration-col">
+            <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracao(${i},'h',1)">▲</button>
+            <input class="dur-input" type="number" min="0" max="23"
+              id="dur-h-${i}" value="${temValor ? h : ''}" placeholder="0"
+              oninput="LWOp.onDuracaoInput(${i})">
+            <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracao(${i},'h',-1)">▼</button>
+            <span class="dur-label">h</span>
+          </div>
+          <span class="dur-sep">:</span>
+          <div class="duration-col">
+            <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracao(${i},'m',1)">▲</button>
+            <input class="dur-input" type="number" min="0" max="59"
+              id="dur-m-${i}" value="${temValor ? m : ''}" placeholder="0"
+              oninput="LWOp.onDuracaoInput(${i})">
+            <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracao(${i},'m',-1)">▼</button>
+            <span class="dur-label">min</span>
+          </div>
+          <span class="dur-sep">:</span>
+          <div class="duration-col">
+            <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracao(${i},'s',1)">▲</button>
+            <input class="dur-input" type="number" min="0" max="59"
+              id="dur-s-${i}" value="${temValor ? s : ''}" placeholder="0"
+              oninput="LWOp.onDuracaoInput(${i})">
+            <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracao(${i},'s',-1)">▼</button>
+            <span class="dur-label">seg</span>
+          </div>
+        </div>
+        ${temValor ? `<div class="dur-total-display">${formatDuracao(segAtual)} <span class="dur-seg-raw">(${segAtual}s)</span></div>` : ''}
+        ${temAjustes ? `
+          <div class="insumo-ajustes-display">
+            <span class="ajustes-formula">${formula}</span>
+            <span class="ajustes-total-badge">Total: ${formatDuracao(parseInt(total))}</span>
+          </div>` : ''}
+        ${temValor ? `
+          <div class="ajuste-painel dur-ajuste-painel" id="ajuste-painel-${i}-tempo_batida" style="display:none">
+            <div class="ajuste-painel-titulo">Adicionar tempo extra</div>
+            <div class="duration-picker duration-picker--sm">
+              <div class="duration-col">
+                <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracaoAjuste(${i},'h',1)">▲</button>
+                <input class="dur-input" type="number" min="0" max="23"
+                  id="dur-aj-h-${i}" value="0" placeholder="0">
+                <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracaoAjuste(${i},'h',-1)">▼</button>
+                <span class="dur-label">h</span>
+              </div>
+              <span class="dur-sep">:</span>
+              <div class="duration-col">
+                <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracaoAjuste(${i},'m',1)">▲</button>
+                <input class="dur-input" type="number" min="0" max="59"
+                  id="dur-aj-m-${i}" value="0" placeholder="0">
+                <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracaoAjuste(${i},'m',-1)">▼</button>
+                <span class="dur-label">min</span>
+              </div>
+              <span class="dur-sep">:</span>
+              <div class="duration-col">
+                <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracaoAjuste(${i},'s',1)">▲</button>
+                <input class="dur-input" type="number" min="0" max="59"
+                  id="dur-aj-s-${i}" value="0" placeholder="0">
+                <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracaoAjuste(${i},'s',-1)">▼</button>
+                <span class="dur-label">seg</span>
+              </div>
+            </div>
+            <div class="ajuste-painel-btns" style="margin-top:10px">
+              <button class="btn btn-primary btn-sm" onclick="LWOp.salvarAjusteDuracao(${i})">Salvar</button>
+              <button class="btn btn-ghost btn-sm" onclick="LWOp.fecharAjuste(${i},'tempo_batida')">Cancelar</button>
+            </div>
+          </div>
+          <button class="btn-ajuste-tempo" onclick="LWOp.abrirAjuste(${i},'tempo_batida',this)">+ tempo extra</button>
+        ` : ''}
+      </div>`;
   }
 
   // Renderiza campo de insumo com botão de ajuste
   function renderCampoInsumo(t, i, fieldKey, label, step, decimais, placeholder) {
     const insumo = t[fieldKey] || { original: '', ajustes: [] };
-    const valorExibido = insumo.original;
+    const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
     const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
-    const displayAjustes = temAjustes ? formatAjustesDisplay(insumo, decimais) : '';
-    const total = temAjustes ? totalInsumo(insumo) : '';
+    const displayAjustes = temAjustes ? formatAjustesDisplay(insumo, decimais, fieldKey) : '';
+    const total = totalInsumo(insumo, fieldKey);
+
+    // Para resultado (densidade/flow): input mostra original (valor medido), badge mostra atual
+    // Para insumos: input mostra original, badge mostra total somado
+    const valorExibido = insumo.original;
+
+    // Painel: "Novo valor" para overwrite (resultado), "Quantidade a adicionar" para soma (insumos)
+    const painelTitulo = isResultado ? 'Registrar novo valor' : 'Adicionar ajuste';
+    const painelLabel  = isResultado ? 'Novo valor:' : 'Quantidade:';
+    const painelPlaceholder = isResultado ? placeholder : '0';
 
     return `
       <div class="form-group insumo-group">
@@ -320,18 +469,18 @@
             value="${valorExibido}"
             oninput="LWOp.updateInsumoOriginal(${i},'${fieldKey}',this.value)"
             placeholder="${placeholder}">
-          <button class="btn-ajuste" title="Adicionar ajuste" onclick="LWOp.abrirAjuste(${i},'${fieldKey}',this)">+</button>
+          <button class="btn-ajuste" title="${painelTitulo}" onclick="LWOp.abrirAjuste(${i},'${fieldKey}',this)">+</button>
         </div>
         ${temAjustes ? `
           <div class="insumo-ajustes-display">
             <span class="ajustes-formula">${displayAjustes}</span>
-            <span class="ajustes-total-badge">Total: ${parseFloat(total).toFixed(decimais)}</span>
+            <span class="ajustes-total-badge">${isResultado ? 'Atual' : 'Total'}: ${total !== '' ? parseFloat(total).toFixed(decimais) : '—'}</span>
           </div>` : ''}
         <div class="ajuste-painel" id="ajuste-painel-${i}-${fieldKey}" style="display:none">
-          <div class="ajuste-painel-titulo">Adicionar ajuste</div>
-          <label class="form-label">Quantidade:</label>
+          <div class="ajuste-painel-titulo">${painelTitulo}</div>
+          <label class="form-label">${painelLabel}</label>
           <input class="form-input ajuste-qty-input" type="number" step="${step}"
-            id="ajuste-input-${i}-${fieldKey}" placeholder="0" value="">
+            id="ajuste-input-${i}-${fieldKey}" placeholder="${painelPlaceholder}" value="">
           <div class="ajuste-painel-btns">
             <button class="btn btn-primary btn-sm" onclick="LWOp.salvarAjuste(${i},'${fieldKey}')">Salvar</button>
             <button class="btn btn-ghost btn-sm" onclick="LWOp.fecharAjuste(${i},'${fieldKey}')">Cancelar</button>
@@ -342,6 +491,7 @@
 
   function renderTracos() {
     const container = $('tracos-container');
+    if (!container) return; // Adiciona uma verificação defensiva para o container
     container.innerHTML = '';
     state.tracos.forEach((t, i) => {
       // Garante migração de traços antigos
@@ -393,11 +543,7 @@
           ${renderCampoInsumo(t, i, 'eps_real',          'EPS (kg)',            '0.01',  2, 'kg')}
           ${renderCampoInsumo(t, i, 'superplast_real',   'Superplast. (kg)',    '0.001', 3, 'kg')}
           ${renderCampoInsumo(t, i, 'incorporador_real', 'Incorp. de Ar (kg)',  '0.001', 3, 'kg')}
-          <div class="form-group">
-            <label class="form-label">Tempo de Batida (s)</label>
-            <input class="form-input" type="number" step="1" value="${t.tempo_batida}"
-              oninput="LWOp.updateTraco(${i},'tempo_batida',this.value)" placeholder="seg">
-          </div>
+          ${renderCampoTempoBatida(t, i)}
         </div>
 
         <!-- Seção: Resultado -->
@@ -491,16 +637,17 @@
       tracos: state.tracos.map(t => ({
         ...t,
         // Expõe os totais calculados como campos planos para relatórios
-        cimento_total:      totalInsumo(t.cimento_real),
-        agua_total:         totalInsumo(t.agua_real),
-        eps_total:          totalInsumo(t.eps_real),
-        superplast_total:   totalInsumo(t.superplast_real),
-        incorporador_total: totalInsumo(t.incorporador_real),
-        densidade_total:    totalInsumo(t.densidade_insumo),
-        flow_total:         totalInsumo(t.flow_insumo),
+        cimento_total:      totalInsumo(t.cimento_real, 'cimento'),
+        agua_total:         totalInsumo(t.agua_real, 'agua'),
+        eps_total:          totalInsumo(t.eps_real, 'eps'),
+        superplast_total:   totalInsumo(t.superplast_real, 'superplast'),
+        incorporador_total: totalInsumo(t.incorporador_real, 'incorporador'),
+        tempo_batida_total: totalInsumo(t.tempo_batida, 'tempo_batida'),
+        densidade_total:    totalInsumo(t.densidade_insumo, 'densidade'),
+        flow_total:         totalInsumo(t.flow_insumo, 'flow'),
         // Compatibilidade: também atualiza os campos legados
-        densidade: totalInsumo(t.densidade_insumo) !== '' ? totalInsumo(t.densidade_insumo) : t.densidade,
-        flow:      totalInsumo(t.flow_insumo)      !== '' ? totalInsumo(t.flow_insumo)      : t.flow,
+        densidade: totalInsumo(t.densidade_insumo, 'densidade') !== '' ? totalInsumo(t.densidade_insumo, 'densidade') : t.densidade,
+        flow:      totalInsumo(t.flow_insumo, 'flow')      !== '' ? totalInsumo(t.flow_insumo, 'flow')      : t.flow,
       })),
     };
 
@@ -608,11 +755,12 @@
     },
     // Atualiza o valor original de um insumo com estrutura {original, ajustes}
     updateInsumoOriginal(i, field, value) {
-      const insumo = state.tracos[i][field];
-      if (insumo && typeof insumo === 'object' && 'ajustes' in insumo) {
-        insumo.original = value;
+      let insumo = state.tracos[i][field];
+      if (!insumo || typeof insumo !== 'object' || !('ajustes' in insumo)) {
+        insumo = { original: value, ajustes: [] };
+        state.tracos[i][field] = insumo;
       } else {
-        state.tracos[i][field] = { original: value, ajustes: [] };
+        insumo.original = value;
       }
       persist();
     },
@@ -653,6 +801,69 @@
       if (painel) painel.style.display = 'none';
     },
     removeTraco,
+
+    // Lê os valores h/m/s do picker e retorna total em segundos
+    _lerDuracaoPicker(prefixo, i) {
+      const h = parseInt(document.getElementById(`${prefixo}-h-${i}`)?.value) || 0;
+      const m = parseInt(document.getElementById(`${prefixo}-m-${i}`)?.value) || 0;
+      const s = parseInt(document.getElementById(`${prefixo}-s-${i}`)?.value) || 0;
+      return hmsParaSeg(h, m, s);
+    },
+
+    // Ajusta um campo (h/m/s) do picker principal com ▲▼, com wrap-around
+    ajustarDuracao(i, campo, delta) {
+      const id = `dur-${campo}-${i}`;
+      const el = document.getElementById(id);
+      if (!el) return;
+      const max = campo === 'h' ? 23 : 59;
+      let val = (parseInt(el.value) || 0) + delta;
+      if (val < 0) val = max;
+      if (val > max) val = 0;
+      el.value = val;
+      this.onDuracaoInput(i);
+    },
+
+    // Chamado quando o operador digita diretamente num campo do picker
+    onDuracaoInput(i) {
+      const seg = this._lerDuracaoPicker('dur', i);
+      let insumo = state.tracos[i].tempo_batida;
+      if (!insumo || typeof insumo !== 'object' || !('ajustes' in insumo)) {
+        insumo = { original: String(seg), ajustes: [] };
+        state.tracos[i].tempo_batida = insumo;
+      } else {
+        insumo.original = String(seg);
+      }
+      // Atualiza só o display de total sem re-renderizar tudo
+      const dispEl = document.querySelector(`#tempo-batida-group-${i} .dur-total-display`);
+      if (dispEl) dispEl.innerHTML = `${formatDuracao(seg)} <span class="dur-seg-raw">(${seg}s)</span>`;
+      persist();
+    },
+
+    // Ajusta um campo do picker de ajuste (painel +tempo extra)
+    ajustarDuracaoAjuste(i, campo, delta) {
+      const id = `dur-aj-${campo}-${i}`;
+      const el = document.getElementById(id);
+      if (!el) return;
+      const max = campo === 'h' ? 23 : 59;
+      let val = (parseInt(el.value) || 0) + delta;
+      if (val < 0) val = max;
+      if (val > max) val = 0;
+      el.value = val;
+    },
+
+    // Salva ajuste de duração (picker do painel +tempo extra)
+    salvarAjusteDuracao(i) {
+      const seg = this._lerDuracaoPicker('dur-aj', i);
+      if (seg === 0) { document.getElementById(`dur-aj-s-${i}`)?.focus(); return; }
+      let insumo = state.tracos[i].tempo_batida;
+      if (!insumo || typeof insumo !== 'object' || !('ajustes' in insumo)) {
+        insumo = { original: '', ajustes: [] };
+        state.tracos[i].tempo_batida = insumo;
+      }
+      insumo.ajustes.push(seg);
+      persist();
+      renderTracos();
+    },
     closeModal() {
       $('success-modal').style.display = 'none';
     }

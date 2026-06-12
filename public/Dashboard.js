@@ -636,7 +636,12 @@
         <td>${l.eps_real || '—'}</td>
         <td>${l.superplast_real || '—'}</td>
         <td>${l.incorporador_real || '—'}</td>
-        <td>${l.tempo_batida ? LW.formatDuration(l.tempo_batida) : '—'}</td>
+        <td>${(() => {
+          // Extrai o valor caso l.tempo_batida ainda seja um objeto {original, ajustes}
+          let val = (typeof l.tempo_batida === 'object' && l.tempo_batida !== null) 
+            ? (l.tempo_batida.original || 0) : l.tempo_batida;
+          return val ? LW.formatDuration(parseFloat(val) / 60) : '—';
+        })()}</td>
         <td>${l.obs || '—'}</td>
         
       </tr>

@@ -1199,3 +1199,137 @@ td.mono {
 .btn-ghost:hover {
   background: var(--surface-3, #334155);
 }
+
+/* ---- Duration Picker de Batida ---- */
+.tempo-batida-group {
+  grid-column: span 1;
+}
+
+.duration-picker {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-3);
+  border: 1.5px solid var(--border-2);
+  border-radius: 7px;
+  padding: 4px 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.duration-picker--sm {
+  padding: 3px 5px;
+  gap: 2px;
+}
+
+.duration-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: 1;
+}
+
+.dur-btn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: .55rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: color .15s, background .15s;
+  user-select: none;
+  width: 100%;
+  text-align: center;
+}
+
+.dur-btn:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.dur-btn:active {
+  transform: scale(.9);
+}
+
+.dur-input {
+  width: 100%;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: .85rem;
+  font-weight: 600;
+  padding: 3px 1px;
+  -moz-appearance: textfield;
+}
+
+.dur-input::-webkit-outer-spin-button,
+.dur-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.dur-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.dur-label {
+  font-size: .58rem;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.dur-sep {
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--text-3);
+  margin: 0;
+  padding-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.dur-total-display {
+  margin-top: 5px;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  letter-spacing: .02em;
+}
+
+.dur-seg-raw {
+  font-size: .68rem;
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.dur-ajuste-painel {
+  margin-top: 8px;
+}
+
+.btn-ajuste-tempo {
+  margin-top: 6px;
+  background: transparent;
+  border: 1px dashed var(--border-2);
+  color: var(--text-3);
+  font-size: .72rem;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+  transition: border-color .15s, color .15s;
+}
+
+.btn-ajuste-tempo:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

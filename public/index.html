@@ -91,20 +91,19 @@
         Relatórios de Injeção
       </button>
 
+      <button class="nav-item" data-page="analise-operacional" onclick="showPage('analise-operacional',this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 20h20M6 20V10M10 20V4M14 20V14M18 20V8"/>
+        </svg>
+        Análise Operacional
+      </button>
+
       <button class="nav-item" data-page="qualidade-tracos" onclick="showPage('qualidade-tracos',this)">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
           <polyline points="9 11 12 14 22 4"/>
         </svg>
         Qualidade dos Traços
-      </button>
-
-      <div class="sidebar-label" style="margin-top:8px">Ajustes</div>
-      <button class="nav-item" data-page="ajustes-receita" onclick="showPage('ajustes-receita',this)">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 2.2" />
-        </svg>
-        Ajustes de Receita
       </button>
     </nav>
 
@@ -784,11 +783,12 @@
     <!-- ============ PAGE: QUALIDADE DOS TRAÇOS ============ -->
     <main class="main" id="page-qualidade-tracos">
       <div class="page-header">
-        <h1 class="page-title">Qualidade dos <span>Traços</span></h1>
-        <p class="page-desc">Análise de ajustes, estabilidade de receitas e consumo de insumos</p>
+        <h1 class="page-title">CEP — Controle <span>Estatístico de Processo</span></h1>
+        <p class="page-desc">Estabilidade de receitas · Análise de insumos · Insights automáticos · Alertas de qualidade</p>
       </div>
       <div class="page-body">
-        <!-- Filtros -->
+
+        <!-- ── FILTROS (inalterados) ── -->
         <div class="card mb-4" style="padding:16px 20px">
           <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
             <div class="form-group" style="margin:0">
@@ -823,269 +823,337 @@
             <button class="btn btn-primary" id="btn-qt-filtrar" style="height:36px;align-self:flex-end">Filtrar</button>
           </div>
         </div>
-        <!-- Linha 1: Taxa de Acerto + Média + Donut -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
-          <div class="card" style="padding:20px">
-            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px">Traços do Período</div>
-            <div style="display:flex;flex-direction:column;gap:10px">
-              <div style="display:flex;justify-content:space-between;align-items:center">
-                <span style="color:var(--text-2);font-size:.85rem">Total de Traços</span>
-                <span id="qt-total-tracos" style="font-size:1.3rem;font-weight:700;color:var(--text);font-family:var(--font-mono)">—</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center">
-                <span style="color:var(--text-2);font-size:.85rem">Sem Ajuste</span>
-                <span id="qt-sem-ajuste" style="font-size:1.1rem;font-weight:600;color:#10b981;font-family:var(--font-mono)">—</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center">
-                <span style="color:var(--text-2);font-size:.85rem">Com Ajuste</span>
-                <span id="qt-com-ajuste" style="font-size:1.1rem;font-weight:600;color:#f59e0b;font-family:var(--font-mono)">—</span>
-              </div>
-              <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center">
-                <span style="color:var(--text-2);font-size:.85rem;font-weight:600">Taxa de Acerto</span>
-                <span id="qt-taxa-acerto" style="font-size:1.6rem;font-weight:800;color:var(--accent);font-family:var(--font-mono)">—%</span>
-              </div>
-              <div style="background:var(--bg-3);border-radius:6px;height:6px;overflow:hidden">
-                <div id="qt-taxa-bar" style="height:100%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:6px;transition:width .5s;width:0%"></div>
+
+        <!-- ── ALERTAS ── -->
+        <div id="qt-alertas" style="margin-bottom:16px;display:flex;flex-direction:column;gap:8px"></div>
+
+        <!-- ── KPIs LINHA 1: Taxa + Total + Média + Receita estável/instável ── -->
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px">
+          <!-- Taxa de acerto -->
+          <div class="card" style="padding:16px;grid-column:span 2">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:10px">Taxa de Acerto da Receita</div>
+            <div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:8px">
+              <span id="qt-taxa-acerto" style="font-size:2.8rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1">—%</span>
+              <div style="padding-bottom:4px;font-size:.78rem;color:var(--text-3)">
+                <span id="qt-sem-ajuste" style="color:#10b981;font-weight:700">—</span> sem ajuste /
+                <span id="qt-total-tracos" style="color:var(--text-2);font-weight:600">—</span> total
               </div>
             </div>
-          </div>
-          <div class="card" style="padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">
-            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:16px">Média de Ajustes por Traço</div>
-            <div id="qt-media-ajustes" style="font-size:3.5rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1">—</div>
-            <div style="color:var(--text-3);font-size:.75rem;margin-top:8px">ajustes / traço</div>
-            <div style="margin-top:16px;color:var(--text-2);font-size:.8rem">
-              <span id="qt-total-ajustes-num" style="font-weight:600;color:var(--text)">—</span> ajustes registrados
+            <div style="background:var(--bg-3);border-radius:6px;height:6px;overflow:hidden">
+              <div id="qt-taxa-bar" style="height:100%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:6px;transition:width .6s;width:0%"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:.74rem;color:var(--text-3)">
+              <span><span id="qt-com-ajuste" style="color:#f59e0b;font-weight:700">—</span> com ajuste</span>
+              <span id="qt-tendencia-taxa" style="font-style:italic"></span>
             </div>
           </div>
-          <div class="card" style="padding:20px">
-            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px">Distribuição dos Ajustes</div>
-            <div style="display:flex;align-items:center;gap:16px;justify-content:center">
-              <canvas id="qt-donut" width="110" height="110"></canvas>
-              <div style="display:flex;flex-direction:column;gap:10px">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <div style="width:10px;height:10px;border-radius:50%;background:#10b981;flex-shrink:0"></div>
+          <!-- Total ajustes + Média -->
+          <div class="card" style="padding:16px">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">Total de Ajustes</div>
+            <div id="qt-total-ajustes-num" style="font-size:2.2rem;font-weight:800;color:#f59e0b;font-family:var(--font-mono);line-height:1.1">—</div>
+            <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">ajustes registrados</div>
+          </div>
+          <div class="card" style="padding:16px">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">Média / Traço</div>
+            <div id="qt-media-ajustes" style="font-size:2.2rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1.1">—</div>
+            <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">ajustes por traço</div>
+          </div>
+          <!-- Receita mais estável -->
+          <div class="card" style="padding:16px;border-left:3px solid #10b981">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">Receita Mais Estável</div>
+            <div id="qt-receita-estavel" style="font-size:1rem;font-weight:700;color:#10b981;font-family:var(--font-mono)">—</div>
+            <div id="qt-receita-estavel-pct" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+          <!-- Receita mais instável -->
+          <div class="card" style="padding:16px;border-left:3px solid #ef4444">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">Receita Mais Instável</div>
+            <div id="qt-receita-instavel" style="font-size:1rem;font-weight:700;color:#ef4444;font-family:var(--font-mono)">—</div>
+            <div id="qt-receita-instavel-pct" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+        </div>
+
+        <!-- ── KPIs LINHA 2: Insumo mais ajustado + maior desvio + Distribuição donut ── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+          <div class="card" style="padding:16px;border-left:3px solid #ef4444">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">Insumo Mais Ajustado</div>
+            <div id="qt-insumo-mais-ajustado" style="font-size:1.15rem;font-weight:700;color:#ef4444">—</div>
+            <div id="qt-insumo-mais-ajustado-cnt" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+          <div class="card" style="padding:16px;border-left:3px solid #f59e0b">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">Maior Desvio Percentual</div>
+            <div id="qt-insumo-maior-desvio" style="font-size:1.15rem;font-weight:700;color:#f59e0b">—</div>
+            <div id="qt-insumo-maior-desvio-val" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+          <!-- Donut distribuição -->
+          <div class="card" style="padding:16px">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:10px">Distribuição dos Traços</div>
+            <div style="display:flex;align-items:center;gap:14px;justify-content:center">
+              <canvas id="qt-donut" width="90" height="90"></canvas>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <div style="width:9px;height:9px;border-radius:50%;background:#10b981;flex-shrink:0"></div>
                   <div>
-                    <div style="font-size:.75rem;color:var(--text-3)">Sem ajuste</div>
-                    <div id="qt-donut-sem" style="font-size:1rem;font-weight:700;color:#10b981;font-family:var(--font-mono)">—</div>
+                    <div style="font-size:.7rem;color:var(--text-3)">Sem ajuste</div>
+                    <div id="qt-donut-sem" style="font-size:.9rem;font-weight:700;color:#10b981;font-family:var(--font-mono)">—</div>
                   </div>
                 </div>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <div style="width:10px;height:10px;border-radius:50%;background:#f59e0b;flex-shrink:0"></div>
+                <div style="display:flex;align-items:center;gap:7px">
+                  <div style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0"></div>
                   <div>
-                    <div style="font-size:.75rem;color:var(--text-3)">Com ajuste</div>
-                    <div id="qt-donut-com" style="font-size:1rem;font-weight:700;color:#f59e0b;font-family:var(--font-mono)">—</div>
+                    <div style="font-size:.7rem;color:var(--text-3)">Com ajuste</div>
+                    <div id="qt-donut-com" style="font-size:.9rem;font-weight:700;color:#f59e0b;font-family:var(--font-mono)">—</div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        <!-- Linha 2: Ranking Materiais + Receitas Instáveis -->
+
+        <!-- ── INSIGHTS AUTOMÁTICOS ── -->
+        <div class="card" style="padding:18px 20px;margin-bottom:16px;border-left:3px solid var(--accent)">
+          <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:12px">💡 Insights Automáticos do Processo</div>
+          <div id="qt-insights" style="display:flex;flex-direction:column;gap:8px">
+            <div style="color:var(--text-3);font-size:.84rem">Calculando insights...</div>
+          </div>
+        </div>
+
+        <!-- ── RANKING MATERIAIS + ESTABILIDADE RECEITAS ── -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
           <div class="card" style="padding:20px">
-            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Materiais Mais Ajustados</div>
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">🔧 Insumos Mais Corrigidos — Ranking de Problemas</div>
             <div id="qt-ranking-materiais"><div style="color:var(--text-3);font-size:.84rem;text-align:center;padding:20px 0">Calculando...</div></div>
           </div>
           <div class="card" style="padding:20px">
-            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Receitas Mais Instáveis</div>
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">📊 Estabilidade por Tipo de Montagem</div>
             <div id="qt-ranking-receitas"><div style="color:var(--text-3);font-size:.84rem;text-align:center;padding:20px 0">Calculando...</div></div>
           </div>
         </div>
-        <!-- Consumo Planejado x Real -->
-        <div class="card mb-4" style="padding:20px">
-          <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Consumo Planejado × Real por Insumo</div>
-          <div id="qt-consumo-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+
+        <!-- ── ANÁLISE ESTATÍSTICA DOS INSUMOS (CEP) ── -->
+        <div class="card" style="padding:20px;margin-bottom:16px">
+          <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">📐 Controle Estatístico por Insumo — Média · Mediana · Desvio Padrão · CV</div>
+          <div id="qt-cep-tabela" style="overflow-x:auto">
+            <div style="color:var(--text-3);font-size:.84rem">Calculando estatísticas...</div>
+          </div>
+        </div>
+
+        <!-- ── CONSUMO PLANEJADO × REAL ── -->
+        <div class="card" style="padding:20px;margin-bottom:16px">
+          <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">⚖️ Consumo Planejado × Real por Insumo — Desvio Absoluto e Percentual</div>
+          <div id="qt-consumo-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px">
             <div style="color:var(--text-3);font-size:.84rem">Calculando...</div>
           </div>
         </div>
-        <!-- Evolução da Qualidade -->
-        <div class="card" style="padding:20px">
-          <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:14px">Evolução da Qualidade — % de Traços Ajustados por Mês</div>
-          <canvas id="qt-evolucao-chart" style="width:100%;height:160px;display:block"></canvas>
+
+        <!-- ── TENDÊNCIAS + EVOLUÇÃO ── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="card" style="padding:20px">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">📈 Evolução da Taxa de Acerto — % Traços Ajustados por Mês</div>
+            <canvas id="qt-evolucao-chart" style="width:100%;height:160px;display:block"></canvas>
+          </div>
+          <div class="card" style="padding:20px">
+            <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">📉 Distribuição de Ajustes por Insumo</div>
+            <canvas id="qt-barras-insumos" style="width:100%;height:160px;display:block"></canvas>
+          </div>
         </div>
+
+        <!-- ── TENDÊNCIA TEMPORAL POR TIPO DE MONTAGEM ── -->
+        <div class="card" style="padding:20px">
+          <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">🏭 Frequência de Ajustes por Tipo de Montagem — Tendência Temporal</div>
+          <div id="qt-tendencia-montagem" style="color:var(--text-3);font-size:.84rem">Calculando...</div>
+        </div>
+
       </div>
     </main>
 
-    <!-- ============ PAGE: REGISTRO DE AJUSTES NA RECEITA ============ -->
-    <main class="main" id="page-ajustes-receita">
+
+    <!-- ============ PAGE: ANÁLISE OPERACIONAL ============ -->
+    <main class="main" id="page-analise-operacional">
       <div class="page-header">
-        <h1 class="page-title">Ajustes de <span>Receita</span></h1>
-        <p class="page-desc">Registro de insumos e correções aplicadas durante a produção</p>
+        <h1 class="page-title">Análise <span>Operacional</span></h1>
+        <p class="page-desc">KPIs avançados · Gargalos · Correlações · Insights automáticos</p>
       </div>
 
       <div class="page-body">
 
-        <!-- Formulário de Novo Ajuste -->
-        <div class="card mb-4">
-          <div style="padding:20px;border-bottom:1px solid var(--border)">
-            <h3 style="font-size:1.1rem;margin-bottom:16px;color:var(--text)">Registrar Novo Ajuste</h3>
-          </div>
+        <!-- Loading / Empty states -->
+        <div id="ao-loading" style="display:none;text-align:center;padding:60px;color:var(--text-3)">Carregando dados...</div>
+        <div id="ao-empty"   style="display:none;text-align:center;padding:60px;color:var(--text-3)">Nenhum registro no período selecionado.</div>
 
-          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
-
-            <!-- ID da Bateria -->
-            <div class="form-group">
-              <label class="form-label">ID da Bateria *</label>
-              <select class="form-input" id="ajuste-bateria-id" required>
-                <option selected disabled hidden>Selecione...</option>
-              </select>
+        <!-- Filtros -->
+        <div class="card mb-4" style="padding:16px 20px">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
+              <label class="form-label" style="white-space:nowrap">De</label>
+              <input class="form-input" type="date" id="ao-data-inicio" style="width:150px">
             </div>
-
-            <!-- Identificação do Traço Original -->
-            <div class="form-group">
-              <label class="form-label">Traço Original *</label>
-              <select class="form-input" id="ajuste-traco-original" required>
-                <option selected disabled hidden>Selecione...</option>
-              </select>
+            <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
+              <label class="form-label" style="white-space:nowrap">Até</label>
+              <input class="form-input" type="date" id="ao-data-fim" style="width:150px">
             </div>
-
-            <!-- Data e Hora do Ajuste -->
-            <div class="form-group">
-              <label class="form-label">Data/Hora do Ajuste *</label>
-              <input class="form-input" type="datetime-local" id="ajuste-data-hora" required>
-            </div>
-
-            <!-- Motivo do Ajuste -->
-            <div class="form-group" style="grid-column:1/-1">
-              <label class="form-label">Motivo do Ajuste *</label>
-              <select class="form-input" id="ajuste-motivo" required>
-                <option selected disabled hidden>Selecione...</option>
-                <option>Densidade inadequada</option>
-                <option>Flow incorreto</option>
-                <option>Expansão anômala</option>
-                <option>Temperatura fora do controle</option>
-                <option>Pressão inadequada</option>
-                <option>Qualidade visual inferior</option>
-                <option>Reação química lenta</option>
-                <option>Reação química rápida</option>
-                <option>Outros motivos</option>
-              </select>
-            </div>
-
-            <!-- Descrição adicional do motivo -->
-            <div class="form-group" style="grid-column:1/-1">
-              <label class="form-label">Descrição do Problema (opcional)</label>
-              <textarea class="form-input" id="ajuste-descricao-problema" 
-                style="min-height:80px;resize:vertical;font-family:var(--font-mono);font-size:.85rem"
-                placeholder="Descreva em detalhes o problema detectado..."></textarea>
-            </div>
-          </div>
-
-          <!-- Separador -->
-          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Materiais Adicionados</h4>
-          </div>
-
-          <!-- Lista de Materiais Adicionados -->
-          <div id="ajuste-materiais-container" style="padding:16px 20px">
-            <!-- Será preenchido dinamicamente -->
-          </div>
-
-          <div style="padding:0 20px 16px;text-align:center">
-            <button class="btn btn-ghost" onclick="adicionarMaterialAjuste()">+ Adicionar Material</button>
-          </div>
-
-          <!-- Separador -->
-          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Tempo de Batida Adicional</h4>
-          </div>
-
-          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
-            <div class="form-group">
-              <label class="form-label">Tempo Adicional (segundos)</label>
-              <input class="form-input" type="number" id="ajuste-tempo-adicional" min="0" value="0">
-            </div>
-          </div>
-
-          <!-- Separador -->
-          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Resultados Antes do Ajuste</h4>
-          </div>
-
-          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px">
-            <div class="form-group">
-              <label class="form-label">Densidade (g/cm³)</label>
-              <input class="form-input" type="number" id="ajuste-densidade-antes" step="0.01" placeholder="Ex: 0.35">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Flow (cm)</label>
-              <input class="form-input" type="number" id="ajuste-flow-antes" step="0.1" placeholder="Ex: 25.5">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Densidade EPS (g/cm³)</label>
-              <input class="form-input" type="number" id="ajuste-dens-eps-antes" step="0.01" placeholder="Ex: 0.18">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Expansão (%)</label>
-              <input class="form-input" type="number" id="ajuste-expansao-antes" step="0.1" placeholder="Ex: 2.3">
-            </div>
-          </div>
-
-          <!-- Separador -->
-          <div style="padding:16px 20px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-            <h4 style="font-size:0.9rem;margin:0;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Resultados Após Ajuste</h4>
-          </div>
-
-          <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px">
-            <div class="form-group">
-              <label class="form-label">Densidade (g/cm³)</label>
-              <input class="form-input" type="number" id="ajuste-densidade-depois" step="0.01" placeholder="Ex: 0.35">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Flow (cm)</label>
-              <input class="form-input" type="number" id="ajuste-flow-depois" step="0.1" placeholder="Ex: 25.5">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Densidade EPS (g/cm³)</label>
-              <input class="form-input" type="number" id="ajuste-dens-eps-depois" step="0.01" placeholder="Ex: 0.18">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Expansão (%)</label>
-              <input class="form-input" type="number" id="ajuste-expansao-depois" step="0.1" placeholder="Ex: 2.3">
-            </div>
-          </div>
-
-          <!-- Botões de ação -->
-          <div style="padding:20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
-            <button class="btn btn-secondary" onclick="limparFormularioAjuste()">Limpar</button>
-            <button class="btn btn-primary" onclick="salvarAjusteReceita()">Salvar Ajuste</button>
+            <button class="btn btn-outline-accent" id="btn-ao-filtrar">Filtrar</button>
           </div>
         </div>
 
-        <!-- Histórico de Ajustes -->
-        <div class="card">
-          <div style="padding:20px;border-bottom:1px solid var(--border)">
-            <h3 style="font-size:1.1rem;margin:0;color:var(--text)">Histórico de Ajustes</h3>
+        <div id="ao-content">
+
+          <!-- ═══ KPIs PRINCIPAIS ═══ -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr) 2fr;gap:16px;margin-bottom:20px">
+
+            <!-- Coluna 1: Produção -->
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div class="kpi-card" style="flex:1">
+                <div class="kpi-label">Produção Total</div>
+                <div class="kpi-value accent" id="ao-kpi-m2" style="font-size:1.7rem">—</div>
+                <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">metros quadrados</div>
+              </div>
+              <div class="kpi-card" style="flex:1">
+                <div class="kpi-label">Painéis Produzidos</div>
+                <div class="kpi-value" id="ao-kpi-paineis" style="font-size:1.7rem">—</div>
+                <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">unidades no período</div>
+              </div>
+            </div>
+
+            <!-- Coluna 2: Ciclo -->
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div class="kpi-card" style="flex:1">
+                <div class="kpi-label">Tempo Médio de Ciclo</div>
+                <div class="kpi-value" id="ao-kpi-ciclo" style="font-size:1.5rem;font-family:var(--font-mono)">—</div>
+                <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">referência: 45 min</div>
+              </div>
+              <div class="kpi-card" style="flex:1">
+                <div class="kpi-label">Tempo Médio / Bateria</div>
+                <div class="kpi-value" id="ao-kpi-tempo-bat" style="font-size:1.5rem;font-family:var(--font-mono)">—</div>
+                <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">ponderado por operações</div>
+              </div>
+            </div>
+
+            <!-- Coluna 3: Atrasos -->
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div class="kpi-card red" style="flex:1">
+                <div class="kpi-label">Taxa de Atrasos</div>
+                <div class="kpi-value red" id="ao-kpi-atraso-pct" style="font-size:1.7rem">—</div>
+                <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">operações com atraso</div>
+              </div>
+              <div class="kpi-card" style="flex:1;border-left:3px solid var(--red)">
+                <div class="kpi-label">Horas Perdidas</div>
+                <div class="kpi-value" id="ao-kpi-horas-perd" style="font-size:1.7rem;color:var(--red)">—</div>
+                <div style="font-size:.72rem;color:var(--text-3);margin-top:4px">excedente acima de 59 min</div>
+              </div>
+            </div>
+
+            <!-- Coluna 4: Eficiência + Melhores/Piores -->
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div class="kpi-card" style="flex:1">
+                <div class="kpi-label">Eficiência Operacional</div>
+                <div class="kpi-value green" id="ao-kpi-eficiencia" style="font-size:2.2rem">—</div>
+                <div style="background:var(--bg-3);border-radius:4px;height:6px;margin-top:8px;overflow:hidden">
+                  <div id="ao-eficiencia-bar" style="height:100%;border-radius:4px;transition:width .8s"></div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1">
+                <div class="kpi-card" style="border-top:3px solid var(--green)">
+                  <div class="kpi-label">🥇 Melhor Bateria</div>
+                  <div class="kpi-value green" id="ao-kpi-melhor-bat" style="font-size:1.5rem">—</div>
+                </div>
+                <div class="kpi-card" style="border-top:3px solid var(--red)">
+                  <div class="kpi-label">⚠️ Pior Bateria</div>
+                  <div class="kpi-value red" id="ao-kpi-pior-bat" style="font-size:1.5rem">—</div>
+                </div>
+              </div>
+            </div>
+
           </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Data/Hora</th>
-                  <th>ID Bateria</th>
-                  <th>Traço</th>
-                  <th>Motivo</th>
-                  <th>Materiais</th>
-                  <th>Tempo Adic.</th>
-                  <th>Densidade Ant.</th>
-                  <th>Densidade Dep.</th>
-                  <th>Melhoria</th>
-                  <th>Ações</th>
-                </tr>
-              </thead>
-              <tbody id="ajustes-tbody">
-                <tr>
-                  <td colspan="10" style="text-align:center;color:var(--text-3);padding:30px">Nenhum ajuste registrado</td>
-                </tr>
-              </tbody>
-            </table>
+          <!-- ═══ INSIGHTS AUTOMÁTICOS ═══ -->
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-title" style="margin-bottom:12px">
+              <span>💡 Insights Automáticos</span>
+              <span style="font-size:.74rem;color:var(--text-3);margin-left:8px">Gerados automaticamente com base nos dados do período</span>
+            </div>
+            <div id="ao-insights"></div>
           </div>
-        </div>
 
-      </div>
+          <!-- ═══ RANKING BATERIAS ═══ -->
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-title" style="margin-bottom:14px">
+              <span>🔋 Ranking de Baterias</span>
+              <span style="font-size:.74rem;color:var(--text-3);margin-left:8px">Ordenado por eficiência — 🥇 melhor · ⚠️ pior</span>
+            </div>
+            <div style="overflow-x:auto;margin-bottom:16px" id="ao-rank-baterias"></div>
+            <div style="margin-top:16px">
+              <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Operações por Bateria</div>
+              <canvas id="ao-chart-bat-ops" style="width:100%;height:180px;display:block"></canvas>
+            </div>
+          </div>
+
+          <!-- ═══ 2 COLUNAS: Motivos + Correlações ═══ -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+
+            <!-- Motivos de Atraso -->
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">
+                <span>🚨 Ranking de Motivos de Atraso</span>
+              </div>
+              <div id="ao-rank-motivos"></div>
+            </div>
+
+            <!-- Correlações -->
+            <div class="card">
+              <div class="card-title" style="margin-bottom:12px">🔗 Correlações</div>
+
+              <div style="margin-bottom:18px">
+                <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">% Atraso por Tipo de Montagem</div>
+                <canvas id="ao-cor-montagem" style="width:100%;height:160px;display:block"></canvas>
+              </div>
+
+              <div>
+                <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Tempo Médio por Dimensão (min)</div>
+                <canvas id="ao-cor-dimensao" style="width:100%;height:160px;display:block"></canvas>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ═══ TENDÊNCIAS + DETERIORAÇÃO ═══ -->
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-title" style="margin-bottom:6px">
+              <span>📈 Tendências Temporais</span>
+              <span style="font-size:.74rem;color:var(--text-3);margin-left:8px">% atrasos e tempo médio por mês</span>
+            </div>
+            <canvas id="ao-trend-chart" style="width:100%;height:220px;display:block;margin-bottom:16px"></canvas>
+            <div style="font-size:.8rem;color:var(--text-2);margin-bottom:8px;font-weight:600">Baterias com tendência de deterioração:</div>
+            <div id="ao-baterias-piora"></div>
+          </div>
+
+          <!-- ═══ PRODUTIVIDADE ═══ -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+
+            <div class="card">
+              <div class="card-title" style="margin-bottom:12px">📦 m² Produzido por Bateria (Top 8)</div>
+              <canvas id="ao-prod-m2" style="width:100%;height:160px;display:block"></canvas>
+            </div>
+
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">📐 Produção por Dimensão</div>
+              <div id="ao-prod-dimensao"></div>
+            </div>
+
+          </div>
+
+          <!-- ═══ CORRELAÇÃO BATERIA x TEMPO ═══ -->
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-title" style="margin-bottom:8px">
+              <span>⏱ Bateria × Tempo Médio de Ciclo</span>
+              <span style="font-size:.74rem;color:var(--text-3);margin-left:8px">verde &lt;50 min · amarelo 50-59 · vermelho &gt;59 min</span>
+            </div>
+            <canvas id="ao-cor-bat-tempo" style="width:100%;height:180px;display:block"></canvas>
+          </div>
+
+        </div><!-- #ao-content -->
+
+      </div><!-- .page-body -->
     </main>
-
 
   </div><!-- .app-shell -->
 
@@ -1249,6 +1317,12 @@
       if (pageId === 'dashboard') {
         // redraw charts on tab switch (canvas needs layout)
         setTimeout(() => LWDash.initDashboard(), 50);
+      }
+      if (pageId === 'analise-operacional' && !window._aoInit) {
+        window._aoInit = true;
+        AOp.init();
+      } else if (pageId === 'analise-operacional') {
+        AOp.render();
       }
       if (pageId === 'qualidade-tracos' && !window._qualidadeInit) {
         window._qualidadeInit = true;
@@ -1960,7 +2034,7 @@
 
     </div>
   </div>
-  <script src="ajustes-receita.js"></script>
+  <script src="analise-operacional.js"></script>
   <script src="qualidade-tracos.js"></script>
 </body>
 

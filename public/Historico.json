@@ -4202,280 +4202,16 @@
     "tempo_min": 0
   },
   {
-    "id": "op_1780695145394",
-    "data": "2026-06-05",
-    "turno": "1º TURNO",
-    "dimensao": "9 cm",
-    "capacidade": 20,
-    "id_bateria": "B1",
-    "inicio": "2026-06-05T21:31:50.122Z",
-    "fim": "2026-06-05T21:32:23.466Z",
-    "tempo_min": 0.5557333333333333,
-    "qtd_tracos": 1,
-    "houve_atraso": "NÃO",
-    "motivo_atraso": "",
-    "tipo_montagem": "2/P",
-    "bercos_reais": 20,
-    "total_paineis": 40,
-    "paineis_2p": 40,
-    "paineis_sp": 0,
-    "m2_total": 73.2,
-    "m2_2p": 73.2,
-    "m2_sp": 0,
-    "placas_cimenticia": 80,
-    "tracos": [
-      {
-        "id": "traco_1780695117874_1",
-        "num": 1,
-        "berco_ini": "1",
-        "berco_fim": "20",
-        "densidade": "455",
-        "flow": "45",
-        "obs": "tutututu",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão"
-      }
-    ]
-  },
-  {
-    "id": "op_1780698287362",
-    "data": "2026-06-05",
-    "turno": "1º TURNO",
-    "dimensao": "9 cm",
-    "capacidade": 20,
-    "id_bateria": "B2",
-    "inicio": "2026-06-05T22:24:43.218Z",
-    "fim": "2026-06-05T22:24:46.058Z",
-    "tempo_min": 0.04733333333333333,
-    "qtd_tracos": 1,
-    "houve_atraso": "NÃO",
-    "motivo_atraso": "",
-    "tipo_montagem": "2/P",
-    "bercos_reais": 20,
-    "total_paineis": 40,
-    "paineis_2p": 40,
-    "paineis_sp": 0,
-    "m2_total": 73.2,
-    "m2_2p": 73.2,
-    "m2_sp": 0,
-    "placas_cimenticia": 80,
-    "tracos": [
-      {
-        "id": "traco_1780698154234_1",
-        "num": 1,
-        "berco_ini": "1",
-        "berco_fim": "25",
-        "densidade": "455",
-        "flow": "45",
-        "obs": "",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão",
-        "densidadeEPS": "45"
-      }
-    ]
-  },
-  {
-    "id": "op_1781030357118",
-    "data": "2026-06-09",
-    "turno": "1º TURNO",
-    "dimensao": "9 cm",
-    "capacidade": 20,
-    "id_bateria": "B2",
-    "inicio": "2026-06-09T18:38:19.159Z",
-    "fim": "2026-06-09T18:39:14.158Z",
-    "tempo_min": 0.91665,
-    "qtd_tracos": 1,
-    "houve_atraso": "NÃO",
-    "motivo_atraso": "",
-    "tipo_montagem": "S/P",
-    "bercos_reais": 20,
-    "total_paineis": 40,
-    "paineis_2p": 0,
-    "paineis_sp": 40,
-    "m2_total": 73.2,
-    "m2_2p": 0,
-    "m2_sp": 73.2,
-    "placas_cimenticia": 0,
-    "tracos": [
-      {
-        "id": "traco_1780865297423_1",
-        "num": 1,
-        "receita_id": "r12",
-        "berco_ini": "1",
-        "berco_fim": "20",
-        "cimento_real": 700,
-        "agua_real": 283.33,
-        "eps_real": 17.33,
-        "superplast_real": 2.533,
-        "incorporador_real": 3.133,
-        "tempo_batida": "800",
-        "densidade": "4556",
-        "flow": "4512",
-        "obs": "",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão",
-        "densidadeEPS": "450"
-      }
-    ]
-  },
-  {
-    "id": "op_1781031081533",
-    "data": "2026-06-09",
-    "turno": "1º TURNO",
-    "dimensao": "9 cm",
-    "capacidade": 20,
-    "id_bateria": "B4",
-    "inicio": "2026-06-09T18:50:12.766Z",
-    "fim": "2026-06-09T18:51:19.701Z",
-    "tempo_min": 1.1155833333333334,
-    "qtd_tracos": 2,
-    "houve_atraso": "NÃO",
-    "motivo_atraso": "",
-    "tipo_montagem": "HÍBRIDA",
-    "bercos_reais": 20,
-    "total_paineis": 40,
-    "paineis_2p": 20,
-    "paineis_sp": 20,
-    "m2_total": 73.2,
-    "m2_2p": 36.6,
-    "m2_sp": 36.6,
-    "placas_cimenticia": 40,
-    "tracos": [
-      {
-        "id": "traco_1781030749806_1",
-        "num": 1,
-        "berco_ini": "1",
-        "berco_fim": "10",
-        "cimento_real": "700",
-        "agua_real": "400",
-        "eps_real": "511",
-        "superplast_real": "154",
-        "incorporador_real": "222",
-        "tempo_batida": "222",
-        "densidade": "222",
-        "flow": "222",
-        "obs": "",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão",
-        "densidadeEPS": "222"
-      },
-      {
-        "id": "traco_1781031041941_2",
-        "num": 2,
-        "berco_ini": "11",
-        "berco_fim": "20",
-        "cimento_real": "333",
-        "agua_real": "333",
-        "eps_real": "333",
-        "superplast_real": "333",
-        "incorporador_real": "333",
-        "tempo_batida": "333",
-        "densidade": "333",
-        "flow": "333",
-        "obs": "333",
-        "silo": "Silo 3",
-        "expansao": "2ª expansão",
-        "densidadeEPS": "333"
-      }
-    ]
-  },
-  {
-    "id": "op_1781031817114",
-    "data": "2026-06-09",
-    "turno": "1º TURNO",
-    "dimensao": "7,5 cm",
-    "capacidade": 22,
-    "id_bateria": "B5-7,5cm",
-    "inicio": "2026-06-09T19:03:07.569Z",
-    "fim": "2026-06-09T19:03:35.762Z",
-    "tempo_min": 0.4698833333333333,
-    "qtd_tracos": 1,
-    "houve_atraso": "NÃO",
-    "motivo_atraso": "",
-    "tipo_montagem": "S/P",
-    "bercos_reais": 22,
-    "total_paineis": 44,
-    "paineis_2p": 0,
-    "paineis_sp": 44,
-    "m2_total": 80.52000000000001,
-    "m2_2p": 0,
-    "m2_sp": 80.52000000000001,
-    "placas_cimenticia": 0,
-    "tracos": [
-      {
-        "id": "traco_1781031792778_1",
-        "num": 1,
-        "berco_ini": "1",
-        "berco_fim": "1",
-        "cimento_real": "11",
-        "agua_real": "11",
-        "eps_real": "11",
-        "superplast_real": "1",
-        "incorporador_real": "1",
-        "tempo_batida": "1",
-        "densidade": "1",
-        "flow": "11",
-        "obs": "",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão",
-        "densidadeEPS": "1"
-      }
-    ]
-  },
-  {
-    "id": "op_1781032187586",
-    "data": "2026-06-09",
-    "turno": "1º TURNO",
-    "dimensao": "9 cm",
-    "capacidade": 20,
-    "id_bateria": "B2",
-    "inicio": "2026-06-09T19:09:17.762Z",
-    "fim": "2026-06-09T19:09:45.546Z",
-    "tempo_min": 0.4630666666666667,
-    "qtd_tracos": 1,
-    "houve_atraso": "NÃO",
-    "motivo_atraso": "",
-    "tipo_montagem": "HÍBRIDA",
-    "bercos_reais": 20,
-    "total_paineis": 40,
-    "paineis_2p": 20,
-    "paineis_sp": 20,
-    "m2_total": 73.2,
-    "m2_2p": 36.6,
-    "m2_sp": 36.6,
-    "placas_cimenticia": 40,
-    "tracos": [
-      {
-        "id": "traco_1781032161314_1",
-        "num": 1,
-        "berco_ini": "2",
-        "berco_fim": "2",
-        "cimento_real": "2",
-        "agua_real": "2",
-        "eps_real": "2",
-        "superplast_real": "2",
-        "incorporador_real": "2",
-        "tempo_batida": "2",
-        "densidade": "2",
-        "flow": "2",
-        "obs": "2",
-        "silo": "Silo 1",
-        "expansao": "2ª expansão",
-        "densidadeEPS": "2"
-      }
-    ]
-  },
-  {
-    "id": "op_1781040796512",
-    "data": "2026-06-09",
+    "id": "op_1781222956649",
+    "data": "2026-06-11",
     "turno": "1º TURNO",
     "dimensao": "9 cm",
     "capacidade": 20,
     "id_bateria": "B3",
-    "inicio": "2026-06-09T21:32:05.992Z",
-    "fim": "2026-06-09T21:33:14.352Z",
-    "tempo_min": 1.1393333333333333,
-    "qtd_tracos": 3,
+    "inicio": "2026-06-12T00:08:16.137Z",
+    "fim": "2026-06-12T00:09:14.625Z",
+    "tempo_min": 0.9748,
+    "qtd_tracos": 1,
     "houve_atraso": "NÃO",
     "motivo_atraso": "",
     "tipo_montagem": "S/P",
@@ -4489,137 +4225,146 @@
     "placas_cimenticia": 0,
     "tracos": [
       {
-        "id": "traco_1781040727232_1",
+        "id": "traco_1781222899346_1",
         "num": 1,
         "berco_ini": "1",
-        "berco_fim": "7",
-        "cimento_real": "4",
-        "agua_real": "4",
-        "eps_real": "4",
-        "superplast_real": "4",
-        "incorporador_real": "4",
-        "tempo_batida": "4",
-        "densidade": "4",
-        "flow": "4",
-        "obs": "4",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão",
-        "densidadeEPS": "4"
-      },
-      {
-        "id": "traco_1781040728344_2",
-        "num": 2,
-        "berco_ini": "8",
-        "berco_fim": "15",
-        "cimento_real": "5",
-        "agua_real": "5",
-        "eps_real": "5",
-        "superplast_real": "5",
-        "incorporador_real": "5",
-        "tempo_batida": "5",
-        "densidade": "5",
-        "flow": "5",
-        "obs": "5",
-        "silo": "Silo 1",
-        "expansao": "1ª expansão",
-        "densidadeEPS": "5"
-      },
-      {
-        "id": "traco_1781040729432_3",
-        "num": 3,
-        "berco_ini": "16",
         "berco_fim": "20",
-        "cimento_real": "6",
-        "agua_real": "6",
-        "eps_real": "6",
-        "superplast_real": "6",
-        "incorporador_real": "6",
-        "tempo_batida": "6",
-        "densidade": "6",
-        "flow": "6",
-        "obs": "6",
+        "cimento_real": {
+          "original": "456",
+          "ajustes": [
+            45
+          ]
+        },
+        "agua_real": {
+          "original": "456",
+          "ajustes": [
+            321
+          ]
+        },
+        "eps_real": {
+          "original": "456",
+          "ajustes": [
+            123
+          ]
+        },
+        "superplast_real": {
+          "original": "456",
+          "ajustes": []
+        },
+        "incorporador_real": {
+          "original": "456",
+          "ajustes": []
+        },
+        "tempo_batida": {
+          "original": "465",
+          "ajustes": []
+        },
+        "densidade_insumo": {
+          "original": "",
+          "ajustes": []
+        },
+        "flow_insumo": {
+          "original": "",
+          "ajustes": []
+        },
+        "densidade": "",
+        "flow": "",
+        "obs": "",
         "silo": "Silo 1",
         "expansao": "1ª expansão",
-        "densidadeEPS": "6"
+        "densidadeEPS": "456",
+        "cimento_total": 501,
+        "agua_total": 777,
+        "eps_total": 579,
+        "superplast_total": 456,
+        "incorporador_total": 456,
+        "tempo_batida_total": 465,
+        "densidade_total": "",
+        "flow_total": ""
       }
     ]
   },
   {
-    "id": "op_1781047867551",
-    "data": "2026-06-09",
+    "id": "op_1781223384305",
+    "data": "2026-06-11",
     "turno": "1º TURNO",
     "dimensao": "9 cm",
     "capacidade": 20,
-    "id_bateria": "B1",
-    "inicio": "2026-06-09T23:29:18.191Z",
-    "fim": "2026-06-09T23:30:42.087Z",
-    "tempo_min": 1.3982666666666668,
+    "id_bateria": "B4",
+    "inicio": "2026-06-12T00:16:11.672Z",
+    "fim": "2026-06-12T00:16:15.032Z",
+    "tempo_min": 0.056,
     "qtd_tracos": 1,
     "houve_atraso": "NÃO",
     "motivo_atraso": "",
-    "tipo_montagem": "2/P",
+    "tipo_montagem": "S/P",
     "bercos_reais": 20,
     "total_paineis": 40,
-    "paineis_2p": 40,
-    "paineis_sp": 0,
+    "paineis_2p": 0,
+    "paineis_sp": 40,
     "m2_total": 73.2,
-    "m2_2p": 73.2,
-    "m2_sp": 0,
-    "placas_cimenticia": 80,
+    "m2_2p": 0,
+    "m2_sp": 73.2,
+    "placas_cimenticia": 0,
     "tracos": [
       {
-        "id": "traco_1781046542147_1",
+        "id": "traco_1781222994577_1",
         "num": 1,
         "berco_ini": "1",
-        "berco_fim": "2",
+        "berco_fim": "",
         "cimento_real": {
-          "original": "",
+          "original": "156",
           "ajustes": [
+            152,
             10
           ]
         },
         "agua_real": {
-          "original": "",
-          "ajustes": [
-            5
-          ]
+          "original": "654",
+          "ajustes": []
         },
         "eps_real": {
-          "original": "",
-          "ajustes": [
-            2
-          ]
+          "original": "654",
+          "ajustes": []
         },
         "superplast_real": {
-          "original": "4",
+          "original": "654",
           "ajustes": []
         },
         "incorporador_real": {
-          "original": "1",
+          "original": "654",
           "ajustes": []
         },
-        "tempo_batida": "45",
-        "densidade_insumo": {
-          "original": "450",
+        "tempo_batida": {
+          "original": "654",
           "ajustes": []
+        },
+        "densidade_insumo": {
+          "original": "456",
+          "ajustes": [
+            450
+          ]
         },
         "flow_insumo": {
-          "original": "45",
-          "ajustes": []
+          "original": "456",
+          "ajustes": [
+            46
+          ]
         },
         "densidade": 450,
-        "flow": 45,
-        "obs": "",
-        "silo": "Silo 1",
+        "flow": 46,
+        "obs": "teste nada",
+        "silo": "Silo 2",
         "expansao": "1ª expansão",
-        "densidadeEPS": "44",
-        "cimento_total": "",
-        "agua_total": "",
-        "eps_total": "",
-        "superplast_total": 4,
-        "incorporador_total": 1,
+        "densidadeEPS": "987",
+        "cimento_total": 318,
+        "agua_total": 654,
+        "eps_total": 654,
+        "superplast_total": 654,
+        "incorporador_total": 654,
+        "tempo_batida_total": 654,
         "densidade_total": 450,
-        "flow_total": 45
+        "flow_total": 46
       }
     ]
   }
