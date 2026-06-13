@@ -4367,5 +4367,82 @@
         "flow_total": 46
       }
     ]
+  },
+  {
+    "id": "op_1781359220186",
+    "data": "2026-06-13",
+    "turno": "1º TURNO",
+    "dimensao": "9 cm",
+    "capacidade": 20,
+    "id_bateria": "B2",
+    "inicio": "2026-06-13T14:00:00.753Z",
+    "fim": "2026-06-13T14:00:18.777Z",
+    "tempo_min": 0.3004,
+    "qtd_tracos": 1,
+    "houve_atraso": "NÃO",
+    "motivo_atraso": "",
+    "tipo_montagem": "HÍBRIDA",
+    "bercos_reais": 20,
+    "total_paineis": 40,
+    "paineis_2p": 20,
+    "paineis_sp": 20,
+    "m2_total": 73.2,
+    "m2_2p": 36.6,
+    "m2_sp": 36.6,
+    "placas_cimenticia": 40,
+    "tracos": [
+      {
+        "id": "traco_1781359169217_1",
+        "num": 1,
+        "berco_ini": "1",
+        "berco_fim": "",
+        "cimento_real": {
+          "original": "45",
+          "ajustes": []
+        },
+        "agua_real": {
+          "original": "45",
+          "ajustes": []
+        },
+        "eps_real": {
+          "original": "45",
+          "ajustes": []
+        },
+        "superplast_real": {
+          "original": "45",
+          "ajustes": []
+        },
+        "incorporador_real": {
+          "original": "45",
+          "ajustes": []
+        },
+        "tempo_batida": {
+          "original": "122",
+          "ajustes": []
+        },
+        "densidade_insumo": {
+          "original": "45",
+          "ajustes": []
+        },
+        "flow_insumo": {
+          "original": "45",
+          "ajustes": []
+        },
+        "densidade": 45,
+        "flow": 45,
+        "obs": "45",
+        "silo": "Silo 1",
+        "expansao": "1ª expansão",
+        "densidadeEPS": "45",
+        "cimento_total": 45,
+        "agua_total": 45,
+        "eps_total": 45,
+        "superplast_total": 45,
+        "incorporador_total": 45,
+        "tempo_batida_total": 122,
+        "densidade_total": 45,
+        "flow_total": 45
+      }
+    ]
   }
 ]

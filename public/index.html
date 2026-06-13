@@ -14,6 +14,11 @@
 
     <!-- ============ TOP BAR ============ -->
     <header class="topbar">
+      <div class="sidebar-toggle-wrapper">
+        <button class="btn-sidebar-toggle" id="sidebar-toggle" title="Alternar Menu">
+          ☰
+        </button>
+      </div>
       <div class="topbar-logo">⬡ Lightwall</div>
       <div class="topbar-sub">Sistema de Injeção V1.0</div>
       <div class="topbar-right">
@@ -34,11 +39,6 @@
 
     <!-- ============ SIDEBAR ============ -->
     <nav class="sidebar">
-      <div class="sidebar-toggle-wrapper">
-        <button class="btn-sidebar-toggle" id="sidebar-toggle" title="Alternar Menu">
-          ☰
-        </button>
-      </div>
       <div class="sidebar-label">Principal</div>
       <button class="nav-item active" data-page="menu" onclick="showPage('menu',this)">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -105,6 +105,9 @@
         <span class="nav-text">Qualidade dos Traços</span>
       </button>
     </nav>
+
+    <!-- Backdrop para fechar ao clicar fora -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
     <!-- ============ PAGE: MENU ============ -->
     <main class="main active" id="page-menu">
@@ -1318,8 +1321,30 @@
 
       // Lógica do botão Sidebar
       const sidebar = document.querySelector('.sidebar');
-      document.getElementById('sidebar-toggle').addEventListener('click', () => {
-        sidebar.classList.toggle('expanded');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      const toggleBtn = document.getElementById('sidebar-toggle');
+
+      const toggleSidebar = () => {
+        const isExpanded = sidebar.classList.toggle('expanded');
+        backdrop.classList.toggle('active', isExpanded);
+      };
+
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleSidebar();
+      });
+
+      backdrop.addEventListener('click', () => {
+        sidebar.classList.remove('expanded');
+        backdrop.classList.remove('active');
+      });
+
+      // Fechar sidebar ao clicar em um item de navegação (melhor UX em mobile/overlay)
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+          sidebar.classList.remove('expanded');
+          backdrop.classList.remove('active');
+        });
       });
     });
 
