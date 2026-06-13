@@ -21,6 +21,7 @@
   };
 
   let timerInterval = null;
+  let expandedTracoIndex = 0; // Índice do traço aberto (acordeão exclusivo)
 
   // ---- DOM refs ----
   const $ = id => document.getElementById(id);
@@ -33,6 +34,7 @@
       const saved = LW.getOperacaoAtual();
       if (saved) {
         state = saved;
+        expandedTracoIndex = state.tracos.length - 1; // Expande o último ao retomar
         renderAll();
         if (state.status === 'running') startTimerUI();
       }
@@ -41,6 +43,13 @@
       setInterval(updateClock, 1000);
       updateClock();
       renderAll();
+
+      // Fecha popovers ao clicar fora
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.ao-popover') && !e.target.closest('.btn-sm')) {
+          document.querySelectorAll('.ao-popover').forEach(p => p.classList.remove('active'));
+        }
+      });
     });
   }
 
@@ -300,6 +309,7 @@
       expansao: '',
       densidadeEPS: ''
     });
+    expandedTracoIndex = state.tracos.length - 1; // Regra: abre automaticamente ao criar
     renderTracos();
     persist();
   }
@@ -307,6 +317,7 @@
   function removeTraco(i) {
     state.tracos.splice(i, 1);
     state.tracos.forEach((t, idx) => t.num = idx + 1);
+    expandedTracoIndex = Math.min(expandedTracoIndex, state.tracos.length - 1);
     renderTracos();
     persist();
   }
@@ -491,18 +502,48 @@
 
   function renderTracos() {
     const container = $('tracos-container');
-    if (!container) return; // Adiciona uma verificação defensiva para o container
-    container.innerHTML = '';
+    if (!container) return;
+
+    // Garante que o índice selecionado seja válido se houver traços
+    if (state.tracos.length > 0 && (expandedTracoIndex < 0 || expandedTracoIndex >= state.tracos.length)) {
+      expandedTracoIndex = state.tracos.length - 1;
+    }
+
+    let html = '';
+
+    // 1. Renderiza a Barra de Navegação por Abas
+    if (state.tracos.length > 0) {
+      html += `<div class="traco-tabs-nav">`;
+      state.tracos.forEach((t, i) => {
+        const isExpanded = i === expandedTracoIndex;
+        const isComplete = t.berco_ini && t.berco_fim && t.silo && t.expansao && t.densidadeEPS;
+        const hasData = t.berco_ini || t.berco_fim || t.silo || t.expansao || t.densidadeEPS || t.obs;
+        
+        const statusIcon = isComplete ? '✅' : (hasData ? '⚠️' : '⚪');
+        const statusClass = isComplete ? 'complete' : (hasData ? 'pending' : 'empty');
+
+        html += `
+          <div class="traco-tab ${isExpanded ? 'active' : ''} ${statusClass}" 
+            onclick="LWOp.selectTraco(${i})" title="Traço ${t.num}">
+            <span class="status-icon">${statusIcon}</span>
+            <span>Traço ${t.num}</span>
+          </div>`;
+      });
+      html += `<button class="btn-add-traco-tab" onclick="LWOp.addTraco()" title="Adicionar traço">+</button>`;
+      html += `</div>`;
+    }
+
     state.tracos.forEach((t, i) => {
       // Garante migração de traços antigos
       migrarTraco(t);
-      const row = document.createElement('div');
-      row.className = 'traco-row';
-      row.innerHTML = `
+      const isExpanded = i === expandedTracoIndex;
+      
+      html += `
+      <div class="traco-row ${isExpanded ? '' : ' collapsed'}">
         <!-- Cabeçalho do traço -->
-        <div class="traco-card-header">
+        <div class="traco-card-header" onclick="LWOp.selectTraco(${i})">
           <span class="traco-num-label">Traço <strong>Nº ${t.num}</strong></span>
-          <div class="traco-header-fields">
+          <div class="traco-header-fields" onclick="if(${isExpanded}) event.stopPropagation()">
             <div class="form-group traco-header-field">
               <label class="form-label">Berço Início <span class="required">*</span></label>
               <input class="form-input" type="number" min="1" max="22" value="${t.berco_ini}"
@@ -532,39 +573,42 @@
               </select>
             </div>
           </div>
-          <button class="traco-remove-btn" onclick="LWOp.removeTraco(${i})" title="Remover traço">✕</button>
+          <button class="traco-remove-btn" onclick="event.stopPropagation(); LWOp.removeTraco(${i})" title="Remover traço">✕</button>
         </div>
 
-        <!-- Seção: Receita Real Pesada -->
-        <div class="traco-section-label">⚖ Receita Real Pesada</div>
-        <div class="traco-fields-grid traco-fields-grid--6">
-          ${renderCampoInsumo(t, i, 'cimento_real',      'Cimento (kg)',        '0.01',  2, 'kg')}
-          ${renderCampoInsumo(t, i, 'agua_real',         'Água (kg)',           '0.01',  2, 'kg')}
-          ${renderCampoInsumo(t, i, 'eps_real',          'EPS (kg)',            '0.01',  2, 'kg')}
-          ${renderCampoInsumo(t, i, 'superplast_real',   'Superplast. (kg)',    '0.001', 3, 'kg')}
-          ${renderCampoInsumo(t, i, 'incorporador_real', 'Incorp. de Ar (kg)',  '0.001', 3, 'kg')}
-          ${renderCampoTempoBatida(t, i)}
-        </div>
+        <div class="traco-card-body">
+          <!-- Seção: Receita Real Pesada -->
+          <div class="traco-section-label">⚖ Receita Real Pesada</div>
+          <div class="traco-fields-grid traco-fields-grid--6">
+            ${renderCampoInsumo(t, i, 'cimento_real',      'Cimento (kg)',        '0.01',  2, 'kg')}
+            ${renderCampoInsumo(t, i, 'agua_real',         'Água (kg)',           '0.01',  2, 'kg')}
+            ${renderCampoInsumo(t, i, 'eps_real',          'EPS (kg)',            '0.01',  2, 'kg')}
+            ${renderCampoInsumo(t, i, 'superplast_real',   'Superplast. (kg)',    '0.001', 3, 'kg')}
+            ${renderCampoInsumo(t, i, 'incorporador_real', 'Incorp. de Ar (kg)',  '0.001', 3, 'kg')}
+            ${renderCampoTempoBatida(t, i)}
+          </div>
 
-        <!-- Seção: Resultado -->
-        <div class="traco-section-label">📊 Resultado Obtido</div>
-        <div class="traco-fields-grid traco-fields-grid--4">
-          <div class="form-group">
-            <label class="form-label">Densidade EPS</label>
-            <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
-              oninput="LWOp.updateTraco(${i},'densidadeEPS',this.value)" placeholder="kg/m³">
-          </div>
-          ${renderCampoInsumo(t, i, 'densidade_insumo', 'Densidade Obtida', '0.01', 2, 'kg/m³')}
-          ${renderCampoInsumo(t, i, 'flow_insumo',      'Flow (mm)',        '1',    0, 'mm')}
-          <div class="form-group traco-obs-field">
-            <label class="form-label">Observações</label>
-            <input class="form-input" type="text" value="${t.obs}"
-              oninput="LWOp.updateTraco(${i},'obs',this.value)" placeholder="Ajustes, correções, falhas...">
+          <!-- Seção: Resultado -->
+          <div class="traco-section-label">📊 Resultado Obtido</div>
+          <div class="traco-fields-grid traco-fields-grid--4">
+            <div class="form-group">
+              <label class="form-label">Densidade EPS</label>
+              <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
+                oninput="LWOp.updateTraco(${i},'densidadeEPS',this.value)" placeholder="kg/m³">
+            </div>
+            ${renderCampoInsumo(t, i, 'densidade_insumo', 'Densidade Obtida', '0.01', 2, 'kg/m³')}
+            ${renderCampoInsumo(t, i, 'flow_insumo',      'Flow (mm)',        '1',    0, 'mm')}
+            <div class="form-group traco-obs-field">
+              <label class="form-label">Observações</label>
+              <input class="form-input" type="text" value="${t.obs}"
+                oninput="LWOp.updateTraco(${i},'obs',this.value)" placeholder="Ajustes, correções, falhas...">
+            </div>
           </div>
         </div>
-      `;
-      container.appendChild(row);
+      </div>`;
     });
+
+    container.innerHTML = html;
   }
 
   function updatePendencias() {
@@ -596,12 +640,12 @@
 
     $('btn-registrar').disabled = !allOk;
 
-    const badge = $('pendencia-badge');
+    const badgeCount = $('pendencia-badge-count');
     const pending = checks.filter(c => !c.ok).length;
-    if (pending === 0) {
-      badge.innerHTML = '<span class="badge badge-green">✓ Tudo preenchido</span>';
-    } else {
-      badge.innerHTML = `<span class="badge badge-red">${pending} pendência${pending > 1 ? 's' : ''}</span>`;
+    if (badgeCount) {
+      badgeCount.innerHTML = pending > 0 
+        ? `<span style="background:var(--red); color:#fff; border-radius:10px; padding:0 6px; font-size:.65rem; margin-left:4px">${pending}</span>`
+        : ` ✅`;
     }
   }
 
@@ -749,6 +793,10 @@
   // ---- Public API ----
   window.LWOp = {
     init,
+    selectTraco(i) {
+      expandedTracoIndex = i; // Define o traço ativo e foca na visualização exclusiva
+      renderTracos();
+    },
     updateTraco(i, field, value) {
       state.tracos[i][field] = value;
       persist();
@@ -801,6 +849,7 @@
       if (painel) painel.style.display = 'none';
     },
     removeTraco,
+    addTraco,
 
     // Lê os valores h/m/s do picker e retorna total em segundos
     _lerDuracaoPicker(prefixo, i) {
@@ -863,6 +912,17 @@
       insumo.ajustes.push(seg);
       persist();
       renderTracos();
+    },
+    toggleCard(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('collapsed');
+    },
+    togglePopover(id, event) {
+      if (event) event.stopPropagation();
+      const el = document.getElementById(id);
+      const wasActive = el.classList.contains('active');
+      document.querySelectorAll('.ao-popover').forEach(p => p.classList.remove('active'));
+      if (!wasActive) el.classList.add('active');
     },
     closeModal() {
       $('success-modal').style.display = 'none';
