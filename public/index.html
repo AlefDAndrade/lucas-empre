@@ -161,17 +161,14 @@
       </div>
 
       <div class="page-body">
-        <div style="display:flex; flex-direction:column; gap:20px">
-
-          <!-- Left: Main form -->
-          <div style="display:flex;flex-direction:column;gap:20px">
-
-            <!-- Status bar -->
+        <div class="op-layout-grid">
+          <!-- Coluna Esquerda: Informações Operacionais (~60%) -->
+          <div class="op-info-column">
             <div class="card"
               style="padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
               <div style="display:flex; align-items:center; gap:16px">
                 <div id="status-banner"><span class="badge badge-gray">⬤ Aguardando início</span></div>
-                
+
                 <!-- Trigger Buttons for Floating Panels -->
                 <div style="display:flex; gap:8px; border-left:1px solid var(--border); padding-left:16px">
                   <div style="position:relative">
@@ -214,7 +211,6 @@
               </div>
             </div>
 
-            <!-- Identificação -->
             <div class="card">
               <div class="card-title">Identificação da Bateria</div>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
@@ -255,11 +251,9 @@
                   <input class="form-input" type="number" id="op-bercos-reais"
                     placeholder="Deixe vazio para usar capacidade total" min="1" max="22">
                 </div>
-              </div> <!-- Certifique-se de manter este fechamento do Grid -->
-
+              </div>
             </div>
 
-            <!-- Cronômetro de injeção -->
             <div class="card">
               <div class="card-title">Controle de Injeção</div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;align-items:end">
@@ -298,7 +292,6 @@
               </div>
             </div>
 
-            <!-- Produção calculada -->
             <div class="card">
               <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;text-align:center">
                 <div>
@@ -353,17 +346,6 @@
               </div>
             </div>
 
-            <!-- Traços -->
-            <div class="card">
-              <div class="card-title" style="justify-content:space-between">
-                <span>Traços de Injeção</span>
-              </div>
-              <div class="traco-section" id="tracos-container"></div>
-              <button class="traco-add-btn mt-4" id="btn-add-traco">
-                + Adicionar Traço
-              </button>
-            </div>
-
             <!-- Actions -->
             <div style="display:flex;gap:12px;flex-wrap:wrap">
               <button class="btn btn-primary btn-lg" id="btn-registrar" disabled>
@@ -374,6 +356,16 @@
               </button>
             </div>
 
+          </div>
+          <!-- Traços -->
+          <div class="card">
+            <div class="card-title" style="justify-content:space-between">
+              <span>Traços de Injeção</span>
+            </div>
+            <div class="traco-section" id="tracos-container"></div>
+            <button class="traco-add-btn mt-4" id="btn-add-traco">
+              + Adicionar Traço
+            </button>
           </div>
         </div>
       </div>

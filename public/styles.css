@@ -284,6 +284,9 @@ h4 {
   .op-layout-grid {
     grid-template-columns: 1fr;
   }
+  .op-info-column {
+    position: static;
+  }
 }
 
 .page-header {
