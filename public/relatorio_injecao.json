@@ -6800,5 +6800,27 @@
     "silo": "Silo 2",
     "expansao": "2ª expansão",
     "densidade_eps": "654"
+  },
+  {
+    "id_traco": "traco_1781375535093_1",
+    "id_operacao": "op_1781375699612",
+    "data": "2026-06-13",
+    "turno": "1º TURNO",
+    "id_bateria": "B2",
+    "num_traco": 1,
+    "berco_ini": "1",
+    "berco_fim": "20",
+    "cimento_real": 654,
+    "agua_real": 654,
+    "eps_real": 654,
+    "superplast_real": 654,
+    "incorporador_real": 654,
+    "tempo_batida": 285,
+    "densidade": "",
+    "flow": "",
+    "obs": "654",
+    "silo": "Silo 1",
+    "expansao": "1ª expansão",
+    "densidade_eps": "654"
   }
 ]
