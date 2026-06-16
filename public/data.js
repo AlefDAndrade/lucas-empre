@@ -17,6 +17,7 @@ let DIMENSAO_OPTS = [];
 let MONTAGEM_OPTS = [];   // ['2/P', 'S/P', 'HÍBRIDA', ...]
 let MONTAGEM_MAP = {};   // { label: { paineis_2p_por_berco, paineis_sp_por_berco } }
 let BATERIA_IDS = [];
+let VOLUME_POR_PLACA = []; // [{ label: 'S/P - 7,5 cm', volume: 0.1373 }, ...]
 
 let _configReady = false;
 const _configCallbacks = [];
@@ -52,6 +53,8 @@ async function loadConfig() {
 
     BATERIA_IDS = cfg.baterias.ids;
 
+    VOLUME_POR_PLACA = cfg.volume_por_placa.map(v => ({ label: v.label, volume: v.volume }));
+
   } catch (err) {
     console.warn('[LW] Usando valores fallback — config.json indisponível:', err.message);
     DIMENSAO_OPTS = [
@@ -66,6 +69,14 @@ async function loadConfig() {
       'HÍBRIDA': { paineis_2p_por_berco: 1, paineis_sp_por_berco: 1 },
     };
     BATERIA_IDS = ['B1', 'B2', 'B3', 'B4', 'B5-7,5cm', 'B6-12cm', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12'];
+    VOLUME_POR_PLACA = [
+      { label: 'S/P - 7,5 cm', volume: 0.1373 },
+      { label: '2/P - 7,5 cm', volume: 0.1189 },
+      { label: 'S/P - 9 cm', volume: 0.1647 },
+      { label: '2/P - 9 cm', volume: 0.1427 },
+      { label: 'S/P - 12 cm', volume: 0.2196 },
+      { label: '2/P - 12 cm', volume: 0.1903 },
+    ]
   }
 
   // Se o admin salvou uma config customizada, ela tem prioridade
@@ -139,10 +150,41 @@ function calcPaineis(tipoMontagem, bercos) {
   return { total_paineis: paineis_total, paineis_2p, paineis_sp, m2_total, m2_2p, m2_sp, placas_cimenticia };
 }
 
+// ---- Fuso horário padronizado: Brasília (America/Sao_Paulo) ----
+// Use nowBrasilia() em vez de new Date() para capturar o momento atual.
+// Retorna um Date cujo valor UTC é ajustado para representar "agora" em Brasília,
+// garantindo que ISO strings e cálculos de duração sejam consistentes
+// independentemente do fuso do computador do operador.
+function nowBrasilia() {
+  const now = new Date();
+  // Obtém o offset real de Brasília no momento atual (considera horário de verão)
+  const brFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  });
+  const parts = brFormatter.formatToParts(now);
+  const get = type => parts.find(p => p.type === type).value;
+  const brStr = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+  // Cria Date como se fosse UTC, representando a hora local de Brasília
+  return new Date(brStr + 'Z');
+}
+
+// Retorna a data de hoje em Brasília no formato YYYY-MM-DD
+function todayBrasilia() {
+  return nowBrasilia().toISOString().split('T')[0];
+}
+
 function formatTime(date) {
   if (!date) return '';
   const d = new Date(date);
-  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toLocaleTimeString('pt-BR', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    second: '2-digit',
+    timeZone: 'UTC' 
+  });
 }
 
 function diffMinutes(start, end) {
@@ -174,16 +216,16 @@ async function registrarRelatorioInjecao(record) {
     num_traco: t.num,
     berco_ini: t.berco_ini || '',
     berco_fim: t.berco_fim || '',
-    // Receita real pesada (Salva o total calculado para o relatório)
-    cimento_real: t.cimento_total !== undefined ? t.cimento_total : (t.cimento_real || ''),
-    agua_real: t.agua_total !== undefined ? t.agua_total : (t.agua_real || ''),
-    eps_real: t.eps_total !== undefined ? t.eps_total : (t.eps_real || ''),
-    superplast_real: t.superplast_total !== undefined ? t.superplast_total : (t.superplast_real || ''),
-    incorporador_real: t.incorporador_total !== undefined ? t.incorporador_total : (t.incorporador_real || ''),
-    tempo_batida: t.tempo_batida_total !== undefined ? t.tempo_batida_total : (t.tempo_batida || ''),
+    // Receita real pesada (Salva o objeto completo com ajustes para o histórico detalhado)
+    cimento_real: t.cimento_real || '',
+    agua_real: t.agua_real || '',
+    eps_real: t.eps_real || '',
+    superplast_real: t.superplast_real || '',
+    incorporador_real: t.incorporador_real || '',
+    tempo_batida: t.tempo_batida || '',
     // Resultado
-    densidade: t.densidade_total !== undefined ? t.densidade_total : (t.densidade || ''),
-    flow: t.flow_total !== undefined ? t.flow_total : (t.flow || ''),
+    densidade: t.densidade_insumo || '',
+    flow: t.flow_insumo || '',
     obs: t.obs || '',
     silo: t.silo || '',
     expansao: t.expansao || '',
@@ -309,6 +351,8 @@ window.LW = {
   get MONTAGEM_OPTS() { return MONTAGEM_OPTS; },
   get MONTAGEM_MAP() { return MONTAGEM_MAP; },
   get BATERIA_IDS() { return BATERIA_IDS; },
+  get VOLUME_POR_PLACA() { return VOLUME_POR_PLACA; },
+
 
   // Config loader
   loadConfig,

@@ -6822,5 +6822,111 @@
     "silo": "Silo 1",
     "expansao": "1ª expansão",
     "densidade_eps": "654"
+  },
+  {
+    "id_traco": "traco_1781376028039_1",
+    "id_operacao": "op_1781380081754",
+    "data": "2026-06-13",
+    "turno": "1º TURNO",
+    "id_bateria": "B2",
+    "num_traco": 1,
+    "berco_ini": "1",
+    "berco_fim": "20",
+    "cimento_real": 912,
+    "agua_real": 32,
+    "eps_real": 321,
+    "superplast_real": 321,
+    "incorporador_real": 321,
+    "tempo_batida": 122,
+    "densidade": 65,
+    "flow": 78,
+    "obs": "nada",
+    "silo": "Silo 1",
+    "expansao": "1ª expansão",
+    "densidade_eps": "321"
+  },
+  {
+    "id_traco": "traco_1781380512497_1",
+    "id_operacao": "op_1781380711120",
+    "data": "2026-06-13",
+    "turno": "1º TURNO",
+    "id_bateria": "B2",
+    "num_traco": 1,
+    "berco_ini": "1",
+    "berco_fim": "20",
+    "cimento_real": 2,
+    "agua_real": 2,
+    "eps_real": 2,
+    "superplast_real": 2,
+    "incorporador_real": 2,
+    "tempo_batida": 244,
+    "densidade": 2,
+    "flow": 2,
+    "obs": "1",
+    "silo": "Silo 1",
+    "expansao": "1ª expansão",
+    "densidade_eps": "1"
+  },
+  {
+    "id_traco": "traco_1781381037495_1",
+    "id_operacao": "op_1781381111975",
+    "data": "2026-06-13",
+    "turno": "1º TURNO",
+    "id_bateria": "B1",
+    "num_traco": 1,
+    "berco_ini": "1",
+    "berco_fim": "20",
+    "cimento_real": {
+      "original": "3",
+      "ajustes": [
+        2
+      ]
+    },
+    "agua_real": {
+      "original": "3",
+      "ajustes": [
+        2
+      ]
+    },
+    "eps_real": {
+      "original": "3",
+      "ajustes": [
+        2
+      ]
+    },
+    "superplast_real": {
+      "original": "3",
+      "ajustes": [
+        2
+      ]
+    },
+    "incorporador_real": {
+      "original": "3",
+      "ajustes": [
+        2
+      ]
+    },
+    "tempo_batida": {
+      "original": "180",
+      "ajustes": [
+        60
+      ]
+    },
+    "densidade": {
+      "original": "3",
+      "ajustes": [
+        5
+      ]
+    },
+    "flow": {
+      "original": "3",
+      "ajustes": [
+        5
+      ]
+    },
+    "obs": "5",
+    "silo": "Silo 1",
+    "expansao": "1ª expansão",
+    "densidade_eps": "3"
   }
 ]

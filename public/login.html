@@ -41,7 +41,7 @@
                 </button>
 
                 <!-- ADMINISTRADOR -->
-                <button class="btn-admin" onclick="entrar('Administrador')">
+                <button class="btn-admin" id="btn-entrar-admin" onclick="solicitarSenhaAdmin()">
                     <span class="btn-role-label">Administrador</span>
                     <span class="btn-role-sub">Dashboards · Relatórios · Análise</span>
                     <span class="btn-role-icon">📊</span>
@@ -64,7 +64,33 @@
         <div class="loading-label" id="loading-label">Carregando sistema...</div>
     </div>
 
+    <script src="admin-auth.js"></script>
     <script>
+        // ─── Verifica se já está autenticado ao carregar a página ─────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            // Se já tem sessão admin válida no localStorage, mostra indicativo no botão
+            if (AdminAuth.isAutenticado()) {
+                const btn = document.getElementById('btn-entrar-admin');
+                if (btn) {
+                    const sub = btn.querySelector('.btn-role-sub');
+                    if (sub) sub.textContent = 'Acesso autorizado · Clique para entrar';
+                }
+            }
+        });
+
+        // ─── Intercepta o clique em "Administrador" ────────────────────────────────
+        function solicitarSenhaAdmin() {
+            // Se já autenticado previamente (sessão localStorage válida), entra direto
+            if (AdminAuth.isAutenticado()) {
+                entrar('Administrador');
+                return;
+            }
+            // Caso contrário, exibe o modal de senha
+            AdminAuth.abrirModal(function onSuccess() {
+                entrar('Administrador');
+            });
+        }
+
         function entrar(role) {
             const overlay = document.getElementById('loading-overlay');
             const roleLabel = document.getElementById('loading-role-label');

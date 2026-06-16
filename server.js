@@ -10,6 +10,7 @@ const MIME = {
   '.css':  'text/css',
   '.js':   'application/javascript',
   '.json': 'application/json',
+  '.key':  'text/plain',
 };
 
 http.createServer((req, res) => {
@@ -22,6 +23,38 @@ http.createServer((req, res) => {
       try {
         const cfg = JSON.parse(body); // valida antes de salvar
         fs.writeFileSync(path.join(DIR, 'config.json'), JSON.stringify(cfg, null, 2), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ── Salvar security.json via POST (recuperação de senha) ──────────────────
+  // Aceita apenas { passwordHash, recoveryKeyHash } — ambos strings hex SHA-256.
+  // Nunca registra os hashes em log.
+  if (req.method === 'POST' && req.url === '/salvar-security') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        // Validação mínima: apenas as duas chaves permitidas, ambas strings hex de 64 chars
+        const hexRE = /^[0-9a-f]{64}$/;
+        if (
+          typeof payload.passwordHash    !== 'string' || !hexRE.test(payload.passwordHash) ||
+          typeof payload.recoveryKeyHash !== 'string' || !hexRE.test(payload.recoveryKeyHash)
+        ) {
+          throw new Error('Payload inválido: hashes SHA-256 esperados.');
+        }
+        const securityPath = path.join(DIR, 'security.json');
+        fs.writeFileSync(securityPath, JSON.stringify({
+          passwordHash:    payload.passwordHash,
+          recoveryKeyHash: payload.recoveryKeyHash,
+        }, null, 2), 'utf8');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch(e) {

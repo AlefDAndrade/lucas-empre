@@ -264,7 +264,7 @@
   function nomeMes(yyyymm) {
     const [y, m] = yyyymm.split('-');
     const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    return nomes[parseInt(m) - 1] + (y !== new Date().getFullYear().toString() ? `/${y.slice(2)}` : '');
+    return nomes[parseInt(m) - 1] + (y !== nowBrasilia().toISOString().slice(0,4) ? `/${y.slice(2)}` : '');
   }
 
   // ── RENDER: KPIs PRINCIPAIS ──────────────────────────────
@@ -841,8 +841,8 @@
 
   // ── INICIALIZAÇÃO ─────────────────────────────────────────
   function init() {
-    const today = new Date().toISOString().split('T')[0];
-    const d90   = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0];
+    const today = todayBrasilia();
+    const d90   = new Date(nowBrasilia().getTime() - 90 * 86400000).toISOString().split('T')[0];
     const ini   = document.getElementById('qt-data-inicio');
     const fim   = document.getElementById('qt-data-fim');
     if (ini && !ini.value) ini.value = d90;

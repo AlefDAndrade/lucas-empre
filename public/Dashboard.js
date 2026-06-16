@@ -73,8 +73,8 @@
   // ---- Desempenho por Turnos ----
 
   function initTurnos() {
-    const today = new Date().toISOString().split('T')[0];
-    const d30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const today = todayBrasilia();
+    const d30 = new Date(nowBrasilia().getTime() - 30 * 86400000).toISOString().split('T')[0];
     document.getElementById('turnos-data-inicio').value = d30;
     document.getElementById('turnos-data-fim').value = today;
 
@@ -447,6 +447,28 @@
     renderRelatorio();
   }
 
+  // Helper para extrair o valor final de campos que podem ser objetos de ajuste {original, ajustes}
+  function _valRel(val, fieldKey) {
+    if (val === null || val === undefined || val === '') return '—';
+    if (typeof val === 'object' && 'ajustes' in val) {
+      const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
+      const original = parseFloat(val.original) || 0;
+      const ajustes = Array.isArray(val.ajustes) ? val.ajustes : [];
+      
+      if (isResultado) {
+        // Para resultados, o último ajuste sobrescreve o valor
+        if (ajustes.length > 0) return ajustes[ajustes.length - 1];
+        return val.original || '—';
+      }
+      
+      // Para insumos, soma-se tudo
+      const total = ajustes.reduce((s, a) => s + (parseFloat(a) || 0), original);
+      if (val.original === '' && ajustes.length === 0) return '—';
+      return total;
+    }
+    return val;
+  }
+
   function _onDataRelatorio(e) {
     _filtrosRelatorio[e.target.id === 'rel-data-inicio' ? 'data_inicio' : 'data_fim'] = e.target.value || null;
     renderRelatorio();
@@ -490,21 +512,20 @@
         <td>${l.num_traco || '—'}</td>
         <td class="mono">${l.berco_ini || '—'}</td>
         <td class="mono">${l.berco_fim || '—'}</td>
-        <td>${l.densidade || '—'}</td>
-        <td>${l.flow || '—'}</td>
+        <td>${_valRel(l.densidade, 'densidade')}</td>
+        <td>${_valRel(l.flow, 'flow')}</td>
         <td>${l.densidade_eps || '—'}</td>
         <td><span class="badge badge-blue">${l.expansao || '—'}</span></td>
         <td><span class="badge badge-gray">${l.silo || '—'}</span></td>
-        <td>${l.cimento_real || '—'}</td>
-        <td>${l.agua_real || '—'}</td>
-        <td>${l.eps_real || '—'}</td>
-        <td>${l.superplast_real || '—'}</td>
-        <td>${l.incorporador_real || '—'}</td>
+        <td>${_valRel(l.cimento_real)}</td>
+        <td>${_valRel(l.agua_real)}</td>
+        <td>${_valRel(l.eps_real)}</td>
+        <td>${_valRel(l.superplast_real)}</td>
+        <td>${_valRel(l.incorporador_real)}</td>
         <td>${(() => {
-          // Extrai o valor caso l.tempo_batida ainda seja um objeto {original, ajustes}
-          let val = (typeof l.tempo_batida === 'object' && l.tempo_batida !== null) 
-            ? (l.tempo_batida.original || 0) : l.tempo_batida;
-          return val ? LW.formatDuration(parseFloat(val) / 60) : '—';
+          let v = _valRel(l.tempo_batida, 'tempo_batida');
+          if (v === '—') return '—';
+          return (typeof v === 'number' || !isNaN(parseFloat(v))) ? LW.formatDuration(parseFloat(v) / 60) : v;
         })()}</td>
         <td>${l.obs || '—'}</td>
         
@@ -593,7 +614,7 @@
   // Compatibilidade — exporta tudo com colunas padrão
   async function exportXLSX() {
     const s = await LW.getStats();
-    gerarDownloadXLSX(s.data, EXPORT_COLUNAS.filter(c => c.padrao), new Date().toISOString().split('T')[0]);
+    gerarDownloadXLSX(s.data, EXPORT_COLUNAS.filter(c => c.padrao), todayBrasilia());
   }
 
   async function abrirExportModal() {

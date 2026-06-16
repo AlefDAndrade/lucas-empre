@@ -87,6 +87,14 @@
       '<span style="color:var(--text-3)">' + d.bercos + ' berços → ' + (d.bercos * 2) + ' painéis</span>' +
       '</div>'
     ).join('');
+    el.innerHTML += '<hr style="margin:8px 0">';
+    el.innerHTML += '<span style="color:var(--accent); text-align:center">VOLUME POR PLACAS</span>';
+    el.innerHTML += LW.VOLUME_POR_PLACA.map(v =>
+      '<div style="display:flex;justify-content:space-between">' +
+      '<span>' + v.label + '</span>' +
+      '<span style="color:var(--text-3)">' + v.volume.toFixed(4) + ' m³</span>' +
+      '</div>'
+    ).join('');
   }
 
   function wireEvents() {
@@ -128,7 +136,7 @@
 
   function updateClock() {
     const el = document.getElementById('topbar-clock');
-    if (el) el.textContent = new Date().toLocaleTimeString('pt-BR');
+    if (el) el.textContent = LW.formatTime(nowBrasilia());
   }
 
   function updateCapacidade() {
@@ -170,7 +178,7 @@
 
   function iniciarInjecao() {
     if (state.status !== 'idle') return;
-    state.inicio = new Date().toISOString();
+    state.inicio = nowBrasilia().toISOString();
     state.status = 'running';
     $('op-inicio').value = LW.formatTime(state.inicio);
     $('btn-iniciar').disabled = true;
@@ -183,7 +191,7 @@
 
   function finalizarInjecao() {
     if (state.status !== 'running') return;
-    state.fim = new Date().toISOString();
+    state.fim = nowBrasilia().toISOString();
     state.status = 'finished';
     clearInterval(timerInterval);
     $('op-fim').value = LW.formatTime(state.fim);
@@ -209,7 +217,7 @@
   function startTimerUI() {
     timerInterval = setInterval(() => {
       if (!state.inicio) return;
-      const elapsed = LW.diffMinutes(state.inicio, new Date().toISOString());
+      const elapsed = LW.diffMinutes(state.inicio, nowBrasilia().toISOString());
       const el = $('timer-display');
       if (!el) return;
       const m = Math.floor(elapsed);
@@ -264,18 +272,20 @@
     const insumos = ['cimento', 'agua', 'eps', 'superplast', 'incorporador'];
     insumos.forEach(key => {
       const realKey = key + '_real';
-      if (t[realKey] !== undefined && (typeof t[realKey] === 'string' || typeof t[realKey] === 'number')) {
+      if (t[realKey] !== undefined && typeof t[realKey] !== 'object') {
         t[realKey] = { original: t[realKey], ajustes: [] };
       }
     });
     // Migrar densidade e flow se necessário
     ['densidade', 'flow'].forEach(key => {
-      if (t[key] !== undefined && typeof t[key] !== 'object') {
-        t[key + '_insumo'] = { original: t[key], ajustes: [] };
+      const targetKey = key + '_insumo';
+      // Só migra se o campo legado tiver um valor preenchido E o destino ainda não for o novo formato (objeto)
+      if (t[key] !== undefined && t[key] !== '' && typeof t[key] !== 'object' && typeof t[targetKey] !== 'object') {
+        t[targetKey] = { original: t[key], ajustes: [] };
       }
     });
     // Migrar tempo_batida se necessário
-    if (t.tempo_batida !== undefined && (typeof t.tempo_batida === 'string' || typeof t.tempo_batida === 'number')) {
+    if (t.tempo_batida !== undefined && typeof t.tempo_batida !== 'object') {
       t.tempo_batida = { original: t.tempo_batida, ajustes: [] };
     }
     return t;
@@ -287,7 +297,7 @@
     const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
 
     state.tracos.push({
-      id: 'traco_' + Date.now() + '_' + num,
+      id: 'traco_' + nowBrasilia().getTime() + '_' + num,
       num,
       berco_ini: sugeridoIni,
       berco_fim: '',
@@ -547,15 +557,15 @@
             <div class="form-group traco-header-field">
               <label class="form-label">Berço Início <span class="required">*</span></label>
               <input class="form-input" type="number" min="1" max="22" value="${t.berco_ini}"
-                oninput="LWOp.updateTraco(${i},'berco_ini',this.value)" placeholder="1">
+                oninput="LWOp.updateTraco(${i},'berco_ini',this.value)" placeholder="—">
             </div>
             <div class="form-group traco-header-field">
               <label class="form-label">Berço Fim <span class="required">*</span></label>
               <input class="form-input" type="number" min="1" max="22" value="${t.berco_fim}"
-                oninput="LWOp.updateTraco(${i},'berco_fim',this.value)" placeholder="22">
+                oninput="LWOp.updateTraco(${i},'berco_fim',this.value)" placeholder="—">
             </div>
             <div class="form-group traco-header-field">
-              <label class="form-label">Silo <span class="required">*</span></label>
+              <label class="form-label">Silo do EPS <span class="required">*</span></label>
               <select class="form-select" onchange="LWOp.updateTraco(${i}, 'silo', this.value)">
                 <option value=""></option>
                 <option value="Silo 1" ${t.silo === 'Silo 1' ? 'selected' : ''}>Silo 1</option>
@@ -596,7 +606,7 @@
               <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
                 oninput="LWOp.updateTraco(${i},'densidadeEPS',this.value)" placeholder="kg/m³">
             </div>
-            ${renderCampoInsumo(t, i, 'densidade_insumo', 'Densidade Obtida', '0.01', 2, 'kg/m³')}
+            ${renderCampoInsumo(t, i, 'densidade_insumo', 'Densidade do traço', '0.01', 2, 'kg/m³')}
             ${renderCampoInsumo(t, i, 'flow_insumo',      'Flow (mm)',        '1',    0, 'mm')}
             <div class="form-group traco-obs-field">
               <label class="form-label">Observações</label>
@@ -657,13 +667,10 @@
 
     const data = new Date(state.inicio);
 
-    const dataLocal =
-      `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')
-      }-${String(data.getDate()).padStart(2, '0')
-      }`;
+    const dataLocal = state.inicio.split('T')[0];
 
     const record = {
-      id: 'op_' + Date.now(),
+      id: 'op_' + nowBrasilia().getTime(),
       data: dataLocal,
       turno: state.turno,
       dimensao: state.dimensao,
@@ -775,8 +782,10 @@
     $('btn-iniciar').disabled = state.status !== 'idle';
     $('btn-finalizar').disabled = state.status !== 'running';
 
-    $('op-data').textContent = new Date().toLocaleDateString('pt-BR', {
-      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+    const brNow = nowBrasilia();
+    $('op-data').textContent = brNow.toLocaleDateString('pt-BR', {
+      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+      timeZone: 'UTC'
     });
 
     renderTracos();
@@ -886,6 +895,7 @@
       const dispEl = document.querySelector(`#tempo-batida-group-${i} .dur-total-display`);
       if (dispEl) dispEl.innerHTML = `${formatDuracao(seg)} <span class="dur-seg-raw">(${seg}s)</span>`;
       persist();
+      renderTracos(); // Re-renderiza para atualizar a visibilidade do botão "+ tempo extra"
     },
 
     // Ajusta um campo do picker de ajuste (painel +tempo extra)

@@ -166,8 +166,8 @@
     });
     const semanas = Object.entries(porSemana).sort((a,b)=>a[0]<b[0]?-1:1);
     const trendLabels = semanas.map(([k]) => {
-      const d = new Date(k+'-01');
-      return d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+      const d = new Date(k + '-01T12:00:00Z');
+      return d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' });
     });
     const trendAtraso  = semanas.map(([,v]) => v.total ? (v.atrasos/v.total)*100 : 0);
     const trendTempo   = semanas.map(([,v]) => v.tempos.length ? v.tempos.reduce((a,b)=>a+b,0)/v.tempos.length : 0);
