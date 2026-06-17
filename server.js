@@ -90,27 +90,57 @@ http.createServer((req, res) => {
   }
 
   // Registrar linhas do relatório de injeção — append em relatorio_injecao.json
-  if (req.method === 'POST' && urlPath === '/registrar-relatorio-injecao') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        const linhas = JSON.parse(body);
-        if (!Array.isArray(linhas)) throw new Error('Payload deve ser um array');
-        const relatorioPath = path.join(DIR, 'relatorio_injecao.json');
-        let relatorio = [];
-        try { relatorio = JSON.parse(fs.readFileSync(relatorioPath, 'utf8')); } catch(_) {}
-        linhas.forEach(l => relatorio.push(l));
-        fs.writeFileSync(relatorioPath, JSON.stringify(relatorio, null, 2), 'utf8');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, inseridos: linhas.length }));
-      } catch(e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, erro: e.message }));
+ if (req.method === 'POST' && urlPath === '/registrar-relatorio-injecao') {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    try {
+      const dadosRecebidos = JSON.parse(body); // Array de traços enviados pelo frontend
+      const relatorioPath = path.join(DIR, 'relatorio_injecao.json');
+      
+      let relatorio = [];
+      try { 
+        relatorio = JSON.parse(fs.readFileSync(relatorioPath, 'utf8')); 
+      } catch(_) {
+        relatorio = [];
       }
-    });
-    return;
-  }
+
+      dadosRecebidos.forEach(novoTraco => {
+        // Tenta encontrar o traço já existente no arquivo pelo ID único
+        console.log('recebido:', novoTraco.id_traco);
+        const registroExistente = relatorio.find(r => r.id_traco === novoTraco.id_traco);
+
+        if (registroExistente) {
+          // SE JÁ EXISTE: Apenas adiciona a nova operação ao array 'operacao'
+          if (!registroExistente.ultilizado) registroExistente.ultilizado = { operacao: [] };
+          
+          // Adiciona os dados da nova utilização (id_operacao, bateria, berços)
+          registroExistente.ultilizado.operacao.push(...novoTraco.ultilizado.operacao);
+          
+          // Opcional: Atualiza a observação se o operador escreveu algo novo na segunda utilização
+          if (novoTraco.obs) {
+            registroExistente.obs = registroExistente.obs 
+              ? registroExistente.obs + " | " + novoTraco.obs 
+              : novoTraco.obs;
+          }
+        } else {
+          // SE NÃO EXISTE: É um traço novo, adiciona ele inteiro ao relatório
+          relatorio.push(novoTraco);
+        }
+      });
+
+      // Salva o arquivo atualizado
+      fs.writeFileSync(relatorioPath, JSON.stringify(relatorio, null, 2), 'utf8');
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch(e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    }
+  });
+  return;
+}
 
   // Importar lote de relatório de injeção — merge com deduplicação
   if (req.method === 'POST' && urlPath === '/importar-relatorio-injecao') {

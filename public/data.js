@@ -206,24 +206,28 @@ function formatDuration(minutes) {
 // ---- Relatório de Injeção ----
 
 async function registrarRelatorioInjecao(record) {
-  // Expande os traços do registro em linhas individuais para o relatorio_injecao.json
   const linhas = (record.tracos || []).map(t => ({
     id_traco: t.id || (record.id + '_t' + t.num),
-    id_operacao: record.id,
+    // Estrutura exata solicitada
+    ultilizado: {
+      operacao: [
+        {
+          id_operacao: record.id,
+          id_bateria: record.id_bateria,
+          berco_inicio: t.berco_ini || '',
+          berco_finalizacao: t.berco_fim || ''
+        }
+      ]
+    },
     data: record.data,
     turno: record.turno,
-    id_bateria: record.id_bateria,
     num_traco: t.num,
-    berco_ini: t.berco_ini || '',
-    berco_fim: t.berco_fim || '',
-    // Receita real pesada (Salva o objeto completo com ajustes para o histórico detalhado)
     cimento_real: t.cimento_real || '',
     agua_real: t.agua_real || '',
     eps_real: t.eps_real || '',
     superplast_real: t.superplast_real || '',
     incorporador_real: t.incorporador_real || '',
     tempo_batida: t.tempo_batida || '',
-    // Resultado
     densidade: t.densidade_insumo || '',
     flow: t.flow_insumo || '',
     obs: t.obs || '',
@@ -232,7 +236,7 @@ async function registrarRelatorioInjecao(record) {
     densidade_eps: t.densidadeEPS || '',
   }));
 
-  if (!linhas.length) return; // sem traços, nada a salvar
+  if (!linhas.length) return;
 
   const res = await fetch('/registrar-relatorio-injecao', {
     method: 'POST',

@@ -454,13 +454,13 @@
       const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
       const original = parseFloat(val.original) || 0;
       const ajustes = Array.isArray(val.ajustes) ? val.ajustes : [];
-      
+
       if (isResultado) {
         // Para resultados, o último ajuste sobrescreve o valor
         if (ajustes.length > 0) return ajustes[ajustes.length - 1];
         return val.original || '—';
       }
-      
+
       // Para insumos, soma-se tudo
       const total = ajustes.reduce((s, a) => s + (parseFloat(a) || 0), original);
       if (val.original === '' && ajustes.length === 0) return '—';
@@ -499,19 +499,22 @@
       return;
     }
 
-    const sorted = [...linhas].sort((a, b) =>
-      b.data.localeCompare(a.data) ||
-      (b.id_operacao || '').localeCompare(a.id_operacao || '') ||
-      (a.num_traco - b.num_traco)
-    );
+    const sorted = [...linhas].sort((a, b) => {
+      // Ordena por data decrescente
+      if (b.data !== a.data) return b.data.localeCompare(a.data);
 
+      // Como id_operacao agora está dentro de ultilizado, pegamos a primeira ou a última
+      const opA = a.ultilizado?.operacao?.[0]?.id_operacao || '';
+      const opB = b.ultilizado?.operacao?.[0]?.id_operacao || '';
+      return opB.localeCompare(opA);
+    });
     tbody.innerHTML = sorted.map(l => `
       <tr>
         <td class="mono">${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
-        <td>${l.id_bateria || '—'}</td>
+        <td>${l.ultilizado?.operacao?.[0]?.id_bateria || '—'}</td>
         <td>${l.num_traco || '—'}</td>
-        <td class="mono">${l.berco_ini || '—'}</td>
-        <td class="mono">${l.berco_fim || '—'}</td>
+        <td class="mono">${l.ultilizado?.operacao?.[0]?.berco_inicio || '—'}</td>
+        <td class="mono">${l.ultilizado?.operacao?.[0]?.berco_finalizacao || '—'}</td>
         <td>${_valRel(l.densidade, 'densidade')}</td>
         <td>${_valRel(l.flow, 'flow')}</td>
         <td>${l.densidade_eps || '—'}</td>
@@ -523,10 +526,10 @@
         <td>${_valRel(l.superplast_real)}</td>
         <td>${_valRel(l.incorporador_real)}</td>
         <td>${(() => {
-          let v = _valRel(l.tempo_batida, 'tempo_batida');
-          if (v === '—') return '—';
-          return (typeof v === 'number' || !isNaN(parseFloat(v))) ? LW.formatDuration(parseFloat(v) / 60) : v;
-        })()}</td>
+        let v = _valRel(l.tempo_batida, 'tempo_batida');
+        if (v === '—') return '—';
+        return (typeof v === 'number' || !isNaN(parseFloat(v))) ? LW.formatDuration(parseFloat(v) / 60) : v;
+      })()}</td>
         <td>${l.obs || '—'}</td>
         
       </tr>
@@ -545,13 +548,15 @@
     { campo: 'tipo_montagem', header: 'Tipo Montagem', padrao: true },
     { campo: 'inicio', header: 'Hora Início', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
     { campo: 'fim', header: 'Hora Fim', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
-    { campo: 'tempo_min', header: 'Duração', padrao: true, fmt: v => {
-      if (!v || typeof v !== 'number') return '—';
-      const totalSegundos = Math.round(v * 60);
-      const m = Math.floor(totalSegundos / 60);
-      const s = totalSegundos % 60;
-      return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
-    } },
+    {
+      campo: 'tempo_min', header: 'Duração', padrao: true, fmt: v => {
+        if (!v || typeof v !== 'number') return '—';
+        const totalSegundos = Math.round(v * 60);
+        const m = Math.floor(totalSegundos / 60);
+        const s = totalSegundos % 60;
+        return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+      }
+    },
     { campo: 'qtd_tracos', header: 'Qtd Traços', padrao: true },
     { campo: 'houve_atraso', header: 'Houve Atraso', padrao: true },
     { campo: 'motivo_atraso', header: 'Motivo Atraso', padrao: true },
