@@ -338,6 +338,46 @@ async function getStats(filtros = {}) {
   };
 }
 
+// ---- Sobra de Traço ----
+
+/**
+ * Carrega sobra.json do servidor.
+ * Retorna o objeto de sobra, ou null se não existir / não estiver ativa.
+ */
+async function getSobra() {
+  try {
+    const res = await fetch('sobra.json?_=' + Date.now()); // evita cache
+    if (!res.ok) return null;
+    const sobra = await res.json();
+    // Só retorna se estiver realmente ativa
+    return (sobra && sobra.ativa === true) ? sobra : null;
+  } catch (_) { return null; }
+}
+
+/**
+ * Persiste o objeto de sobra no servidor (sobra.json).
+ * @param {object} sobra – objeto conforme estrutura definida
+ */
+async function salvarSobra(sobra) {
+  const res = await fetch('/salvar-sobra', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sobra),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.erro || 'Erro ao salvar sobra');
+}
+
+/**
+ * Desativa a sobra atual, marcando-a como inativa e registrando motivo.
+ * @param {'utilizada'|'descartada'} motivo
+ */
+async function desativarSobra(motivo) {
+  const atual = await getSobra();
+  if (!atual) return; // já não existe sobra ativa
+  await salvarSobra({ ...atual, ativa: false, status: motivo, dataEncerramento: new Date().toISOString() });
+}
+
 // ---- Export ----
 
 window.LW = {
@@ -373,4 +413,7 @@ window.LW = {
 
   // Dados e analytics
   registrarOperacao, getStats,
+
+  // Sobra de traço
+  getSobra, salvarSobra, desativarSobra,
 };

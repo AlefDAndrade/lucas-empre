@@ -1,0 +1,40 @@
+{
+  "ativa": false,
+  "tracoId": "traco_1781562151000_1",
+  "operacaoOrigem": "op_1781562179000",
+  "flow": 2,
+  "densidade": 2,
+  "receita": {
+    "cimento_real": {
+      "original": "2",
+      "ajustes": []
+    },
+    "agua_real": {
+      "original": "2",
+      "ajustes": []
+    },
+    "eps_real": {
+      "original": "2",
+      "ajustes": []
+    },
+    "superplast_real": {
+      "original": "2",
+      "ajustes": []
+    },
+    "incorporador_real": {
+      "original": "2",
+      "ajustes": []
+    },
+    "tempo_batida": {
+      "original": "120",
+      "ajustes": []
+    },
+    "silo": "Silo 2",
+    "expansao": "2ª expansão",
+    "densidadeEPS": "2",
+    "obs": "2"
+  },
+  "data": "2026-06-16T01:23:01.057Z",
+  "status": "utilizada",
+  "dataEncerramento": "2026-06-16T01:23:26.873Z"
+}

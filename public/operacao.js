@@ -291,37 +291,327 @@
     return t;
   }
 
-  function addTraco() {
-    const num = state.tracos.length + 1;
-    const prevTraco = state.tracos[state.tracos.length - 1];
-    const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
-
-    state.tracos.push({
+  /**
+   * Cria a estrutura de um traço novo (sem sobra).
+   */
+  function _criarEstruturaTraco(num, sugeridoIni) {
+    return {
       id: 'traco_' + nowBrasilia().getTime() + '_' + num,
       num,
       berco_ini: sugeridoIni,
       berco_fim: '',
-      // Receita real pesada — nova estrutura com ajustes
       cimento_real:      { original: '', ajustes: [] },
       agua_real:         { original: '', ajustes: [] },
       eps_real:          { original: '', ajustes: [] },
       superplast_real:   { original: '', ajustes: [] },
       incorporador_real: { original: '', ajustes: [] },
-      tempo_batida: { original: '', ajustes: [] },
-      // Resultado
-      densidade_insumo: { original: '', ajustes: [] },
-      flow_insumo:      { original: '', ajustes: [] },
-      // campos legados mantidos por compatibilidade
+      tempo_batida:      { original: '', ajustes: [] },
+      densidade_insumo:  { original: '', ajustes: [] },
+      flow_insumo:       { original: '', ajustes: [] },
       densidade: '',
       flow: '',
       obs: '',
       silo: '',
       expansao: '',
-      densidadeEPS: ''
-    });
-    expandedTracoIndex = state.tracos.length - 1; // Regra: abre automaticamente ao criar
+      densidadeEPS: '',
+      // Campo para rastrear múltiplas operações em que o traço foi usado
+      operacoes: [],
+    };
+  }
+
+  /**
+   * Adiciona o traço ao state a partir de um objeto de sobra,
+   * REUTILIZANDO o mesmo ID e receita — sem criar traço novo.
+   */
+  function _adicionarTracoDeSobra(sobra) {
+    const num = state.tracos.length + 1;
+    const prevTraco = state.tracos[state.tracos.length - 1];
+    const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
+
+    // Reconstrói o traço a partir dos dados persistidos na sobra
+    const receita = sobra.receita || {};
+    const traco = {
+      // MANTÉM o ID original — não gera novo
+      id: sobra.tracoId,
+      num,
+      berco_ini: sugeridoIni,
+      berco_fim: '',
+      // Receita carregada da sobra
+      cimento_real:      receita.cimento_real      || { original: '', ajustes: [] },
+      agua_real:         receita.agua_real          || { original: '', ajustes: [] },
+      eps_real:          receita.eps_real           || { original: '', ajustes: [] },
+      superplast_real:   receita.superplast_real    || { original: '', ajustes: [] },
+      incorporador_real: receita.incorporador_real  || { original: '', ajustes: [] },
+      tempo_batida:      receita.tempo_batida       || { original: '', ajustes: [] },
+      // Flow e densidade carregados — o operador pode registrar o novo resultado medido
+      densidade_insumo:  (sobra.densidade !== undefined && sobra.densidade !== null)
+        ? { original: String(sobra.densidade), ajustes: [] }
+        : { original: '', ajustes: [] },
+      flow_insumo:       (sobra.flow !== undefined && sobra.flow !== null)
+        ? { original: String(sobra.flow), ajustes: [] }
+        : { original: '', ajustes: [] },
+      densidade: (sobra.densidade !== undefined && sobra.densidade !== null) ? sobra.densidade : '',
+      flow:      (sobra.flow !== undefined && sobra.flow !== null) ? sobra.flow : '',
+      obs: receita.obs || '',
+      silo: receita.silo || '',
+      expansao: receita.expansao || '',
+      densidadeEPS: receita.densidadeEPS || '',
+      // Rastreia todas as operações onde este traço foi usado
+      operacoes: [
+        { operacaoId: sobra.operacaoOrigem, tipo: 'origem' },
+        { operacaoId: null, tipo: 'reaproveitamento' }, // preenchido ao registrar
+      ],
+      _reaproveitado: true, // flag interna para uso na UI
+      _sobraOrigem: sobra.operacaoOrigem,
+    };
+
+    state.tracos.push(traco);
+    expandedTracoIndex = state.tracos.length - 1;
     renderTracos();
     persist();
+  }
+
+  /**
+   * Cria um traço novo diretamente, sem verificar sobra.
+   */
+  function _adicionarTracoNovo() {
+    const num = state.tracos.length + 1;
+    const prevTraco = state.tracos[state.tracos.length - 1];
+    const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
+    const traco = _criarEstruturaTraco(num, sugeridoIni);
+    state.tracos.push(traco);
+    expandedTracoIndex = state.tracos.length - 1;
+    renderTracos();
+    persist();
+  }
+
+  /**
+   * Ponto de entrada público ao clicar "Adicionar Traço".
+   * Verifica sobra ativa e exibe modal de decisão se houver.
+   */
+  async function addTraco() {
+    let sobra = null;
+    try { sobra = await LW.getSobra(); } catch (_) { sobra = null; }
+
+    if (!sobra) {
+      // Fluxo normal — sem sobra ativa
+      _adicionarTracoNovo();
+      return;
+    }
+
+    // Existe sobra ativa — exibe modal de decisão
+    _mostrarModalSobra(sobra);
+  }
+
+  // ============================================================
+  //  LÓGICA DE SOBRA
+  // ============================================================
+
+  /**
+   * Exibe o modal de decisão quando há sobra ativa ao adicionar traço.
+   */
+  function _mostrarModalSobra(sobra) {
+    // Remove modal anterior se existir
+    const existente = document.getElementById('modal-sobra-decisao');
+    if (existente) existente.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-sobra-decisao';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center';
+
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                  padding:32px;width:460px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+        <div style="text-align:center;margin-bottom:20px">
+          <div style="font-size:2.2rem;margin-bottom:8px">♻️</div>
+          <h2 style="font-family:var(--font-display);font-size:1.3rem;color:var(--accent);margin:0">
+            Sobra de Traço Encontrada
+          </h2>
+        </div>
+        <p style="color:var(--text-2);text-align:center;margin-bottom:20px;line-height:1.5">
+          Foi encontrada uma sobra do traço <strong style="color:var(--text)">${sobra.tracoId}</strong>
+          da operação <strong style="color:var(--text)">${sobra.operacaoOrigem}</strong>.
+          <br>Deseja utilizar este restante?
+        </p>
+        <div style="background:var(--bg-2);border-radius:var(--radius);padding:14px;margin-bottom:24px;font-size:.82rem;color:var(--text-2)">
+          ${sobra.flow     ? `<div>Flow: <strong style="color:var(--text)">${sobra.flow} mm</strong></div>` : ''}
+          ${sobra.densidade ? `<div>Densidade: <strong style="color:var(--text)">${sobra.densidade} kg/m³</strong></div>` : ''}
+          <div style="color:var(--text-3);font-size:.75rem;margin-top:4px">${new Date(sobra.data).toLocaleString('pt-BR')}</div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <button id="btn-utilizar-sobra"
+            style="flex:1;padding:12px;background:var(--accent);color:#000;border:none;border-radius:var(--radius);
+                   font-weight:700;font-size:.9rem;cursor:pointer">
+            ♻️ Utilizar Sobra
+          </button>
+          <button id="btn-criar-novo-traco"
+            style="flex:1;padding:12px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                   border-radius:var(--radius);font-size:.9rem;cursor:pointer">
+            + Criar Novo Traço
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-utilizar-sobra').addEventListener('click', async () => {
+      modal.remove();
+      // Adiciona o traço reaproveitado ao state
+      _adicionarTracoDeSobra(sobra);
+      // Marca sobra como utilizada (em segundo plano para não travar a UI)
+      try { await LW.desativarSobra('utilizada'); } catch (_) {}
+    });
+
+    document.getElementById('btn-criar-novo-traco').addEventListener('click', () => {
+      modal.remove();
+      _mostrarModalDescarteSobra(sobra, () => _adicionarTracoNovo());
+    });
+  }
+
+  /**
+   * Exibe modal perguntando se o usuário quer descartar a sobra
+   * antes de criar um novo traço.
+   */
+  function _mostrarModalDescarteSobra(sobra, callbackProsseguir) {
+    const existente = document.getElementById('modal-descarte-sobra');
+    if (existente) existente.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-descarte-sobra';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1001;display:flex;align-items:center;justify-content:center';
+
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                  padding:32px;width:420px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:2rem;margin-bottom:8px">⚠️</div>
+          <h2 style="font-family:var(--font-display);font-size:1.2rem;color:var(--amber);margin:0">
+            Sobra Ativa Não Utilizada
+          </h2>
+        </div>
+        <p style="color:var(--text-2);text-align:center;margin-bottom:24px;line-height:1.5">
+          Existe uma sobra ativa do traço
+          <strong style="color:var(--text)">${sobra.tracoId}</strong>
+          da operação <strong style="color:var(--text)">${sobra.operacaoOrigem}</strong>.
+          <br><br>Deseja descartá-la?
+        </p>
+        <div style="display:flex;gap:12px">
+          <button id="btn-descartar-sobra"
+            style="flex:1;padding:12px;background:var(--red);color:#fff;border:none;border-radius:var(--radius);
+                   font-weight:700;font-size:.9rem;cursor:pointer">
+            Descartar Sobra
+          </button>
+          <button id="btn-cancelar-descarte"
+            style="flex:1;padding:12px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                   border-radius:var(--radius);font-size:.9rem;cursor:pointer">
+            Cancelar
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-descartar-sobra').addEventListener('click', async () => {
+      modal.remove();
+      try { await LW.desativarSobra('descartada'); } catch (_) {}
+      callbackProsseguir();
+    });
+
+    document.getElementById('btn-cancelar-descarte').addEventListener('click', () => {
+      modal.remove();
+      // Não faz nada — usuário cancelou
+    });
+  }
+
+  /**
+   * Exibe o modal de sobra ao finalizar uma operação.
+   * Pergunta se houve sobra no ÚLTIMO traço e persiste sobra.json se sim.
+   * @param {object} record — registro já salvo da operação
+   */
+  function _perguntarSobraAoFinalizar(record) {
+    const tracos = record.tracos || [];
+    if (tracos.length === 0) return;
+
+    const ultimoTraco = tracos[tracos.length - 1];
+
+    // Se o traço já é um reaproveitamento de sobra e ainda sobrou mais, também pergunta
+    const existente = document.getElementById('modal-pergunta-sobra');
+    if (existente) existente.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-pergunta-sobra';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center';
+
+    const labelTraco = `Traço Nº ${ultimoTraco.num}` + (tracos.length > 1 ? ` (último traço)` : '');
+
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                  padding:32px;width:420px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:2rem;margin-bottom:8px">🪣</div>
+          <h2 style="font-family:var(--font-display);font-size:1.2rem;color:var(--accent);margin:0">
+            Sobra de Massa
+          </h2>
+        </div>
+        <p style="color:var(--text-2);text-align:center;margin-bottom:24px;line-height:1.6">
+          Houve sobra do <strong style="color:var(--text)">${labelTraco}</strong>
+          ${tracos.length > 1 ? '<br><span style="font-size:.8rem;color:var(--text-3)">(Os demais traços já estão esgotados)</span>' : ''}
+          ?
+        </p>
+        <div style="display:flex;gap:12px">
+          <button id="btn-sobra-sim"
+            style="flex:1;padding:14px;background:var(--accent);color:#000;border:none;border-radius:var(--radius);
+                   font-weight:700;font-size:1rem;cursor:pointer">
+            ✅ Sim
+          </button>
+          <button id="btn-sobra-nao"
+            style="flex:1;padding:14px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                   border-radius:var(--radius);font-size:1rem;cursor:pointer">
+            ❌ Não
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-sobra-sim').addEventListener('click', async () => {
+      modal.remove();
+      // Persiste a sobra ativa
+      const sobra = {
+        ativa: true,
+        tracoId: ultimoTraco.id,
+        operacaoOrigem: record.id,
+        flow:      totalInsumo(ultimoTraco.flow_insumo,      'flow')      || ultimoTraco.flow      || '',
+        densidade: totalInsumo(ultimoTraco.densidade_insumo, 'densidade') || ultimoTraco.densidade || '',
+        receita: {
+          cimento_real:      ultimoTraco.cimento_real,
+          agua_real:         ultimoTraco.agua_real,
+          eps_real:          ultimoTraco.eps_real,
+          superplast_real:   ultimoTraco.superplast_real,
+          incorporador_real: ultimoTraco.incorporador_real,
+          tempo_batida:      ultimoTraco.tempo_batida,
+          silo:              ultimoTraco.silo,
+          expansao:          ultimoTraco.expansao,
+          densidadeEPS:      ultimoTraco.densidadeEPS,
+          obs:               ultimoTraco.obs,
+        },
+        data: new Date().toISOString(),
+        status: 'ativa',
+      };
+      try {
+        await LW.salvarSobra(sobra);
+      } catch (err) {
+        console.warn('[LW] Falha ao salvar sobra:', err.message);
+      }
+      showSuccessModal(record);
+    });
+
+    document.getElementById('btn-sobra-nao').addEventListener('click', async () => {
+      modal.remove();
+      // Garante que não há sobra ativa residual para o traço encerrado
+      try { await LW.desativarSobra('descartada'); } catch (_) {}
+      showSuccessModal(record);
+    });
   }
 
   function removeTraco(i) {
@@ -552,7 +842,11 @@
       <div class="traco-row ${isExpanded ? '' : ' collapsed'}">
         <!-- Cabeçalho do traço -->
         <div class="traco-card-header" onclick="LWOp.selectTraco(${i})">
-          <span class="traco-num-label">Traço <strong>Nº ${t.num}</strong></span>
+          <span class="traco-num-label">Traço <strong>Nº ${t.num}</strong>
+            ${t._reaproveitado ? `<span title="Traço reaproveitado da operação ${t._sobraOrigem || ''}"
+              style="margin-left:6px;font-size:.7rem;background:var(--accent);color:#000;
+                     border-radius:4px;padding:1px 6px;font-weight:700">♻️ SOBRA</span>` : ''}
+          </span>
           <div class="traco-header-fields" onclick="if(${isExpanded}) event.stopPropagation()">
             <div class="form-group traco-header-field">
               <label class="form-label">Berço Início <span class="required">*</span></label>
@@ -665,12 +959,11 @@
 
     const calc = LW.calcPaineis(state.tipo_montagem, bercos);
 
-    const data = new Date(state.inicio);
-
     const dataLocal = state.inicio.split('T')[0];
 
-    const record = {
-      id: 'op_' + nowBrasilia().getTime(),
+    const opId = 'op_' + nowBrasilia().getTime();
+    const fullRecord = {
+      id: opId,
       data: dataLocal,
       turno: state.turno,
       dimensao: state.dimensao,
@@ -685,33 +978,40 @@
       tipo_montagem: state.tipo_montagem,
       bercos_reais: bercos,
       ...calc,
-      tracos: state.tracos.map(t => ({
-        ...t,
-        // Expõe os totais calculados como campos planos para relatórios
-        cimento_total:      totalInsumo(t.cimento_real, 'cimento'),
-        agua_total:         totalInsumo(t.agua_real, 'agua'),
-        eps_total:          totalInsumo(t.eps_real, 'eps'),
-        superplast_total:   totalInsumo(t.superplast_real, 'superplast'),
-        incorporador_total: totalInsumo(t.incorporador_real, 'incorporador'),
-        tempo_batida_total: totalInsumo(t.tempo_batida, 'tempo_batida'),
-        densidade_total:    totalInsumo(t.densidade_insumo, 'densidade'),
-        flow_total:         totalInsumo(t.flow_insumo, 'flow'),
-        // Compatibilidade: também atualiza os campos legados
-        densidade: totalInsumo(t.densidade_insumo, 'densidade') !== '' ? totalInsumo(t.densidade_insumo, 'densidade') : t.densidade,
-        flow:      totalInsumo(t.flow_insumo, 'flow')      !== '' ? totalInsumo(t.flow_insumo, 'flow')      : t.flow,
-      })),
+      tracos: state.tracos.map(t => {
+        // Se o traço foi reaproveitado, completa a entrada de reaproveitamento com o ID real
+        let operacoes = t.operacoes || [];
+        if (t._reaproveitado) {
+          operacoes = operacoes.map(op =>
+            op.tipo === 'reaproveitamento' && op.operacaoId === null
+              ? { ...op, operacaoId: opId }
+              : op
+          );
+        }
+        return {
+          ...t,
+          operacoes
+        };
+      }),
+    };
+
+    // Criamos uma versão simplificada para o historico.json (apenas IDs dos traços)
+    const historyRecord = {
+      ...fullRecord,
+      tracos: fullRecord.tracos.map(t => ({ id: t.id }))
     };
 
     Promise.all([
-      LW.registrarOperacao(record),
-      LW.registrarRelatorioInjecao(record),
+      LW.registrarOperacao(historyRecord),
+      LW.registrarRelatorioInjecao(fullRecord),
     ])
       .then(() => {
         LW.clearOperacaoAtual();
         clearInterval(timerInterval);
-        showSuccessModal(record);
         resetState();
         renderAll();
+        // Pergunta sobre sobra ANTES de mostrar o modal de sucesso
+        _perguntarSobraAoFinalizar(fullRecord);
       })
       .catch(err => {
         alert('Erro ao salvar operação: ' + err.message);
