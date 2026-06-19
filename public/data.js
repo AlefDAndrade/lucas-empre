@@ -338,7 +338,8 @@ async function registrarRelatorioInjecao(record) {
           id_operacao: record.id,
           id_bateria: record.id_bateria,
           berco_inicio: t.berco_ini || '',
-          berco_finalizacao: t.berco_fim || ''
+          berco_finalizacao: t.berco_fim || '',
+          obs: t.obs || ''
         }
       ]
     },
@@ -353,7 +354,7 @@ async function registrarRelatorioInjecao(record) {
     tempo_batida: t.tempo_batida || '',
     densidade: t.densidade_insumo || '',
     flow: t.flow_insumo || '',
-    obs: t.obs || '',
+    obs: t.obs || '', // legado: mantido só como fallback p/ registros antigos sem obs por operação — exibição deve preferir ultilizado.operacao[].obs
     silo: t.silo || '',
     expansao: t.expansao || '',
     densidade_eps: t.densidadeEPS || '',

@@ -268,12 +268,12 @@ http.createServer((req, res) => {
 
           if (registroExistente) {
             if (!registroExistente.ultilizado) registroExistente.ultilizado = { operacao: [] };
+            // Cada uso/reaproveitamento já carrega sua própria obs dentro do
+            // próprio item de operação (novoTraco.ultilizado.operacao[].obs),
+            // então não há mais necessidade de concatenar obs no nível do
+            // traço — isso evitava perder a observação de reaproveitamentos,
+            // mas misturava observações de baterias diferentes num só texto.
             registroExistente.ultilizado.operacao.push(...novoTraco.ultilizado.operacao);
-            if (novoTraco.obs) {
-              registroExistente.obs = registroExistente.obs
-                ? registroExistente.obs + " | " + novoTraco.obs
-                : novoTraco.obs;
-            }
           } else {
             relatorio.push(novoTraco);
           }

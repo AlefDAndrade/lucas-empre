@@ -93,7 +93,7 @@
               densidade_eps:   valorFinal(traco.densidade_eps),
               berco_inicio:    uso.berco_inicio,
               berco_fim:       uso.berco_finalizacao,
-              obs:             (traco.obs || '').trim(),
+              obs:             (uso.obs || traco.obs || '').trim(),
               reaproveitado,
               origem_bateria:  reaproveitado ? usos[0].id_bateria   : null,
               origem_operacao: reaproveitado ? usos[0].id_operacao  : null,

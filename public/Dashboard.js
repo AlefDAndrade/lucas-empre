@@ -156,6 +156,8 @@
     dimensao: new Set(), turno: new Set(),
     silo: new Set(), expansao: new Set(),
     id_traco: new Set(), // filtro de navegação via Registro de Baterias
+    id_bateria_traco: new Set(), // só para exibição do chip "🔗 Bateria: X"
+    op_navegacao: null, // id_operacao exato da bateria clicada — usado para filtrar (id_bateria pode repetir entre operações, id_operacao não)
   };
 
   // Data de corte: produções anteriores a esta data não possuem vínculo de traço
@@ -290,6 +292,15 @@
     if (containerId === 'filtros-relatorio' && filtrosObj.id_traco && filtrosObj.id_traco.size) {
       filtrosObj.id_traco.forEach(val => {
         chips.push({ key: 'id_traco', val, label: `🔗 Traço: ${val}`, tipo: 'traco' });
+      });
+    }
+
+    // Chip especial de navegação por bateria — restringe a exibição de
+    // traços reaproveitados apenas ao uso feito nesta bateria. Removível,
+    // assim o usuário pode ver os demais reaproveitamentos se quiser.
+    if (containerId === 'filtros-relatorio' && filtrosObj.id_bateria_traco && filtrosObj.id_bateria_traco.size) {
+      filtrosObj.id_bateria_traco.forEach(val => {
+        chips.push({ key: 'id_bateria_traco', val, label: `🔗 Bateria: ${val}`, tipo: 'traco' });
       });
     }
 
@@ -731,13 +742,37 @@
       const opB = b.ultilizado?.operacao?.[0]?.id_operacao || '';
       return opB.localeCompare(opA);
     });
-    tbody.innerHTML = sorted.map(l => `
-      <tr>
+    tbody.innerHTML = sorted.map(l => {
+      // Um traço pode ter sido reaproveitado em mais de uma bateria — cada uso
+      // fica registrado em l.ultilizado.operacao. Aqui geramos UMA LINHA VISUAL
+      // por uso (bateria/berço inicial/berço final mudam a cada reaproveitamento),
+      // mas os insumos (cimento, água, eps, densidade, flow, tempo de batida etc.)
+      // são lidos sempre de `l` — ou seja, são os MESMOS em todas as linhas, nunca
+      // duplicados. Isso é só uma exibição: não cria registros novos nem altera
+      // nada que entra em dashboards/análises, que continuam consumindo `l` (o
+      // traço único) normalmente.
+      const operacoesDoTraco = (l.ultilizado?.operacao && l.ultilizado.operacao.length)
+        ? l.ultilizado.operacao
+        : [{}];
+
+      // Se a navegação veio de uma operação específica (clique numa bateria
+      // no Registro de Baterias), mostra só o uso daquela operação — mesmo
+      // que esse mesmo traço tenha sido reaproveitado na mesma bateria (em
+      // outra operação) ou em baterias diferentes. id_operacao é único por
+      // operação, então não tem o problema de id_bateria poder repetir.
+      const operacoes = (f.id_bateria_traco && f.id_bateria_traco.size && f.op_navegacao)
+        ? operacoesDoTraco.filter(op => op.id_operacao === f.op_navegacao)
+        : operacoesDoTraco;
+
+      if (!operacoes.length) return ''; // este traço não pertence à bateria filtrada
+
+      return operacoes.map((op, idx) => `
+      <tr${idx > 0 ? ' class="linha-traco-reaproveitado"' : ''}>
         <td class="mono">${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
-        <td>${l.ultilizado?.operacao?.[0]?.id_bateria || '—'}</td>
+        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" title="Traço reaproveitado nesta bateria">♻ reaproveitado</span>' : ''}</td>
         <td>${l.num_traco || '—'}</td>
-        <td class="mono">${l.ultilizado?.operacao?.[0]?.berco_inicio || '—'}</td>
-        <td class="mono">${l.ultilizado?.operacao?.[0]?.berco_finalizacao || '—'}</td>
+        <td class="mono">${op.berco_inicio || '—'}</td>
+        <td class="mono">${op.berco_finalizacao || '—'}</td>
         <td>${_valRel(l.densidade, 'densidade')}</td>
         <td>${_valRel(l.flow, 'flow')}</td>
         <td>${l.densidade_eps || '—'}</td>
@@ -753,10 +788,10 @@
         if (v === '—') return '—';
         return (typeof v === 'number' || !isNaN(parseFloat(v))) ? LW.formatDuration(parseFloat(v) / 60) : v;
       })()}</td>
-        <td>${l.obs || '—'}</td>
-        
+        <td>${op.obs || l.obs || '—'}</td>
       </tr>
     `).join('');
+    }).join('');
   }
 
 
@@ -1008,6 +1043,15 @@
 
     // Aplica os IDs de traço como filtro de navegação
     idsTraco.forEach(id => _filtrosRelatorio.id_traco.add(id));
+
+    // Restringe a exibição apenas ao uso feito NESTA operação específica —
+    // usamos id_operacao (único por operação) em vez de id_bateria, pois a
+    // mesma bateria pode rodar mais de uma operação e reaproveitar o mesmo
+    // traço nelas, o que faria id_bateria sozinho mostrar as duas juntas.
+    if (bateria.id_bateria) {
+      _filtrosRelatorio.id_bateria_traco.add(bateria.id_bateria); // só exibição (chip)
+    }
+    _filtrosRelatorio.op_navegacao = bateria.id || null; // filtro real
 
     // Reseta inputs de data do relatório
     const ini = document.getElementById('rel-data-inicio');

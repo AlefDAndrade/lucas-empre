@@ -833,7 +833,7 @@ th {
 }
 
 td {
-  padding: 10px 14px;
+  padding: 10px 7px;
   border-bottom: 1px solid var(--border);
   color: var(--text-2);
   font-family: var(--font-body);
@@ -859,6 +859,15 @@ tbody tr:hover td {
 td.mono {
   font-family: var(--font-mono);
   font-size: .8rem;
+}
+
+/* Linha visual extra de um traço reaproveitado, no Relatório de Injeção —
+   é a MESMA linha de dados do traço (mesmos insumos), exibida de novo apenas
+   para mostrar a bateria/berço inicial/final daquele reaproveitamento.
+   Não representa um registro novo nem entra duplicada em análises/dashboards. */
+.linha-traco-reaproveitado td {
+  border-top: 1px dashed var(--border-2);
+  background: rgba(255, 255, 255, .015);
 }
 
 /* ---- Grid helpers ---- */

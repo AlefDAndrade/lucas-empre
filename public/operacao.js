@@ -1012,8 +1012,7 @@
             <div class="form-group traco-obs-field">
               <label class="form-label">Observações</label>
                 <input class="form-input" type="text" value="${t.obs}"
-                oninput="LWOp.updateTraco(${i},\'obs\',this.value)" placeholder="Ajustes, correções, falhas..."
-                ${t._reaproveitado ? 'readonly class="readonly-reaproveitado"' : ''}>
+                oninput="LWOp.updateTraco(${i},\'obs\',this.value)" placeholder="Ajustes, correções, falhas...">
             </div>
           </div>
         </div>
