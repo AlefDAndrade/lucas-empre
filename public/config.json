@@ -13,14 +13,13 @@
       },
       {
         "id": "B3",
-         "label": "9 cm",
+        "label": "9 cm",
         "bercos": 20
       },
       {
         "id": "B4",
         "label": "9 cm",
         "bercos": 20
-
       },
       {
         "id": "B5-7,5cm",
@@ -35,7 +34,7 @@
       {
         "id": "B7",
         "label": "9 cm",
-        "bercos": 20  
+        "bercos": 20
       },
       {
         "id": "B8",
@@ -69,6 +68,22 @@
       }
     ]
   },
+  "dimensoes": {
+    "opcoes": [
+      {
+        "label": "9 cm",
+        "bercos": 20
+      },
+      {
+        "label": "7,5 cm",
+        "bercos": 22
+      },
+      {
+        "label": "12 cm",
+        "bercos": 18
+      }
+    ]
+  },
   "tipos_montagem": {
     "opcoes": [
       {
@@ -83,6 +98,10 @@
         "label": "HÍBRIDA 2p/sp",
         "paineis_2p_por_berco": 1,
         "paineis_sp_por_berco": 1
+      },
+      {
+        "label": "3T",
+        "paineis_3t_por_berco": 2
       }
     ]
   },

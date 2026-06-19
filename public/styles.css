@@ -1823,6 +1823,41 @@ td.mono {
   flex-direction: column;
 }
 
+.debriefing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.debriefing-header-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+.debriefing-date-input {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 3px 7px;
+  cursor: pointer;
+  outline: none;
+}
+
+.debriefing-date-input:focus {
+  border-color: var(--accent);
+}
+
 .debriefing-paper {
   font-family: var(--font-mono);
   font-size: 0.78rem;

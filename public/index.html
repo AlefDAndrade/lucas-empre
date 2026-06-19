@@ -197,6 +197,10 @@
                       📓 Debriefing do Dia
                     </button>
                     <div id="popover-debriefing" class="ao-popover debriefing-popover">
+                      <div class="debriefing-header">
+                        <span class="debriefing-header-label">📓 Debriefing</span>
+                        <input type="date" id="debriefing-data-input" class="debriefing-date-input" oninput="LWDebriefing.mudarData(this.value)">
+                      </div>
                       <div class="debriefing-paper" id="debriefing-content">Carregando...</div>
                     </div>
                   </div>
