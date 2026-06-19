@@ -22,6 +22,25 @@ let VOLUME_POR_PLACA = []; // [{ label: 'S/P - 7,5 cm', volume: 0.1373 }, ...]
 let _configReady = false;
 const _configCallbacks = [];
 
+/**
+ * Extrai os componentes de painéis de uma opção de tipo de montagem,
+ * de forma genérica — suporta qualquer quantidade de tipos (2p, sp, 3p, ...).
+ * Uma chave é considerada um componente se terminar em "_por_berco".
+ * Retorna: { porBerco: { '2p': 2, 'sp': 0, ... } }
+ * O tipo (ex: '2p') é extraído do nome da chave: paineis_2p_por_berco -> '2p'.
+ */
+function extrairComponentesMontagem(opcao) {
+  const porBerco = {};
+  Object.keys(opcao || {}).forEach(chave => {
+    const m = chave.match(/^paineis_(.+)_por_berco$/);
+    if (m) {
+      const tipo = m[1]; // ex: '2p', 'sp', '3p'
+      porBerco[tipo] = Number(opcao[chave]) || 0;
+    }
+  });
+  return { porBerco };
+}
+
 async function loadConfig() {
   if (_configReady) return;
   try {
@@ -30,9 +49,9 @@ async function loadConfig() {
     const cfg = await res.json();
 
     // Se não houver chave 'dimensoes', extraímos das baterias (nova estrutura)
-    if (cfg.dimensoes?.opcoes) {
+    if (Array.isArray(cfg.dimensoes?.opcoes)) {
       DIMENSAO_OPTS = cfg.dimensoes.opcoes.map(d => ({ label: d.label, bercos: d.bercos }));
-    } else if (cfg.baterias?.ids) {
+    } else if (Array.isArray(cfg.baterias?.ids)) {
       const uniqueDims = new Map();
       cfg.baterias.ids.forEach(b => {
         if (b.label && b.bercos) {
@@ -40,20 +59,61 @@ async function loadConfig() {
         }
       });
       DIMENSAO_OPTS = Array.from(uniqueDims.entries()).map(([label, bercos]) => ({ label, bercos }));
+    } else if (!DIMENSAO_OPTS.length) {
+      console.warn('[LW] config.json sem "dimensoes" nem "baterias.ids" válidos — usando fallback de dimensões.');
+      DIMENSAO_OPTS = [
+        { label: '7,5 cm', bercos: 22 },
+        { label: '9 cm', bercos: 20 },
+        { label: '12 cm', bercos: 18 },
+      ];
     }
 
-    MONTAGEM_OPTS = cfg.tipos_montagem.opcoes.map(t => t.label);
-    MONTAGEM_MAP = {};
-    cfg.tipos_montagem.opcoes.forEach(t => {
-      MONTAGEM_MAP[t.label] = {
-        paineis_2p_por_berco: t.paineis_2p_por_berco,
-        paineis_sp_por_berco: t.paineis_sp_por_berco,
+    // Cada bloco do config.json é lido de forma independente: se um bloco vier
+    // ausente ou malformado (ex: um campo esquecido ao salvar configurações),
+    // isso não deve impedir a leitura dos demais blocos válidos. Cada bloco que
+    // falhar mantém o valor já carregado (ou o default, na primeira carga).
+    if (Array.isArray(cfg.tipos_montagem?.opcoes)) {
+      MONTAGEM_OPTS = cfg.tipos_montagem.opcoes.map(t => t.label);
+      MONTAGEM_MAP = {};
+      cfg.tipos_montagem.opcoes.forEach(t => {
+        MONTAGEM_MAP[t.label] = extrairComponentesMontagem(t);
+      });
+    } else if (!MONTAGEM_OPTS.length) {
+      console.warn('[LW] config.json sem "tipos_montagem.opcoes" válido — usando fallback de tipos de montagem.');
+      MONTAGEM_OPTS = ['2/P', 'S/P', 'HÍBRIDA'];
+      MONTAGEM_MAP = {
+        '2/P': { porBerco: { '2p': 2 } },
+        'S/P': { porBerco: { 'sp': 2 } },
+        'HÍBRIDA': { porBerco: { '2p': 1, 'sp': 1 } },
       };
-    });
+    } else {
+      console.warn('[LW] config.json sem "tipos_montagem.opcoes" válido — mantendo tipos de montagem já carregados.');
+    }
 
-    BATERIA_IDS = cfg.baterias.ids;
+    if (Array.isArray(cfg.baterias?.ids)) {
+      BATERIA_IDS = cfg.baterias.ids;
+    } else if (!BATERIA_IDS.length) {
+      console.warn('[LW] config.json sem "baterias.ids" válido — usando fallback de baterias.');
+      BATERIA_IDS = ['B1', 'B2', 'B3', 'B4', 'B5-7,5cm', 'B6-12cm', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12'];
+    } else {
+      console.warn('[LW] config.json sem "baterias.ids" válido — mantendo baterias já carregadas.');
+    }
 
-    VOLUME_POR_PLACA = cfg.volume_por_placa.map(v => ({ label: v.label, volume: v.volume }));
+    if (Array.isArray(cfg.volume_por_placa)) {
+      VOLUME_POR_PLACA = cfg.volume_por_placa.map(v => ({ label: v.label, volume: v.volume }));
+    } else if (!VOLUME_POR_PLACA.length) {
+      console.warn('[LW] config.json sem "volume_por_placa" válido — usando fallback (apenas informativo).');
+      VOLUME_POR_PLACA = [
+        { label: 'S/P - 7,5 cm', volume: 0.1373 },
+        { label: '2/P - 7,5 cm', volume: 0.1189 },
+        { label: 'S/P - 9 cm', volume: 0.1647 },
+        { label: '2/P - 9 cm', volume: 0.1427 },
+        { label: 'S/P - 12 cm', volume: 0.2196 },
+        { label: '2/P - 12 cm', volume: 0.1903 },
+      ];
+    } else {
+      console.warn('[LW] config.json sem "volume_por_placa" válido — mantendo lista já carregada.');
+    }
 
   } catch (err) {
     console.warn('[LW] Usando valores fallback — config.json indisponível:', err.message);
@@ -64,9 +124,9 @@ async function loadConfig() {
     ];
     MONTAGEM_OPTS = ['2/P', 'S/P', 'HÍBRIDA'];
     MONTAGEM_MAP = {
-      '2/P': { paineis_2p_por_berco: 2, paineis_sp_por_berco: 0 },
-      'S/P': { paineis_2p_por_berco: 0, paineis_sp_por_berco: 2 },
-      'HÍBRIDA': { paineis_2p_por_berco: 1, paineis_sp_por_berco: 1 },
+      '2/P': { porBerco: { '2p': 2 } },
+      'S/P': { porBerco: { 'sp': 2 } },
+      'HÍBRIDA': { porBerco: { '2p': 1, 'sp': 1 } },
     };
     BATERIA_IDS = ['B1', 'B2', 'B3', 'B4', 'B5-7,5cm', 'B6-12cm', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12'];
     VOLUME_POR_PLACA = [
@@ -89,10 +149,7 @@ async function loadConfig() {
       MONTAGEM_OPTS = cfg.tipos_montagem.opcoes.map(t => t.label);
       MONTAGEM_MAP = {};
       cfg.tipos_montagem.opcoes.forEach(t => {
-        MONTAGEM_MAP[t.label] = {
-          paineis_2p_por_berco: t.paineis_2p_por_berco,
-          paineis_sp_por_berco: t.paineis_sp_por_berco
-        };
+        MONTAGEM_MAP[t.label] = extrairComponentesMontagem(t);
       });
     } catch (e) { console.warn('Config override inválida', e); }
   }
@@ -132,22 +189,88 @@ function clearOperacaoAtual() {
 
 // ---- Calculation helpers ----
 
+/**
+ * Calcula painéis e m² para um tipo de montagem e quantidade de berços.
+ * Suporta qualquer número de "tipos de placa" (2p, sp, 3p, ...), definidos
+ * dinamicamente em MONTAGEM_MAP[tipoMontagem].porBerco.
+ *
+ * Retorna sempre:
+ *  - paineis_por_tipo / m2_por_tipo: objetos { '2p': N, 'sp': N, ... } — fonte da verdade
+ *  - paineis_2p, paineis_sp, m2_2p, m2_sp: aliases de compatibilidade com código/
+ *    registros antigos que esperam exatamente esses dois tipos (sempre presentes,
+ *    mesmo que valham 0, mesmo se o tipo não existir na montagem atual).
+ */
 function calcPaineis(tipoMontagem, bercos) {
   const map = MONTAGEM_MAP[tipoMontagem];
-  let paineis_2p, paineis_sp;
-  if (map) {
-    paineis_2p = bercos * map.paineis_2p_por_berco;
-    paineis_sp = bercos * map.paineis_sp_por_berco;
-  } else {
-    paineis_2p = 0;
-    paineis_sp = bercos * 2;
-  }
-  const paineis_total = paineis_2p + paineis_sp;
+  const porBerco = (map && map.porBerco) ? map.porBerco : { 'sp': 2 }; // fallback histórico: S/P puro
+
+  const paineis_por_tipo = {};
+  let paineis_total = 0;
+  Object.keys(porBerco).forEach(tipo => {
+    const qtd = bercos * (porBerco[tipo] || 0);
+    paineis_por_tipo[tipo] = qtd;
+    paineis_total += qtd;
+  });
+
+  const m2_por_tipo = {};
+  Object.keys(paineis_por_tipo).forEach(tipo => {
+    m2_por_tipo[tipo] = paineis_por_tipo[tipo] * M2_POR_PAINEL;
+  });
   const m2_total = paineis_total * M2_POR_PAINEL;
-  const m2_2p = paineis_2p * M2_POR_PAINEL;
-  const m2_sp = paineis_sp * M2_POR_PAINEL;
-  const placas_cimenticia = paineis_2p * 2;
-  return { total_paineis: paineis_total, paineis_2p, paineis_sp, m2_total, m2_2p, m2_sp, placas_cimenticia };
+
+  // Placas cimenticia: regra de negócio específica do tipo '2p' (mantida).
+  const placas_cimenticia = (paineis_por_tipo['2p'] || 0) * 2;
+
+  return {
+    total_paineis: paineis_total,
+    m2_total,
+    placas_cimenticia,
+    paineis_por_tipo,
+    m2_por_tipo,
+    // Aliases de compatibilidade (sempre presentes):
+    paineis_2p: paineis_por_tipo['2p'] || 0,
+    paineis_sp: paineis_por_tipo['sp'] || 0,
+    m2_2p: m2_por_tipo['2p'] || 0,
+    m2_sp: m2_por_tipo['sp'] || 0,
+  };
+}
+
+/**
+ * Soma um campo do tipo { '2p': N, 'sp': N, ... } através de uma lista de registros.
+ * Ex: somarPorTipo(baterias, 'paineis_por_tipo') -> { '2p': 120, 'sp': 40, '3p': 10 }
+ */
+function somarPorTipo(registros, campo) {
+  const totais = {};
+  registros.forEach(r => {
+    const obj = r[campo];
+    if (!obj) return;
+    Object.keys(obj).forEach(tipo => {
+      totais[tipo] = (totais[tipo] || 0) + (obj[tipo] || 0);
+    });
+  });
+  return totais;
+}
+
+/**
+ * Garante que um registro (do histórico, novo ou antigo) tenha paineis_por_tipo
+ * e m2_por_tipo preenchidos, derivando-os dos campos legados paineis_2p/paineis_sp
+ * quando necessário. Não sobrescreve dados já no formato novo.
+ */
+function normalizarPaineisRegistro(registro) {
+  if (!registro) return registro;
+  if (!registro.paineis_por_tipo) {
+    registro.paineis_por_tipo = {
+      '2p': registro.paineis_2p || 0,
+      'sp': registro.paineis_sp || 0,
+    };
+  }
+  if (!registro.m2_por_tipo) {
+    registro.m2_por_tipo = {
+      '2p': registro.m2_2p || 0,
+      'sp': registro.m2_sp || 0,
+    };
+  }
+  return registro;
 }
 
 // ---- Fuso horário padronizado: Brasília (America/Sao_Paulo) ----
@@ -255,6 +378,41 @@ async function getRelatorioInjecao() {
   } catch (_) { return []; }
 }
 
+/**
+ * Obtém o total de traços já CONFIRMADOS hoje (Brasília) — apenas leitura,
+ * não consome/incrementa nada. Usado para calcular a numeração de PRÉVIA
+ * (total+1, total+2, ...) dos traços ainda em edição na operação atual.
+ * O número só se torna definitivo quando a operação é finalizada — ver
+ * confirmarTracosHoje().
+ * @returns {Promise<number>} total de traços confirmados hoje
+ */
+async function getTotalTracosHoje() {
+  const res = await fetch('/total-tracos-hoje?_=' + Date.now()); // evita cache
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.erro || 'Erro ao obter total de traços do dia');
+  return json.total;
+}
+
+/**
+ * Confirma N traços ao finalizar uma operação — incrementa atomicamente o
+ * total do dia no servidor. Deve ser chamada uma única vez por operação
+ * finalizada, com a quantidade de traços que de fato sobraram (após exclusões).
+ * Traços reaproveitados de sobra (mantêm Nº de uma operação anterior) NÃO
+ * devem ser contados aqui — apenas traços novos desta operação.
+ * @param {number} quantidade - quantos traços novos foram confirmados
+ * @returns {Promise<number>} novo total acumulado do dia
+ */
+async function confirmarTracosHoje(quantidade) {
+  const res = await fetch('/confirmar-tracos-hoje', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quantidade }),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.erro || 'Erro ao confirmar traços do dia');
+  return json.total;
+}
+
 // ---- Analytics ----
 
 async function registrarOperacao(record) {
@@ -269,6 +427,8 @@ async function registrarOperacao(record) {
 
 async function getStats(filtros = {}) {
   const baterias = await fetch('historico.json').then(r => r.json());
+  // Garante paineis_por_tipo/m2_por_tipo em todos os registros (antigos e novos)
+  baterias.forEach(normalizarPaineisRegistro);
   let data = baterias;
 
   if (filtros.dataInicio) {
@@ -283,11 +443,15 @@ async function getStats(filtros = {}) {
 
   const total_baterias = data.length;
   const total_paineis = data.reduce((s, b) => s + (b.total_paineis || 0), 0);
-  const total_paineis_2p = data.reduce((s, b) => s + (b.paineis_2p || 0), 0);
-  const total_paineis_sp = data.reduce((s, b) => s + (b.paineis_sp || 0), 0);
   const total_m2 = data.reduce((s, b) => s + (b.m2_total || 0), 0);
-  const total_m2_2p = data.reduce((s, b) => s + (b.m2_2p || 0), 0);
-  const total_m2_sp = data.reduce((s, b) => s + (b.m2_sp || 0), 0);
+  // Agregação genérica por tipo de placa (suporta N tipos: 2p, sp, 3p, ...)
+  const total_paineis_por_tipo = somarPorTipo(data, 'paineis_por_tipo');
+  const total_m2_por_tipo = somarPorTipo(data, 'm2_por_tipo');
+  // Aliases de compatibilidade (sempre presentes, mesmo que 0)
+  const total_paineis_2p = total_paineis_por_tipo['2p'] || 0;
+  const total_paineis_sp = total_paineis_por_tipo['sp'] || 0;
+  const total_m2_2p = total_m2_por_tipo['2p'] || 0;
+  const total_m2_sp = total_m2_por_tipo['sp'] || 0;
   const baterias_atraso = data.filter(b => b.houve_atraso === 'SIM').length;
   const pct_atraso = total_baterias ? Math.round(baterias_atraso / total_baterias * 100) : 0;
   const media_tempo = total_baterias
@@ -313,16 +477,21 @@ async function getStats(filtros = {}) {
   const por_turno = {};
   ['1º TURNO', '2º TURNO', '3º TURNO'].forEach(t => {
     const td = data.filter(b => b.turno === t);
+    const paineisPorTipoTurno = somarPorTipo(td, 'paineis_por_tipo');
+    const m2PorTipoTurno = somarPorTipo(td, 'm2_por_tipo');
     por_turno[t] = {
       total: td.length,
       atraso: td.filter(b => b.houve_atraso === 'SIM').length,
       m2: td.reduce((s, b) => s + (b.m2_total || 0), 0),
       tempo_medio: td.length ? td.reduce((s, b) => s + (b.tempo_min || 0), 0) / td.length : 0,
       paineis: td.reduce((s, b) => s + (b.total_paineis || 0), 0),
-      paineis_2p: td.reduce((s, b) => s + (b.paineis_2p || 0), 0),
-      paineis_sp: td.reduce((s, b) => s + (b.paineis_sp || 0), 0),
-      m2_2p: td.reduce((s, b) => s + (b.m2_2p || 0), 0),
-      m2_sp: td.reduce((s, b) => s + (b.m2_sp || 0), 0),
+      paineis_por_tipo: paineisPorTipoTurno,
+      m2_por_tipo: m2PorTipoTurno,
+      // Aliases de compatibilidade:
+      paineis_2p: paineisPorTipoTurno['2p'] || 0,
+      paineis_sp: paineisPorTipoTurno['sp'] || 0,
+      m2_2p: m2PorTipoTurno['2p'] || 0,
+      m2_sp: m2PorTipoTurno['sp'] || 0,
     };
   });
 
@@ -407,6 +576,9 @@ window.LW = {
 
   // Cálculos
   calcPaineis,
+  normalizarPaineisRegistro,
+  somarPorTipo,
+  extrairComponentesMontagem,
 
   // Formatação
   formatTime, diffMinutes, formatDuration,
@@ -414,6 +586,8 @@ window.LW = {
   // Relatório de Injeção
   registrarRelatorioInjecao,
   getRelatorioInjecao,
+  getTotalTracosHoje,
+  confirmarTracosHoje,
 
   // Dados e analytics
   registrarOperacao, getStats,

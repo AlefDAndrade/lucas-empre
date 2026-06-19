@@ -13,10 +13,82 @@ const MIME = {
   '.key':  'text/plain',
 };
 
+// Retorna a data de hoje em Brasília no formato YYYY-MM-DD (consistente com
+// todayBrasilia() do frontend), independente do fuso horário do servidor.
+function todayBrasiliaServer() {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  return fmt.format(new Date()); // en-CA já formata como YYYY-MM-DD
+}
+
+// Lê o contador de traços do dia, resetando automaticamente se a data mudou
+// (Brasília). NÃO incrementa — apenas garante que o objeto retornado é válido
+// para o dia de hoje. Quem chama decide se quer ler ou incrementar.
+function lerContadorTracosHoje() {
+  const hoje = todayBrasiliaServer();
+  const contadorPath = path.join(DIR, 'contador_tracos.json');
+  let contador = { data: hoje, total: 0 };
+  try {
+    contador = JSON.parse(fs.readFileSync(contadorPath, 'utf8'));
+  } catch (_) { /* arquivo ainda não existe — usa o default acima */ }
+  if (contador.data !== hoje) {
+    contador = { data: hoje, total: 0 }; // novo dia: reinicia a contagem
+  }
+  return contador;
+}
+
+function salvarContadorTracos(contador) {
+  const contadorPath = path.join(DIR, 'contador_tracos.json');
+  fs.writeFileSync(contadorPath, JSON.stringify(contador, null, 2), 'utf8');
+}
+
 http.createServer((req, res) => {
 
   // Extrai apenas o caminho (pathname) da URL, ignorando parâmetros como ?_=...
   const [urlPath] = req.url.split('?');
+
+  // Total de traços já CONFIRMADOS hoje (Brasília) — apenas leitura, não incrementa.
+  // Usado pelo frontend para calcular a numeração de prévia (total+1, total+2, ...)
+  // dos traços ainda em edição na operação em andamento.
+  if (req.method === 'GET' && urlPath === '/total-tracos-hoje') {
+    try {
+      const contador = lerContadorTracosHoje();
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, total: contador.total, data: contador.data }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    }
+    return;
+  }
+
+  // Confirma N traços ao finalizar uma operação — incrementa atomicamente o
+  // total do dia e retorna o novo total. Chamado uma única vez por operação
+  // finalizada, com a quantidade de traços que de fato sobraram (não excluídos).
+  if (req.method === 'POST' && urlPath === '/confirmar-tracos-hoje') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        const quantidade = Number(payload.quantidade);
+        if (!Number.isInteger(quantidade) || quantidade < 0) {
+          throw new Error('Quantidade inválida.');
+        }
+        const contador = lerContadorTracosHoje();
+        contador.total += quantidade;
+        salvarContadorTracos(contador);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, total: contador.total, data: contador.data }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
 
   // Salvar config.json via POST
   if (req.method === 'POST' && urlPath === '/salvar-config') {

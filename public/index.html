@@ -192,6 +192,14 @@
                       </div>
                     </div>
                   </div>
+                  <div style="position:relative">
+                    <button class="btn btn-ghost btn-sm" onclick="LWDebriefing.toggle(event)">
+                      📓 Debriefing do Dia
+                    </button>
+                    <div id="popover-debriefing" class="ao-popover debriefing-popover">
+                      <div class="debriefing-paper" id="debriefing-content">Carregando...</div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -293,7 +301,7 @@
             </div>
 
             <div class="card">
-              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;text-align:center">
+              <div id="op-cards-paineis" style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;text-align:center">
                 <div>
                   <div
                     style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
@@ -301,20 +309,8 @@
                   <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:var(--accent)"
                     id="op-paineis-total">—</div>
                 </div>
-                <div>
-                  <div
-                    style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
-                    Painéis 2/P</div>
-                  <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:var(--blue)"
-                    id="op-paineis-2p">—</div>
-                </div>
-                <div>
-                  <div
-                    style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
-                    Painéis S/P</div>
-                  <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:var(--green)"
-                    id="op-paineis-sp">—</div>
-                </div>
+                <!-- Cards de Painéis por tipo (2/P, S/P, 3/P, ...) inseridos dinamicamente aqui -->
+                <div id="op-cards-paineis-tipo" style="display:contents"></div>
                 <div>
                   <div
                     style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
@@ -322,20 +318,8 @@
                   <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:var(--text)"
                     id="op-m2-total">—</div>
                 </div>
-                <div>
-                  <div
-                    style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
-                    m² 2/P</div>
-                  <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:var(--blue)"
-                    id="op-m2-2p">—</div>
-                </div>
-                <div>
-                  <div
-                    style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
-                    m² S/P</div>
-                  <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:var(--green)"
-                    id="op-m2-sp">—</div>
-                </div>
+                <!-- Cards de m² por tipo (2/P, S/P, 3/P, ...) inseridos dinamicamente aqui -->
+                <div id="op-cards-m2-tipo" style="display:contents"></div>
                 <div>
                   <div
                     style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
@@ -345,6 +329,7 @@
                 </div>
               </div>
             </div>
+
 
             <!-- Actions -->
             <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -556,29 +541,37 @@
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table id="registro-table">
             <thead>
               <tr>
-                <th>Data</th>
-                <th>Turno</th>
-                <th>Dimensão</th>
-                <th>Cap. Berços</th> <!-- Nova -->
-                <th>ID Bateria</th>
-                <th>Início</th>
-                <th>Fim</th>
-                <th>Duração</th>
-                <th>Traços</th>
-                <th>Atraso</th>
-                <th>Motivo Atraso</th> <!-- Nova -->
-                <th>Montagem</th>
-                <th>Painéis (2P/SP)</th> <!-- Atualizada -->
-                <th>Painéis 2/P</th> <!-- Coluna 2/P -->
-                <th>Painéis S/P</th> <!-- Coluna S/P -->
-                <th>m² (2P/SP)</th> <!-- Atualizada -->
-                <th>m² 2/P</th> <!-- Coluna m² 2/P -->
-                <th>m² S/P</th> <!-- Coluna m² S/P -->
-                <th>Berços Reais</th> <!-- Nova -->
-                <th>Placas Cimenticia</th>
+                <th data-col="data">Data</th>
+                <th data-col="turno">Turno</th>
+                <th data-col="dimensao">Dimensão</th>
+                <th data-col="capacidade">Cap. Berços</th> <!-- Nova -->
+                <th data-col="id_bateria">ID Bateria</th>
+                <th data-col="inicio">Início</th>
+                <th data-col="fim">Fim</th>
+                <th data-col="duracao">Duração</th>
+                <th data-col="tracos">Traços</th>
+                <th data-col="atraso">Atraso</th>
+                <th data-col="motivo_atraso">Motivo Atraso</th> <!-- Nova -->
+                <th data-col="montagem">Montagem</th>
+                <th data-col="paineis_2psp">Painéis (2P/SP)</th> <!-- Atualizada -->
+                <th data-col="paineis_2p">Painéis 2/P</th> <!-- Coluna 2/P -->
+                <th data-col="paineis_sp">Painéis S/P</th> <!-- Coluna S/P -->
+                <th data-col="m2_2psp">m² (2P/SP)</th> <!-- Atualizada -->
+                <th data-col="m2_2p">m² 2/P</th> <!-- Coluna m² 2/P -->
+                <th data-col="m2_sp">m² S/P</th> <!-- Coluna m² S/P -->
+                <th data-col="bercos_reais">Berços Reais</th> <!-- Nova -->
+                <th data-col="placas_cimenticia">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+                    <span>Placas Cimenticia</span>
+                    <button type="button" id="btn-col-toggle-registro" class="btn-col-toggle"
+                      title="Exibir/ocultar colunas" aria-haspopup="true" aria-expanded="false"
+                      onclick="LWDash.toggleColMenu(event)"
+                      style="background:none;border:1px solid var(--border);border-radius:6px;width:24px;height:24px;line-height:1;cursor:pointer;color:var(--text-2);font-size:.8rem;flex:0 0 auto">⚙</button>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody id="registro-tbody">
@@ -587,6 +580,18 @@
               </tr>
             </tbody>
           </table>
+
+          <!-- Menu de colunas (dropdown) -->
+          <div id="col-menu-registro" class="col-menu" style="display:none">
+            <div class="col-menu-item col-menu-group-toggle">
+              <label>
+                <input type="checkbox" id="col-toggle-tipos-placa" onchange="LWDash.toggleGrupoTiposPlaca(this.checked)">
+                <span>Ocultar Tipos de Placas</span>
+              </label>
+            </div>
+            <div class="col-menu-divider"></div>
+            <div id="col-menu-list"></div>
+          </div>
         </div>
 
       </div>
@@ -1188,20 +1193,34 @@
       <div style="margin-bottom:28px">
         <div class="card-title">Tipos de Montagem</div>
         <div id="cfg-montagem-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-          <div class="form-group">
+
+        <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+          <div style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">
+            Novo Tipo de Montagem</div>
+
+          <div class="form-group" style="margin-bottom:12px">
             <label class="form-label">Label</label>
-            <input class="form-input" id="cfg-mont-label" placeholder="Ex: DUPLA" style="width:130px">
+            <input class="form-input" id="cfg-mont-label" placeholder="Ex: HÍBRIDA 3p/2p" style="width:220px">
           </div>
-          <div class="form-group">
-            <label class="form-label">Painéis 2P/berço</label>
-            <input class="form-input" type="number" id="cfg-mont-2p" placeholder="0" style="width:100px">
+
+          <!-- Componentes (tipo + painéis/berço) adicionados antes de salvar o tipo -->
+          <div id="cfg-mont-componentes-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Tipo de Placa</label>
+              <input class="form-input" id="cfg-mont-comp-tipo" placeholder="Ex: 2p, sp, 3p" style="width:120px">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Painéis/Berço</label>
+              <input class="form-input" type="number" id="cfg-mont-comp-valor" placeholder="0" style="width:110px">
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="cfgAdicionarComponenteMontagem()">+ Adicionar Componente</button>
           </div>
-          <div class="form-group">
-            <label class="form-label">Painéis SP/berço</label>
-            <input class="form-input" type="number" id="cfg-mont-sp" placeholder="2" style="width:100px">
+
+          <div style="margin-top:14px;display:flex;justify-content:flex-end">
+            <button class="btn btn-outline-accent btn-sm" onclick="cfgAdicionarMontagem()">+ Salvar Tipo de Montagem</button>
           </div>
-          <button class="btn btn-outline-accent btn-sm" onclick="cfgAdicionarMontagem()">+ Adicionar</button>
         </div>
       </div>
 
@@ -1677,6 +1696,7 @@
     // ---- Config Modal ----
 
     let _cfgDados = null; // cópia local enquanto edita
+    let _cfgMontComponentesTemp = []; // componentes (tipo+valor) do novo tipo de montagem em edição
 
     function abrirConfig() {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
@@ -1684,12 +1704,14 @@
       // BATERIA_IDS agora é array de objetos {id, label, bercos}
       _cfgDados = {
         baterias: LW.BATERIA_IDS.map(b => ({ id: b.id, label: b.label || '', bercos: b.bercos || 20 })),
+        // Cada montagem agora guarda 'componentes': [{ tipo: '2p', valor: 2 }, ...],
+        // espelhando a estrutura genérica porBerco usada internamente em data.js.
         montagens: Object.entries(LW.MONTAGEM_MAP).map(([label, v]) => ({
           label,
-          paineis_2p_por_berco: v.paineis_2p_por_berco,
-          paineis_sp_por_berco: v.paineis_sp_por_berco
+          componentes: Object.entries(v.porBerco || {}).map(([tipo, valor]) => ({ tipo, valor }))
         }))
       };
+      _cfgMontComponentesTemp = [];
       cfgRenderTudo();
       document.getElementById('config-modal').style.display = 'flex';
     }
@@ -1697,6 +1719,7 @@
     function fecharConfig() {
       document.getElementById('config-modal').style.display = 'none';
       _cfgDados = null;
+      _cfgMontComponentesTemp = [];
     }
 
     function cfgRenderTudo() {
@@ -1712,16 +1735,31 @@
     </div>
   `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhuma bateria cadastrada.</span>';
 
-      // Montagens
+      // Montagens — cada uma exibe seus componentes (tipo: valor/berço) dinamicamente
       const lm = document.getElementById('cfg-montagem-lista');
       lm.innerHTML = _cfgDados.montagens.map((m, i) => `
-    <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px">
+    <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;flex-wrap:wrap">
       <span style="font-family:var(--font-display);font-size:.9rem;font-weight:700;color:var(--text);min-width:90px">${m.label}</span>
-      <span style="font-size:.78rem;color:var(--text-3)">2P/berço: <strong style="color:var(--blue)">${m.paineis_2p_por_berco}</strong></span>
-      <span style="font-size:.78rem;color:var(--text-3)">SP/berço: <strong style="color:var(--green)">${m.paineis_sp_por_berco}</strong></span>
+      ${m.componentes.map(c =>
+        `<span style="font-size:.78rem;color:var(--text-3)">${c.tipo.toUpperCase()}/berço: <strong style="color:var(--blue)">${c.valor}</strong></span>`
+      ).join('')}
       <button onclick="cfgRemoverMontagem(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
     </div>
   `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum tipo cadastrado.</span>';
+
+      cfgRenderComponentesTemp();
+    }
+
+    // Renderiza a lista temporária de componentes (tipo+valor) do tipo de montagem em edição
+    function cfgRenderComponentesTemp() {
+      const el = document.getElementById('cfg-mont-componentes-lista');
+      if (!el) return;
+      el.innerHTML = _cfgMontComponentesTemp.map((c, i) => `
+    <div style="display:flex;align-items:center;gap:10px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px">
+      <span style="font-size:.8rem;color:var(--text-2)">${c.tipo.toUpperCase()} — <strong style="color:var(--blue)">${c.valor}</strong> painéis/berço</span>
+      <button onclick="cfgRemoverComponenteMontagem(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.8rem;margin-left:auto">✕</button>
+    </div>
+  `).join('') || '<span style="color:var(--text-3);font-size:.78rem">Nenhum componente adicionado ainda.</span>';
     }
 
     function cfgAdicionarBateria() {
@@ -1753,16 +1791,42 @@
 
     // cfgAdicionarDimensao e cfgRemoverDimensao removidos — dimensão agora pertence à bateria
 
+    // Adiciona um componente (tipo de placa + painéis/berço) à lista temporária,
+    // antes de salvar o tipo de montagem como um todo.
+    function cfgAdicionarComponenteMontagem() {
+      const inputTipo = document.getElementById('cfg-mont-comp-tipo');
+      const inputValor = document.getElementById('cfg-mont-comp-valor');
+
+      const tipo = inputTipo.value.trim().toLowerCase().replace(/\s+/g, '');
+      const valor = parseInt(inputValor.value);
+
+      if (!tipo) return alert('Digite o tipo de placa (ex: 2p, sp, 3p).');
+      if (!/^[a-z0-9]+$/.test(tipo)) return alert('Use apenas letras e números no tipo (ex: 2p, sp, 3p).');
+      if (!Number.isFinite(valor) || valor < 0) return alert('Digite a quantidade de painéis/berço (0 ou mais).');
+      if (_cfgMontComponentesTemp.find(c => c.tipo === tipo)) return alert('Este tipo de placa já foi adicionado a este tipo de montagem.');
+
+      _cfgMontComponentesTemp.push({ tipo, valor });
+      inputTipo.value = '';
+      inputValor.value = '';
+      cfgRenderComponentesTemp();
+    }
+
+    function cfgRemoverComponenteMontagem(i) {
+      _cfgMontComponentesTemp.splice(i, 1);
+      cfgRenderComponentesTemp();
+    }
+
+    // Consolida os componentes empilhados em um novo tipo de montagem e o salva na lista.
     function cfgAdicionarMontagem() {
       const label = document.getElementById('cfg-mont-label').value.trim().toUpperCase();
-      const p2p = parseInt(document.getElementById('cfg-mont-2p').value) || 0;
-      const psp = parseInt(document.getElementById('cfg-mont-sp').value) || 0;
       if (!label) return alert('Digite um label para o tipo de montagem.');
+      if (!_cfgMontComponentesTemp.length) return alert('Adicione ao menos um componente (tipo de placa + painéis/berço).');
       if (_cfgDados.montagens.find(m => m.label === label)) return alert('Este tipo já existe.');
-      _cfgDados.montagens.push({ label, paineis_2p_por_berco: p2p, paineis_sp_por_berco: psp });
+
+      _cfgDados.montagens.push({ label, componentes: [..._cfgMontComponentesTemp] });
+
       document.getElementById('cfg-mont-label').value = '';
-      document.getElementById('cfg-mont-2p').value = '';
-      document.getElementById('cfg-mont-sp').value = '';
+      _cfgMontComponentesTemp = [];
       cfgRenderTudo();
     }
 
@@ -1788,12 +1852,17 @@
         baterias: { ids: _cfgDados.baterias },
         dimensoes: { opcoes: dimensoesOpcoes }, // mantido para compatibilidade com registros antigos
         tipos_montagem: {
-          opcoes: _cfgDados.montagens.map(m => ({
-            label: m.label,
-            paineis_2p_por_berco: m.paineis_2p_por_berco,
-            paineis_sp_por_berco: m.paineis_sp_por_berco
-          }))
-        }
+          // Cada componente {tipo, valor} é convertido para a chave genérica
+          // "paineis_<tipo>_por_berco", lida dinamicamente por extrairComponentesMontagem() em data.js.
+          opcoes: _cfgDados.montagens.map(m => {
+            const opcao = { label: m.label };
+            m.componentes.forEach(c => { opcao[`paineis_${c.tipo}_por_berco`] = c.valor; });
+            return opcao;
+          })
+        },
+        // Preserva volume_por_placa tal como está atualmente em memória — este modal
+        // não edita essa lista, então nunca deve sobrescrevê-la com algo vazio/ausente.
+        volume_por_placa: LW.VOLUME_POR_PLACA,
       };
 
       try {
@@ -2019,6 +2088,7 @@
   </div>
   <script src="analise-operacional.js"></script>
   <script src="qualidade-tracos.js"></script>
+  <script src="debriefing.js"></script>
   <script src="keyboard-shortcuts.js"></script>
 </body>
 

@@ -363,7 +363,11 @@
       el.addEventListener('change', _onDataRegistro);
     });
 
-    renderRegistro();
+    // Detecta tipos de placa extras (ex: 3p) antes de montar o menu de colunas,
+    // para que eles já apareçam na lista de checkboxes na primeira renderização.
+    _garantirColunasDinamicasTipo(s.data);
+    initColMenuRegistro();
+    await renderRegistro();
   }
 
   function _onDataRegistro(e) {
@@ -386,11 +390,20 @@
 
     data = [...data].sort((a, b) => b.data.localeCompare(a.data) || (b.inicio || '').localeCompare(a.inicio || ''));
 
+    // Antes de montar as linhas, garante que colunas de tipos extras (ex: 3p) existam no thead
+    _garantirColunasDinamicasTipo(data);
+    // Tipos de placa que não são 2p/sp e já têm coluna injetada (na ordem em que foram injetados)
+    const tiposExtras = COLUNAS_REGISTRO
+      .filter(c => c.dinamica && c.key.startsWith('paineis_'))
+      .map(c => c.key.replace('paineis_', ''));
+
     const tbody = document.getElementById('registro-tbody');
     document.getElementById('reg-count').textContent = data.length + ' registros';
 
+    const colspanTotal = COLUNAS_REGISTRO.length;
+
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="20" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${colspanTotal}" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
       return;
     }
 
@@ -398,38 +411,243 @@
     window._lwRegistroMapTemp = {};
     tbody.innerHTML = data.map((b, idx) => {
       window._lwRegistroMapTemp[idx] = b;
+      const ppt = b.paineis_por_tipo || {};
+      const m2pt = b.m2_por_tipo || {};
+      // <td> extras para tipos de placa alem de 2p/sp (ex: 3p), na mesma ordem das colunas injetadas
+      const tdsExtras = tiposExtras.map(tipo => `
+        <td data-col="paineis_${tipo}">${ppt[tipo] || 0}</td>
+        <td data-col="m2_${tipo}">${(m2pt[tipo] || 0).toFixed(2)}</td>
+      `).join('');
       return `
       <tr style="cursor:pointer" title="Clique para ver os traços desta bateria no Relatório de Injeção"
         onclick="LWDash.navegarParaTracosDoRegistro(window._lwRegistroMapTemp[${idx}])">
-        <td class="mono">${b.data ? b.data.split('-').reverse().join('/') : '—'}</td>
-        <td><span class="badge badge-gray">${b.turno || '—'}</span></td>
-        <td>${b.dimensao || '—'}</td>
-        <td>${b.capacidade || '—'}</td>
-        <td>${b.id_bateria || '—'}</td>
-        <td class="mono">${b.inicio ? LW.formatTime(b.inicio) : '—'}</td>
-        <td class="mono">${b.fim ? LW.formatTime(b.fim) : '—'}</td>
-        <td class="mono">${LW.formatDuration(b.tempo_min)}</td>
-        <td>${b.qtd_tracos || 0}</td>
-        <td>${b.houve_atraso === 'SIM'
+        <td data-col="data" class="mono">${b.data ? b.data.split('-').reverse().join('/') : '—'}</td>
+        <td data-col="turno"><span class="badge badge-gray">${b.turno || '—'}</span></td>
+        <td data-col="dimensao">${b.dimensao || '—'}</td>
+        <td data-col="capacidade">${b.capacidade || '—'}</td>
+        <td data-col="id_bateria">${b.id_bateria || '—'}</td>
+        <td data-col="inicio" class="mono">${b.inicio ? LW.formatTime(b.inicio) : '—'}</td>
+        <td data-col="fim" class="mono">${b.fim ? LW.formatTime(b.fim) : '—'}</td>
+        <td data-col="duracao" class="mono">${LW.formatDuration(b.tempo_min)}</td>
+        <td data-col="tracos">${b.qtd_tracos || 0}</td>
+        <td data-col="atraso">${b.houve_atraso === 'SIM'
           ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
           : '<span class="badge badge-green">✓ NÃO</span>'}</td>
-        <td>${b.motivo_atraso || '—'}</td>
-        <td><span class="badge ${b.tipo_montagem === '2/P' ? 'badge-blue' : b.tipo_montagem === 'S/P' ? 'badge-green' : 'badge-amber'}">${b.tipo_montagem || '—'}</span></td>
-        <td>${b.total_paineis || 0}</td>
-        <td>${b.paineis_2p || 0}</td>
-        <td>${b.paineis_sp || 0}</td>
-        <td>${(b.m2_total || 0).toFixed(2)}</td>
-        <td>${(b.m2_2p || 0).toFixed(2)}</td>
-        <td>${(b.m2_sp || 0).toFixed(2)}</td>
-        <td>${b.bercos_reais || '—'}</td>
-        <td>${b.placas_cimenticia || 0}</td>
+        <td data-col="motivo_atraso">${b.motivo_atraso || '—'}</td>
+        <td data-col="montagem"><span class="badge ${b.tipo_montagem === '2/P' ? 'badge-blue' : b.tipo_montagem === 'S/P' ? 'badge-green' : 'badge-amber'}">${b.tipo_montagem || '—'}</span></td>
+        <td data-col="paineis_2psp">${b.total_paineis || 0}</td>
+        <td data-col="paineis_2p">${b.paineis_2p || 0}</td>
+        <td data-col="paineis_sp">${b.paineis_sp || 0}</td>
+        <td data-col="m2_2psp">${(b.m2_total || 0).toFixed(2)}</td>
+        <td data-col="m2_2p">${(b.m2_2p || 0).toFixed(2)}</td>
+        <td data-col="m2_sp">${(b.m2_sp || 0).toFixed(2)}</td>
+        ${tdsExtras}
+        <td data-col="bercos_reais">${b.bercos_reais || '—'}</td>
+        <td data-col="placas_cimenticia">${b.placas_cimenticia || 0}</td>
       </tr>`;
     }).join('');
+
+    _aplicarVisibilidadeColunasRegistro();
   }
 
   // ================================================================
-  //  RELATÓRIO DE INJEÇÃO
+  //  REGISTRO DE BATERIAS — Exibir/Ocultar Colunas
   // ================================================================
+
+  const COL_REGISTRO_STORAGE_KEY = 'lw_cols_registro_baterias';
+
+  // Definição das colunas fixas da tabela (mesma ordem do <thead> em index.html).
+  // Tipos de placa alem de '2p'/'sp' (ex: '3p') geram colunas extras inseridas
+  // dinamicamente em runtime por _garantirColunasDinamicasTipo() — ver abaixo.
+  const COLUNAS_REGISTRO_BASE = [
+    { key: 'data', label: 'Data' },
+    { key: 'turno', label: 'Turno' },
+    { key: 'dimensao', label: 'Dimensão' },
+    { key: 'capacidade', label: 'Cap. Berços' },
+    { key: 'id_bateria', label: 'ID Bateria' },
+    { key: 'inicio', label: 'Início' },
+    { key: 'fim', label: 'Fim' },
+    { key: 'duracao', label: 'Duração' },
+    { key: 'tracos', label: 'Traços' },
+    { key: 'atraso', label: 'Atraso' },
+    { key: 'motivo_atraso', label: 'Motivo Atraso' },
+    { key: 'montagem', label: 'Montagem' },
+    { key: 'paineis_2psp', label: 'Painéis (2P/SP)', tipoPlaca: true },
+    { key: 'paineis_2p', label: 'Painéis 2/P', tipoPlaca: true },
+    { key: 'paineis_sp', label: 'Painéis S/P', tipoPlaca: true },
+    { key: 'm2_2psp', label: 'm² (2P/SP)', tipoPlaca: true },
+    { key: 'm2_2p', label: 'm² 2/P', tipoPlaca: true },
+    { key: 'm2_sp', label: 'm² S/P', tipoPlaca: true },
+    { key: 'bercos_reais', label: 'Berços Reais' },
+    { key: 'placas_cimenticia', label: 'Placas Cimenticia' },
+  ];
+
+  // Cópia mutável: ganha entradas extras quando tipos de placa novos (3p, 4p, ...)
+  // aparecem nos dados. Mantida em ordem de inserção.
+  let COLUNAS_REGISTRO = [...COLUNAS_REGISTRO_BASE];
+
+  // Tipos conhecidos de fábrica (já cobertos pelas colunas fixas do HTML)
+  const TIPOS_PLACA_NATIVOS = new Set(['2p', 'sp']);
+
+  function _labelTipoPlaca(tipo) {
+    const m = String(tipo).match(/^(\d+)p$/i);
+    if (m) return `${m[1]}/P`;
+    return String(tipo).toUpperCase();
+  }
+
+  /**
+   * Verifica os dados carregados por tipos de placa que não existem nas colunas
+   * fixas (ex: '3p') e, se encontrar, injeta dinamicamente:
+   *  - <th> de Painéis e m² para esse tipo, no <thead> (antes de "Berços Reais")
+   *  - entradas correspondentes em COLUNAS_REGISTRO (para entrar no menu de toggle)
+   * Idempotente: não duplica colunas já injetadas.
+   */
+  function _garantirColunasDinamicasTipo(dados) {
+    const tiposEncontrados = new Set();
+    dados.forEach(b => {
+      const obj = b.paineis_por_tipo;
+      if (!obj) return;
+      Object.keys(obj).forEach(t => { if (!TIPOS_PLACA_NATIVOS.has(t)) tiposEncontrados.add(t); });
+    });
+    if (!tiposEncontrados.size) return;
+
+    const thead = document.querySelector('#registro-table thead tr');
+    const thBercosReais = thead?.querySelector('th[data-col="bercos_reais"]');
+    if (!thead || !thBercosReais) return;
+
+    tiposEncontrados.forEach(tipo => {
+      const keyPaineis = `paineis_${tipo}`;
+      const keyM2 = `m2_${tipo}`;
+      if (COLUNAS_REGISTRO.some(c => c.key === keyPaineis)) return; // já injetada
+
+      const label = _labelTipoPlaca(tipo);
+      const thPaineis = document.createElement('th');
+      thPaineis.setAttribute('data-col', keyPaineis);
+      thPaineis.textContent = `Painéis ${label}`;
+      const thM2 = document.createElement('th');
+      thM2.setAttribute('data-col', keyM2);
+      thM2.textContent = `m² ${label}`;
+      thead.insertBefore(thPaineis, thBercosReais);
+      thead.insertBefore(thM2, thBercosReais);
+
+      // Insere antes de 'bercos_reais' na lista de colunas (mesma posição visual)
+      const idx = COLUNAS_REGISTRO.findIndex(c => c.key === 'bercos_reais');
+      COLUNAS_REGISTRO.splice(idx, 0,
+        { key: keyPaineis, label: `Painéis ${label}`, tipoPlaca: true, dinamica: true },
+        { key: keyM2, label: `m² ${label}`, tipoPlaca: true, dinamica: true },
+      );
+    });
+
+    // Atualiza colspan da mensagem "Carregando/Nenhum registro" e o menu de colunas
+    COLS_TIPOS_PLACA.length = 0;
+    COLUNAS_REGISTRO.filter(c => c.tipoPlaca).forEach(c => COLS_TIPOS_PLACA.push(c.key));
+  }
+
+  // Chaves do grupo "Tipos de Placas" (mutável: cresce se houver colunas dinâmicas)
+  const COLS_TIPOS_PLACA = COLUNAS_REGISTRO.filter(c => c.tipoPlaca).map(c => c.key);
+
+  let _colsOcultasRegistro = new Set();
+
+  function _carregarColsOcultasRegistro() {
+    try {
+      const saved = localStorage.getItem(COL_REGISTRO_STORAGE_KEY);
+      if (saved) {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr)) return new Set(arr);
+      }
+    } catch (e) { console.warn('Preferência de colunas inválida, usando padrão.', e); }
+    return new Set();
+  }
+
+  function _salvarColsOcultasRegistro() {
+    try {
+      localStorage.setItem(COL_REGISTRO_STORAGE_KEY, JSON.stringify([..._colsOcultasRegistro]));
+    } catch (e) { console.warn('Não foi possível salvar preferência de colunas.', e); }
+  }
+
+  function initColMenuRegistro() {
+    _colsOcultasRegistro = _carregarColsOcultasRegistro();
+
+    const lista = document.getElementById('col-menu-list');
+    if (!lista) return; // página ainda não renderizada
+
+    lista.innerHTML = COLUNAS_REGISTRO.map(c => `
+      <div class="col-menu-item">
+        <label>
+          <input type="checkbox" data-col-key="${c.key}"
+            ${_colsOcultasRegistro.has(c.key) ? '' : 'checked'}
+            onchange="LWDash.toggleColunaRegistro('${c.key}', this.checked)">
+          <span>${c.label}</span>
+        </label>
+      </div>
+    `).join('');
+
+    _sincronizarCheckboxGrupoTiposPlaca();
+    _aplicarVisibilidadeColunasRegistro();
+
+    // Fecha o menu ao clicar fora dele
+    document.removeEventListener('click', _onClickForaColMenuRegistro);
+    document.addEventListener('click', _onClickForaColMenuRegistro);
+  }
+
+  function _onClickForaColMenuRegistro(e) {
+    const menu = document.getElementById('col-menu-registro');
+    const btn = document.getElementById('btn-col-toggle-registro');
+    if (!menu || menu.style.display === 'none') return;
+    if (menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+    menu.style.display = 'none';
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleColMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('col-menu-registro');
+    const btn = document.getElementById('btn-col-toggle-registro');
+    if (!menu) return;
+    const abrir = menu.style.display === 'none';
+    menu.style.display = abrir ? 'block' : 'none';
+    if (btn) btn.setAttribute('aria-expanded', String(abrir));
+  }
+
+  function toggleColunaRegistro(key, visivel) {
+    if (visivel) _colsOcultasRegistro.delete(key);
+    else _colsOcultasRegistro.add(key);
+    _salvarColsOcultasRegistro();
+    _sincronizarCheckboxGrupoTiposPlaca();
+    _aplicarVisibilidadeColunasRegistro();
+  }
+
+  function toggleGrupoTiposPlaca(ocultar) {
+    COLS_TIPOS_PLACA.forEach(key => {
+      if (ocultar) _colsOcultasRegistro.add(key);
+      else _colsOcultasRegistro.delete(key);
+      const cb = document.querySelector(`#col-menu-list input[data-col-key="${key}"]`);
+      if (cb) cb.checked = !ocultar;
+    });
+    _salvarColsOcultasRegistro();
+    _aplicarVisibilidadeColunasRegistro();
+  }
+
+  // Marca o checkbox do grupo automaticamente quando todas as colunas do grupo já estão ocultas
+  function _sincronizarCheckboxGrupoTiposPlaca() {
+    const grupoCb = document.getElementById('col-toggle-tipos-placa');
+    if (!grupoCb) return;
+    grupoCb.checked = COLS_TIPOS_PLACA.every(key => _colsOcultasRegistro.has(key));
+  }
+
+  function _aplicarVisibilidadeColunasRegistro() {
+    const table = document.getElementById('registro-table');
+    if (!table) return;
+
+    COLUNAS_REGISTRO.forEach(c => {
+      const oculta = _colsOcultasRegistro.has(c.key);
+      table.querySelectorAll(`[data-col="${c.key}"]`).forEach(cell => {
+        cell.style.display = oculta ? 'none' : '';
+      });
+    });
+  }
+
+
 
   async function initRelatorio() {
     const linhas = await LW.getRelatorioInjecao();
@@ -539,7 +757,7 @@
 
   // ---- Export CSV ----
 
-  const EXPORT_COLUNAS = [
+  const EXPORT_COLUNAS_BASE = [
     { campo: 'data', header: 'Data', padrao: true, fmt: v => v ? v.split('-').reverse().join('/') : '' },
     { campo: 'turno', header: 'Turno', padrao: true },
     { campo: 'id_bateria', header: 'ID Bateria', padrao: true },
@@ -569,6 +787,54 @@
     { campo: 'm2_2p', header: 'm² 2/P', padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0,00' },
     { campo: 'm2_sp', header: 'm² S/P', padrao: false, fmt: v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0,00' },
   ];
+
+  // Tipos nativos já cobertos pela lista acima (paineis_2p/sp, m2_2p/sp)
+  const _EXPORT_TIPOS_NATIVOS = new Set(['2p', 'sp']);
+
+  /**
+   * Monta a lista de colunas de export, incluindo (se existirem nos dados)
+   * colunas extras para tipos de placa não nativos (ex: 3p), inseridas
+   * imediatamente após as colunas nativas de painéis/m².
+   */
+  function _gerarExportColunas(dados) {
+    const tiposExtras = new Set();
+    (dados || []).forEach(b => {
+      const obj = b.paineis_por_tipo;
+      if (!obj) return;
+      Object.keys(obj).forEach(t => { if (!_EXPORT_TIPOS_NATIVOS.has(t)) tiposExtras.add(t); });
+    });
+    if (!tiposExtras.size) return [...EXPORT_COLUNAS_BASE];
+
+    const colunas = [...EXPORT_COLUNAS_BASE];
+    const idxPaineisSp = colunas.findIndex(c => c.campo === 'paineis_sp');
+    const idxM2Sp = colunas.findIndex(c => c.campo === 'm2_sp');
+
+    const fmtNum = v => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '0,00';
+    let offset = 0;
+    tiposExtras.forEach(tipo => {
+      const label = (() => {
+        const m = String(tipo).match(/^(\d+)p$/i);
+        return m ? `${m[1]}/P` : String(tipo).toUpperCase();
+      })();
+      colunas.splice(idxPaineisSp + 1 + offset, 0, { campo: `paineis_${tipo}`, header: `Painéis ${label}`, padrao: true });
+      offset++;
+    });
+    // m2_sp pode ter mudado de posição por causa das inserções acima
+    const idxM2SpAjustado = colunas.findIndex(c => c.campo === 'm2_sp');
+    offset = 0;
+    tiposExtras.forEach(tipo => {
+      const label = (() => {
+        const m = String(tipo).match(/^(\d+)p$/i);
+        return m ? `${m[1]}/P` : String(tipo).toUpperCase();
+      })();
+      colunas.splice(idxM2SpAjustado + 1 + offset, 0, { campo: `m2_${tipo}`, header: `m² ${label}`, padrao: false, fmt: fmtNum });
+      offset++;
+    });
+    return colunas;
+  }
+
+  // Lista efetiva usada pela UI de export — recalculada em abrirExportModal()
+  let EXPORT_COLUNAS = [...EXPORT_COLUNAS_BASE];
 
   function gerarDownloadXLSX(dados, colsSel, sufixo) {
     // 1. Prepara os dados para o Excel
@@ -619,10 +885,14 @@
   // Compatibilidade — exporta tudo com colunas padrão
   async function exportXLSX() {
     const s = await LW.getStats();
+    EXPORT_COLUNAS = _gerarExportColunas(s.data);
     gerarDownloadXLSX(s.data, EXPORT_COLUNAS.filter(c => c.padrao), todayBrasilia());
   }
 
   async function abrirExportModal() {
+    const s = await LW.getStats();
+    EXPORT_COLUNAS = _gerarExportColunas(s.data);
+
     const grid = document.getElementById('exp-colunas-grid');
     grid.innerHTML = EXPORT_COLUNAS.map((c, i) =>
       '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 10px;' +
@@ -800,5 +1070,6 @@
     navegarParaTracosDoRegistro,
     exportCSV: exportXLSX, abrirExportModal, fecharExportModal, onExportPeriodoChange,
     selecionarTodasColunas, atualizarPreviewCount, confirmarExport,
+    toggleColMenu, toggleColunaRegistro, toggleGrupoTiposPlaca,
   };
 })();

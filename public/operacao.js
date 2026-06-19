@@ -152,28 +152,61 @@
     }
   }
 
+  // Cores cíclicas para os cards de tipo (mesma paleta usada antes para 2P/SP)
+  const _CORES_TIPO = ['var(--blue)', 'var(--green)', 'var(--accent)', 'var(--purple)', 'var(--yellow)'];
+
+  // Labels amigáveis para tipos conhecidos; tipos novos caem no fallback (maiúsculas + "/").
+  function _labelTipo(tipo) {
+    const conhecidos = { '2p': '2/P', 'sp': 'S/P', '3p': '3/P' };
+    if (conhecidos[tipo]) return conhecidos[tipo];
+    // Ex: '4p' -> '4/P'
+    const m = tipo.match(/^(\d+)p$/i);
+    if (m) return `${m[1]}/P`;
+    return tipo.toUpperCase();
+  }
+
   function recalcPaineis() {
     const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
     const bercos = parseInt(state.bercos_reais) || (bateria?.bercos || 0);
 
+    const elPaineisTipo = $('op-cards-paineis-tipo');
+    const elM2Tipo = $('op-cards-m2-tipo');
+
     if (!bercos || !state.tipo_montagem) {
       $('op-paineis-total').textContent = '—';
-      $('op-paineis-2p').textContent = '—';
-      $('op-paineis-sp').textContent = '—';
       $('op-m2-total').textContent = '—';
-      $('op-m2-2p').textContent = '—';
-      $('op-m2-sp').textContent = '—';
       $('op-placas-cimenticia').textContent = '—';
+      if (elPaineisTipo) elPaineisTipo.innerHTML = '';
+      if (elM2Tipo) elM2Tipo.innerHTML = '';
       return;
     }
     const r = LW.calcPaineis(state.tipo_montagem, bercos);
     $('op-paineis-total').textContent = r.total_paineis;
-    $('op-paineis-2p').textContent = r.paineis_2p;
-    $('op-paineis-sp').textContent = r.paineis_sp;
     $('op-m2-total').textContent = r.m2_total.toFixed(2) + ' m²';
-    $('op-m2-2p').textContent = r.m2_2p.toFixed(2) + ' m²';
-    $('op-m2-sp').textContent = r.m2_sp.toFixed(2) + ' m²';
     $('op-placas-cimenticia').textContent = r.placas_cimenticia;
+
+    // Gera os cards de Painéis por tipo (2/P, S/P, 3/P, ... — quantos a montagem tiver)
+    const tipos = Object.keys(r.paineis_por_tipo);
+    if (elPaineisTipo) {
+      elPaineisTipo.innerHTML = tipos.map((tipo, i) => `
+        <div>
+          <div style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
+            Painéis ${_labelTipo(tipo)}</div>
+          <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:${_CORES_TIPO[i % _CORES_TIPO.length]}">
+            ${r.paineis_por_tipo[tipo]}</div>
+        </div>
+      `).join('');
+    }
+    if (elM2Tipo) {
+      elM2Tipo.innerHTML = tipos.map((tipo, i) => `
+        <div>
+          <div style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
+            m² ${_labelTipo(tipo)}</div>
+          <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:${_CORES_TIPO[i % _CORES_TIPO.length]}">
+            ${r.m2_por_tipo[tipo].toFixed(2)} m²</div>
+        </div>
+      `).join('');
+    }
   }
 
   function iniciarInjecao() {
@@ -292,6 +325,41 @@
   }
 
   /**
+   * Renumera os traços NOVOS (não reaproveitados) do state em sequência,
+   * a partir de state.baseNumTraco. Chamada após qualquer criação/remoção de
+   * traço, garantindo que a numeração de prévia exibida na tela esteja sempre
+   * correta e sem buracos — ex: se o traço do meio for excluído, os seguintes
+   * "sobem" um número.
+   * Traços reaproveitados de sobra (t._reaproveitado) mantêm seu próprio
+   * número fixo (o da operação de origem) e são ignorados nesta contagem.
+   */
+  function _renumerarTracos() {
+    const base = state.baseNumTraco || 0;
+    let proximo = base + 1;
+    state.tracos.forEach(t => {
+      if (t._reaproveitado) return; // número fixo, não participa da sequência local
+      t.num = proximo;
+      proximo++;
+    });
+  }
+
+  /**
+   * Garante que state.baseNumTraco esteja definido, buscando do servidor na
+   * primeira vez que a operação atual precisa numerar um traço novo. Uma vez
+   * definida, a base fica fixa durante toda a operação (mesmo com reload da
+   * página) — apenas ao finalizar a operação o total real do servidor avança.
+   */
+  async function _garantirBaseNumTraco() {
+    if (typeof state.baseNumTraco === 'number') return;
+    try {
+      state.baseNumTraco = await LW.getTotalTracosHoje();
+    } catch (err) {
+      console.warn('[LW] Falha ao obter total de traços do dia, usando 0 como base:', err.message);
+      state.baseNumTraco = 0;
+    }
+  }
+
+  /**
    * Cria a estrutura de um traço novo (sem sobra).
    */
   function _criarEstruturaTraco(num, sugeridoIni) {
@@ -321,19 +389,21 @@
 
   /**
    * Adiciona o traço ao state a partir de um objeto de sobra,
-   * REUTILIZANDO o mesmo ID e receita — sem criar traço novo.
+   * REUTILIZANDO o mesmo ID, número e receita — sem criar traço novo.
+   * O número (num) é o mesmo do traço original — reaproveitar sobra NÃO
+   * consome um número novo do contador progressivo diário, e não participa
+   * da renumeração dos traços novos desta operação.
    */
   function _adicionarTracoDeSobra(sobra) {
-    const num = state.tracos.length + 1;
     const prevTraco = state.tracos[state.tracos.length - 1];
-    const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
+    const sugeridoIni = prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '1';
 
     // Reconstrói o traço a partir dos dados persistidos na sobra
     const receita = sobra.receita || {};
     const traco = {
-      // MANTÉM o ID original — não gera novo
+      // MANTÉM o ID e o número originais — não gera novos
       id: sobra.tracoId,
-      num,
+      num: sobra.numTraco,
       berco_ini: sugeridoIni,
       berco_fim: '',
       // Receita carregada da sobra
@@ -373,13 +443,19 @@
 
   /**
    * Cria um traço novo diretamente, sem verificar sobra.
+   * O número exibido (Nº) é uma PRÉVIA calculada localmente a partir do total
+   * de traços já confirmados hoje no servidor (state.baseNumTraco) — ainda não
+   * é um número reservado/definitivo. Só ao finalizar a operação o total real
+   * do servidor avança (ver finalizarInjecao -> LW.confirmarTracosHoje).
+   * Isso permite criar e excluir traços livremente sem "furar" a sequência.
    */
-  function _adicionarTracoNovo() {
-    const num = state.tracos.length + 1;
+  async function _adicionarTracoNovo() {
+    await _garantirBaseNumTraco();
     const prevTraco = state.tracos[state.tracos.length - 1];
-    const sugeridoIni = num === 1 ? '1' : (prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '');
-    const traco = _criarEstruturaTraco(num, sugeridoIni);
+    const sugeridoIni = prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '1';
+    const traco = _criarEstruturaTraco(0, sugeridoIni); // num provisório, corrigido abaixo
     state.tracos.push(traco);
+    _renumerarTracos();
     expandedTracoIndex = state.tracos.length - 1;
     renderTracos();
     persist();
@@ -395,7 +471,7 @@
 
     if (!sobra) {
       // Fluxo normal — sem sobra ativa
-      _adicionarTracoNovo();
+      await _adicionarTracoNovo();
       return;
     }
 
@@ -456,6 +532,9 @@
 
     document.getElementById('btn-utilizar-sobra').addEventListener('click', async () => {
       modal.remove();
+      // Garante que a base do contador diário esteja definida nesta operação,
+      // mesmo que o primeiro traço adicionado seja um reaproveitado de sobra.
+      await _garantirBaseNumTraco();
       // Adiciona o traço reaproveitado ao state
       _adicionarTracoDeSobra(sobra);
       // Marca sobra como utilizada (em segundo plano para não travar a UI)
@@ -514,7 +593,7 @@
     document.getElementById('btn-descartar-sobra').addEventListener('click', async () => {
       modal.remove();
       try { await LW.desativarSobra('descartada'); } catch (_) { }
-      callbackProsseguir();
+      await callbackProsseguir();
     });
 
     document.getElementById('btn-cancelar-descarte').addEventListener('click', () => {
@@ -580,6 +659,7 @@
       const sobra = {
         ativa: true,
         tracoId: ultimoTraco.id,
+        numTraco: ultimoTraco.num, // preserva o Nº original — reaproveitar não consome número novo
         operacaoOrigem: record.id,
         flow: totalInsumo(ultimoTraco.flow_insumo, 'flow') || ultimoTraco.flow || '',
         densidade: totalInsumo(ultimoTraco.densidade_insumo, 'densidade') || ultimoTraco.densidade || '',
@@ -620,17 +700,21 @@
     if (traco && traco._reaproveitado) {
       // Se for um traço reaproveitado, exibe modal de confirmação
       _mostrarModalConfirmacaoExclusao(i, () => {
-        // Callback de confirmação: executa a remoção real
+        // Callback de confirmação: executa a remoção real e renumera os
+        // traços novos restantes (o reaproveitado removido não afeta a
+        // sequência, pois nunca participou dela).
         state.tracos.splice(i, 1);
-        state.tracos.forEach((t, idx) => t.num = idx + 1);
+        _renumerarTracos();
         expandedTracoIndex = Math.min(expandedTracoIndex, state.tracos.length - 1);
         renderTracos();
         persist();
       });
     } else {
-      // Traço normal: remove diretamente
+      // Traço normal: remove e renumera os demais traços novos em sequência
+      // a partir de baseNumTraco — ex: remover o 2º de 3 faz o 3º assumir o
+      // número do 2º, sem buracos.
       state.tracos.splice(i, 1);
-      state.tracos.forEach((t, idx) => t.num = idx + 1);
+      _renumerarTracos();
       expandedTracoIndex = Math.min(expandedTracoIndex, state.tracos.length - 1);
       renderTracos();
       persist();
@@ -1025,9 +1109,14 @@
       tracos: fullRecord.tracos.map(t => ({ id: t.id }))
     };
 
+    // Conta quantos traços NOVOS (não reaproveitados de sobra) sobraram nesta
+    // operação — apenas esses consomem números do contador diário do servidor.
+    const qtdTracosNovos = state.tracos.filter(t => !t._reaproveitado).length;
+
     Promise.all([
       LW.registrarOperacao(historyRecord),
       LW.registrarRelatorioInjecao(fullRecord),
+      qtdTracosNovos > 0 ? LW.confirmarTracosHoje(qtdTracosNovos) : Promise.resolve(),
     ])
       .then(() => {
         LW.clearOperacaoAtual();

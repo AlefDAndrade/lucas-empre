@@ -622,6 +622,7 @@ h4 {
 
 /* ---- Tables ---- */
 .table-wrap {
+  position: relative;
   max-height: 70vh;
   /* Ajuste a altura máxima como preferir (70% da altura da tela) */
   overflow-y: auto;
@@ -1745,4 +1746,112 @@ td.mono {
 
 .modal-confirmacao-exclusao .modal-btns .btn-excluir:hover {
   background: var(--red-dark);
+}
+/* ---- Menu de colunas (exibir/ocultar) ---- */
+.col-menu {
+  position: sticky;
+  float: right;
+  top: 40px;
+  right: 8px;
+  z-index: 20;
+  width: 240px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  padding: 6px;
+}
+
+.col-menu-item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: .82rem;
+  color: var(--text-2);
+}
+
+.col-menu-item:hover {
+  background: var(--bg-3);
+}
+
+.col-menu-item label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.col-menu-item input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.col-menu-group-toggle {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.col-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 4px;
+}
+
+.btn-col-toggle:hover {
+  background: var(--bg-2) !important;
+  color: var(--accent) !important;
+}
+
+/* ============================================================
+   DEBRIEFING DO DIA — relatório operacional somente leitura
+   ============================================================ */
+.debriefing-popover {
+  width: 480px;
+  max-width: min(480px, calc(100vw - 48px));
+  max-height: 70vh;
+  padding: 0;
+  overflow: hidden;
+}
+
+.debriefing-popover.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.debriefing-paper {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--text-2);
+  background: var(--bg-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 16px 18px;
+  overflow-y: auto;
+  max-height: 70vh;
+  user-select: text;
+}
+
+.debriefing-paper .dbf-titulo {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.debriefing-paper .dbf-secao {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.debriefing-paper .dbf-sep {
+  color: var(--border-2);
+}
+
+.debriefing-paper .dbf-vazio {
+  color: var(--text-3);
+  font-style: italic;
 }

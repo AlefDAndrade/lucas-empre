@@ -73,16 +73,14 @@
     "opcoes": [
       {
         "label": "2/P",
-        "paineis_2p_por_berco": 2,
-        "paineis_sp_por_berco": 0
+        "paineis_2p_por_berco": 2
       },
       {
         "label": "S/P",
-        "paineis_2p_por_berco": 0,
         "paineis_sp_por_berco": 2
       },
       {
-        "label": "HÍBRIDA",
+        "label": "HÍBRIDA 2p/sp",
         "paineis_2p_por_berco": 1,
         "paineis_sp_por_berco": 1
       }
