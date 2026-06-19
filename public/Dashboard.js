@@ -788,7 +788,7 @@
         if (v === '—') return '—';
         return (typeof v === 'number' || !isNaN(parseFloat(v))) ? LW.formatDuration(parseFloat(v) / 60) : v;
       })()}</td>
-        <td>${op.obs || l.obs || '—'}</td>
+        <td>${(op.obs !== undefined ? op.obs : l.obs) || '—'}</td>
       </tr>
     `).join('');
     }).join('');
