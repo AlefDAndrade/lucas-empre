@@ -1904,11 +1904,8 @@ td.mono {
 }
 /* ---- Menu de colunas (exibir/ocultar) ---- */
 .col-menu {
-  position: sticky;
-  float: right;
-  top: 40px;
-  right: 8px;
-  z-index: 20;
+  position: fixed;
+  z-index: 9999;
   width: 240px;
   max-height: 360px;
   overflow-y: auto;

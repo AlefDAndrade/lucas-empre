@@ -603,10 +603,15 @@
     e.stopPropagation();
     const menu = document.getElementById('col-menu-registro');
     const btn = document.getElementById('btn-col-toggle-registro');
-    if (!menu) return;
+    if (!menu || !btn) return;
     const abrir = menu.style.display === 'none';
+    if (abrir) {
+      const rect = btn.getBoundingClientRect();
+      menu.style.top = (rect.bottom + 8) + 'px';
+      menu.style.left = rect.left + 'px';
+    }
     menu.style.display = abrir ? 'block' : 'none';
-    if (btn) btn.setAttribute('aria-expanded', String(abrir));
+    btn.setAttribute('aria-expanded', String(abrir));
   }
 
   function toggleColunaRegistro(key, visivel) {

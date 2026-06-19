@@ -557,7 +557,27 @@
           <table id="registro-table">
             <thead>
               <tr>
-                <th data-col="data">Data</th>
+                <th data-col="data">
+                  <div style="display:flex;align-items:center;gap:8px;position:relative">
+                    <button type="button" id="btn-col-toggle-registro" class="btn-col-toggle"
+                      title="Exibir/ocultar colunas" aria-haspopup="true" aria-expanded="false"
+                      onclick="LWDash.toggleColMenu(event)"
+                      style="background:none;border:1px solid var(--border);border-radius:6px;width:24px;height:24px;line-height:1;cursor:pointer;color:var(--text-2);font-size:.8rem;flex:0 0 auto">⚙</button>
+                    <span>Data</span>
+
+                    <!-- Menu de colunas (dropdown) -->
+                    <div id="col-menu-registro" class="col-menu" style="display:none">
+                      <div class="col-menu-item col-menu-group-toggle">
+                        <label>
+                          <input type="checkbox" id="col-toggle-tipos-placa" onchange="LWDash.toggleGrupoTiposPlaca(this.checked)">
+                          <span>Ocultar Tipos de Placas</span>
+                        </label>
+                      </div>
+                      <div class="col-menu-divider"></div>
+                      <div id="col-menu-list"></div>
+                    </div>
+                  </div>
+                </th>
                 <th data-col="turno">Turno</th>
                 <th data-col="dimensao">Dimensão</th>
                 <th data-col="capacidade">Cap. Berços</th> <!-- Nova -->
@@ -569,22 +589,14 @@
                 <th data-col="atraso">Atraso</th>
                 <th data-col="motivo_atraso">Motivo Atraso</th> <!-- Nova -->
                 <th data-col="montagem">Montagem</th>
-                <th data-col="paineis_2psp">Painéis (2P/SP)</th> <!-- Atualizada -->
+                <th data-col="paineis_2psp">Painéis (Total)</th> <!-- Atualizada -->
                 <th data-col="paineis_2p">Painéis 2/P</th> <!-- Coluna 2/P -->
                 <th data-col="paineis_sp">Painéis S/P</th> <!-- Coluna S/P -->
-                <th data-col="m2_2psp">m² (2P/SP)</th> <!-- Atualizada -->
+                <th data-col="m2_2psp">m² (Total)</th> <!-- Atualizada -->
                 <th data-col="m2_2p">m² 2/P</th> <!-- Coluna m² 2/P -->
                 <th data-col="m2_sp">m² S/P</th> <!-- Coluna m² S/P -->
                 <th data-col="bercos_reais">Berços Reais</th> <!-- Nova -->
-                <th data-col="placas_cimenticia">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-                    <span>Placas Cimenticia</span>
-                    <button type="button" id="btn-col-toggle-registro" class="btn-col-toggle"
-                      title="Exibir/ocultar colunas" aria-haspopup="true" aria-expanded="false"
-                      onclick="LWDash.toggleColMenu(event)"
-                      style="background:none;border:1px solid var(--border);border-radius:6px;width:24px;height:24px;line-height:1;cursor:pointer;color:var(--text-2);font-size:.8rem;flex:0 0 auto">⚙</button>
-                  </div>
-                </th>
+                <th data-col="placas_cimenticia">Placas Cimenticia</th>
               </tr>
             </thead>
             <tbody id="registro-tbody">
@@ -594,17 +606,6 @@
             </tbody>
           </table>
 
-          <!-- Menu de colunas (dropdown) -->
-          <div id="col-menu-registro" class="col-menu" style="display:none">
-            <div class="col-menu-item col-menu-group-toggle">
-              <label>
-                <input type="checkbox" id="col-toggle-tipos-placa" onchange="LWDash.toggleGrupoTiposPlaca(this.checked)">
-                <span>Ocultar Tipos de Placas</span>
-              </label>
-            </div>
-            <div class="col-menu-divider"></div>
-            <div id="col-menu-list"></div>
-          </div>
         </div>
 
       </div>
