@@ -779,7 +779,7 @@
       return operacoes.map((op, idx) => `
       <tr${idx > 0 ? ' class="linha-traco-reaproveitado"' : ''}>
         <td class="mono">${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
-        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" title="Traço reaproveitado nesta bateria">♻ reaproveitado</span>' : ''}</td>
+        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" title="Traço reaproveitado nesta bateria">♻</span>' : ''}</td>
         <td>${l.num_traco || '—'}</td>
         <td class="mono">${op.berco_inicio || '—'}</td>
         <td class="mono">${op.berco_finalizacao || '—'}</td>
