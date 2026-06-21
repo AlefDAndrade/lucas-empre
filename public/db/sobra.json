@@ -1,41 +1,40 @@
 {
-  "ativa": false,
-  "tracoId": "traco_1781823242000_0",
-  "numTraco": 3,
-  "operacaoOrigem": "op_1781823280000",
-  "flow": 45,
-  "densidade": 789,
+  "ativa": true,
+  "tracoId": "traco_1782044565000_0",
+  "numTraco": 1,
+  "operacaoOrigem": "op_1782052524000",
+  "flow": 10,
+  "densidade": 10,
   "receita": {
     "cimento_real": {
-      "original": "78",
+      "original": "10",
       "ajustes": []
     },
     "agua_real": {
-      "original": "78",
+      "original": "10",
       "ajustes": []
     },
     "eps_real": {
-      "original": "78",
+      "original": "10",
       "ajustes": []
     },
     "superplast_real": {
-      "original": "78",
+      "original": "10",
       "ajustes": []
     },
     "incorporador_real": {
-      "original": "78",
+      "original": "10",
       "ajustes": []
     },
     "tempo_batida": {
-      "original": "480",
+      "original": "60",
       "ajustes": []
     },
-    "silo": "Silo 3",
-    "expansao": "2ª expansão",
-    "densidadeEPS": "789",
+    "silo": "Silo 1",
+    "expansao": "1ª expansão",
+    "densidadeEPS": "10",
     "obs": ""
   },
-  "data": "2026-06-19T01:54:41.459Z",
-  "status": "utilizada",
-  "dataEncerramento": "2026-06-19T01:54:48.182Z"
+  "data": "2026-06-21T17:35:26.078Z",
+  "status": "ativa"
 }

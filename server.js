@@ -28,6 +28,19 @@ function todayBrasiliaServer() {
   return fmt.format(new Date()); // en-CA já formata como YYYY-MM-DD
 }
 
+// Retorna { hora, minuto } de agora em Brasília — usado pelo backup
+// automático diário, pra saber se já passou do horário de "fim de dia".
+function horaMinutoBrasiliaServer() {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+  const partes = fmt.formatToParts(new Date());
+  const hora = parseInt(partes.find(p => p.type === 'hour').value, 10);
+  const minuto = parseInt(partes.find(p => p.type === 'minute').value, 10);
+  return { hora, minuto };
+}
+
 // Lê o contador de traços do dia, resetando automaticamente se a data mudou
 // (Brasília). NÃO incrementa — apenas garante que o objeto retornado é válido
 // para o dia de hoje. Quem chama decide se quer ler ou incrementar.
@@ -95,6 +108,107 @@ function parseArquivoBackupDados(nome, texto) {
     return DEFAULT_SE_VAZIO_BACKUP_DADOS[nome];
   }
   return JSON.parse(texto);
+}
+
+// ─── Backup automático diário (dados) ──────────────────────────────────────
+// Roda dentro do próprio servidor (não depende de ninguém com o navegador
+// aberto). Todo fim de dia, gera um .zip com os arquivos de public/db/ e
+// guarda em backups-automaticos/ (fora de public/, nunca servido como
+// arquivo "comum" — só pelas duas rotas dedicadas abaixo). Mantém sempre os
+// últimos 3 dias: ao criar um novo, remove os mais antigos que excederem
+// esse limite.
+const DIR_BACKUPS_AUTO = path.join(ROOT_DIR, 'backups-automaticos');
+const PREFIXO_BACKUP_AUTO = 'backup-dados_';
+const RETENCAO_DIAS_BACKUP_AUTO = 3;
+// "Fim de dia" = a partir deste horário (Brasília). Checado a cada minuto,
+// então qualquer hora futura nesse mesmo dia também serve de gatilho — não
+// precisa ser exatamente nesse minuto.
+const HORA_CORTE_BACKUP_AUTO = 23;
+const MINUTO_CORTE_BACKUP_AUTO = 50;
+
+// Mesma lista de arquivos do Backup de Dados manual (VALIDADORES_BACKUP_DADOS),
+// só que montada aqui no servidor — o backup automático não depende de
+// ninguém estar com o navegador aberto.
+async function gerarZipDadosServidor() {
+  const zip = new JSZip();
+  Object.keys(VALIDADORES_BACKUP_DADOS).forEach(nome => {
+    try {
+      zip.file(nome, fs.readFileSync(path.join(DB_DIR, nome)));
+    } catch (_) {
+      // Arquivo pode não existir ainda — ok, só não entra no zip.
+    }
+  });
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+// Remove os backups automáticos mais antigos, mantendo só os N mais
+// recentes (RETENCAO_DIAS_BACKUP_AUTO). O nome do arquivo já tem a data no
+// formato YYYY-MM-DD, então ordenar por nome = ordenar cronologicamente.
+function _rotacionarBackupsAutomaticos() {
+  if (!fs.existsSync(DIR_BACKUPS_AUTO)) return;
+  const arquivos = fs.readdirSync(DIR_BACKUPS_AUTO)
+    .filter(f => f.startsWith(PREFIXO_BACKUP_AUTO) && f.endsWith('.zip'))
+    .sort();
+
+  const excedentes = arquivos.length - RETENCAO_DIAS_BACKUP_AUTO;
+  if (excedentes > 0) {
+    arquivos.slice(0, excedentes).forEach(nome => {
+      try {
+        fs.unlinkSync(path.join(DIR_BACKUPS_AUTO, nome));
+        console.log(`[backup automático] removido (mantém só os últimos ${RETENCAO_DIAS_BACKUP_AUTO} dias): ${nome}`);
+      } catch (_) { /* não trava o resto por causa de um arquivo */ }
+    });
+  }
+}
+
+// Checa se já passou do "fim de dia" de hoje e ainda não existe backup de
+// hoje — se for o caso, gera um e rotaciona. Seguro de chamar repetidamente
+// (cada dia só gera um único arquivo, então chamadas repetidas no mesmo dia
+// não fazem nada depois da primeira).
+// Verifica se ao menos uma operação foi registrada hoje em historico.json —
+// usado pelo backup automático pra não gastar um dos 3 slots de rotação num
+// dia em que o maquinário não operou (o conteúdo seria essencialmente igual
+// ao do backup do dia anterior, então não agrega nada guardar de novo).
+// Em caso de erro de leitura, assume que SIM (prefere gerar um backup a mais
+// do que arriscar não ter um backup justamente quando algo está estranho).
+function _houveOperacaoHoje(hoje) {
+  try {
+    const texto = fs.readFileSync(path.join(DB_DIR, 'historico.json'), 'utf8').trim();
+    if (!texto) return false; // arquivo vazio = nenhuma operação registrada nunca
+    const historico = JSON.parse(texto);
+    return Array.isArray(historico) && historico.some(r => r.data === hoje);
+  } catch (_) {
+    return true;
+  }
+}
+
+async function executarBackupAutomaticoSeNecessario() {
+  try {
+    const hoje = todayBrasiliaServer();
+    const nomeArquivoHoje = `${PREFIXO_BACKUP_AUTO}${hoje}.zip`;
+    const caminhoHoje = path.join(DIR_BACKUPS_AUTO, nomeArquivoHoje);
+
+    if (fs.existsSync(caminhoHoje)) return; // já fizemos o backup de hoje
+
+    const { hora, minuto } = horaMinutoBrasiliaServer();
+    const passouDoCorte = hora > HORA_CORTE_BACKUP_AUTO ||
+      (hora === HORA_CORTE_BACKUP_AUTO && minuto >= MINUTO_CORTE_BACKUP_AUTO);
+    if (!passouDoCorte) return; // ainda não é "fim de dia"
+
+    if (!_houveOperacaoHoje(hoje)) {
+      console.log(`[backup automático] nenhuma operação registrada em ${hoje} — backup não gerado.`);
+      return;
+    }
+
+    fs.mkdirSync(DIR_BACKUPS_AUTO, { recursive: true });
+    const buffer = await gerarZipDadosServidor();
+    fs.writeFileSync(caminhoHoje, buffer);
+    console.log(`[backup automático] criado: ${nomeArquivoHoje}`);
+
+    _rotacionarBackupsAutomaticos();
+  } catch (e) {
+    console.error('[backup automático] falhou:', e.message);
+  }
 }
 
 // ─── Backup Geral — zipa o projeto inteiro (código + dados), como está ────
@@ -483,6 +597,48 @@ http.createServer((req, res) => {
     return;
   }
 
+  // ── BACKUPS AUTOMÁTICOS: lista os backups diários disponíveis (até 3) ──────
+  if (req.method === 'GET' && urlPath === '/backups-automaticos') {
+    try {
+      fs.mkdirSync(DIR_BACKUPS_AUTO, { recursive: true });
+      const backups = fs.readdirSync(DIR_BACKUPS_AUTO)
+        .filter(f => f.startsWith(PREFIXO_BACKUP_AUTO) && f.endsWith('.zip'))
+        .sort()
+        .reverse() // mais recente primeiro
+        .map(nome => {
+          const stat = fs.statSync(path.join(DIR_BACKUPS_AUTO, nome));
+          return { nome, data: nome.slice(PREFIXO_BACKUP_AUTO.length, -4), tamanho: stat.size };
+        });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, backups }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    }
+    return;
+  }
+
+  // ── BACKUPS AUTOMÁTICOS: baixa um arquivo específico ────────────────────
+  if (req.method === 'GET' && urlPath.startsWith('/backups-automaticos/')) {
+    const nome = decodeURIComponent(urlPath.slice('/backups-automaticos/'.length));
+    // Nome tem que bater exatamente com o padrão esperado — nada de path
+    // traversal ou nome arbitrário chegando ao path.join().
+    if (!/^backup-dados_\d{4}-\d{2}-\d{2}\.zip$/.test(nome)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: 'Nome de arquivo inválido.' }));
+      return;
+    }
+    fs.readFile(path.join(DIR_BACKUPS_AUTO, nome), (err, data) => {
+      if (err) { res.writeHead(404); res.end('Not found'); return; }
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${nome}"`,
+      });
+      res.end(data);
+    });
+    return;
+  }
+
   // ── RESTAURAR BACKUP DE DADOS: substitui os arquivos de public/db/ a
   // partir de um backup, com várias camadas de segurança ─────────────────────
   if (req.method === 'POST' && urlPath === '/restaurar-backup-dados') {
@@ -703,4 +859,10 @@ http.createServer((req, res) => {
 
 }).listen(PORT, () => {
   console.log(`Lightwall rodando em http://localhost:${PORT}`);
+
+  // Checa a cada minuto se já é "fim de dia" e falta fazer o backup
+  // automático de hoje. Roda também uma vez já no boot, pro caso do
+  // servidor subir depois das 23:50 de algum dia.
+  setInterval(executarBackupAutomaticoSeNecessario, 60 * 1000);
+  executarBackupAutomaticoSeNecessario();
 });

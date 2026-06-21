@@ -181,33 +181,73 @@
             <div class="menu-card-desc">Importa dados de uma planilha Excel (.xlsx / .xls) para o histórico ou relatório
               de injeção.</div>
           </div>
-          <div class="menu-card" data-admin-only id="btn-backup-dados" onclick="fazerBackupDados()">
+          <div class="menu-card" data-admin-only onclick="abrirBackupHub()">
             <div class="menu-card-icon">💾</div>
-            <div class="menu-card-title">Backup de Dados</div>
-            <div class="menu-card-desc">Baixa um .zip com todos os arquivos de dados (histórico, relatório de injeção,
-              configurações etc.).</div>
-          </div>
-          <div class="menu-card" data-admin-only id="btn-backup-geral" onclick="fazerBackupGeral()">
-            <div class="menu-card-icon">🗄️</div>
-            <div class="menu-card-title">Backup Geral</div>
-            <div class="menu-card-desc">Baixa um .zip com o programa inteiro como está agora (código + dados) — útil
-              pra poder voltar a este estado exato depois.</div>
-          </div>
-          <div class="menu-card" data-admin-only onclick="abrirRestaurarBackup()">
-            <div class="menu-card-icon">♻️</div>
-            <div class="menu-card-title">Restaurar Backup de Dados</div>
-            <div class="menu-card-desc">Restaura os dados a partir de um arquivo gerado pelo "Backup de Dados". Salva
-              automaticamente uma cópia de segurança do estado atual antes de substituir.</div>
-          </div>
-          <div class="menu-card" data-admin-only onclick="abrirRestaurarGeral()">
-            <div class="menu-card-icon">⚠️</div>
-            <div class="menu-card-title">Restaurar Backup Geral</div>
-            <div class="menu-card-desc">Restaura o programa inteiro (código + dados) a partir de um "Backup Geral".
-              Requer reiniciar o servidor depois. Use com cautela.</div>
+            <div class="menu-card-title">Backup e Restauração</div>
+            <div class="menu-card-desc">Fazer ou restaurar um backup — só dos dados, ou do programa inteiro.</div>
           </div>
         </div>
       </div>
     </main>
+
+    <!-- ============ MODAL: BACKUP E RESTAURAÇÃO (painel de escolha) ============ -->
+    <div id="backup-hub-modal"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
+      <div
+        style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+          <h2 style="font-family:var(--font-display);font-size:1.3rem;color:var(--accent);letter-spacing:.06em">💾
+            BACKUP E RESTAURAÇÃO</h2>
+          <button onclick="fecharBackupHub()"
+            style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+        </div>
+
+        <div id="backup-hub-status"
+          style="display:none;margin-bottom:16px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-2);font-size:.85rem">
+        </div>
+
+        <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:10px">
+          Fazer backup (baixar)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+          <div class="menu-card" id="backup-hub-card-dados" onclick="fazerBackupDados()">
+            <div class="menu-card-icon">💾</div>
+            <div class="menu-card-title">Backup de Dados</div>
+            <div class="menu-card-desc">Só os arquivos de dados (histórico, relatório de injeção, configurações etc.).
+            </div>
+          </div>
+          <div class="menu-card" id="backup-hub-card-geral" onclick="fazerBackupGeral()">
+            <div class="menu-card-icon">🗄️</div>
+            <div class="menu-card-title">Backup Geral</div>
+            <div class="menu-card-desc">O programa inteiro como está agora (código + dados).</div>
+          </div>
+        </div>
+
+        <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:10px">
+          Restaurar backup</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="menu-card" onclick="fecharBackupHub();abrirRestaurarBackup()">
+            <div class="menu-card-icon">♻️</div>
+            <div class="menu-card-title">Restaurar Dados</div>
+            <div class="menu-card-desc">A partir de um arquivo gerado pelo "Backup de Dados".</div>
+          </div>
+          <div class="menu-card" onclick="fecharBackupHub();abrirRestaurarGeral()">
+            <div class="menu-card-icon">⚠️</div>
+            <div class="menu-card-title">Restaurar Geral</div>
+            <div class="menu-card-desc">A partir de um "Backup Geral". Exige reiniciar o servidor depois.</div>
+          </div>
+        </div>
+
+        <div
+          style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:24px 0 10px">
+          Backups Automáticos <span style="text-transform:none;font-weight:400">— gerados todo fim de dia, mantém os
+            últimos 3</span></div>
+        <div id="backup-hub-automaticos" style="display:flex;flex-direction:column;gap:8px">
+          <span style="color:var(--text-3);font-size:.82rem">Carregando...</span>
+        </div>
+
+      </div>
+    </div>
 
     <!-- ============ PAGE: OPERAÇÃO ============ -->
     <main class="main" id="page-operacao">
@@ -1778,26 +1818,77 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
+    // ---- Painel "Backup e Restauração" (admin) ----
+    function abrirBackupHub() {
+      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      const status = document.getElementById('backup-hub-status');
+      if (status) status.style.display = 'none';
+      document.getElementById('backup-hub-modal').style.display = 'flex';
+      _carregarBackupsAutomaticos();
+    }
+
+    function fecharBackupHub() {
+      document.getElementById('backup-hub-modal').style.display = 'none';
+    }
+
+    function _statusBackupHub(msg) {
+      const status = document.getElementById('backup-hub-status');
+      if (!status) return;
+      if (msg) { status.textContent = msg; status.style.display = 'block'; }
+      else { status.style.display = 'none'; }
+    }
+
+    // Lista os backups automáticos diários (gerados pelo próprio servidor,
+    // todo fim de dia — ver server.js). Só leitura/download aqui; a criação
+    // e a rotação (manter só os últimos 3) são feitas no servidor, sem
+    // depender de ninguém com essa tela aberta.
+    async function _carregarBackupsAutomaticos() {
+      const el = document.getElementById('backup-hub-automaticos');
+      if (!el) return;
+      el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Carregando...</span>';
+      try {
+        const res = await fetch('/backups-automaticos');
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.erro || 'Erro ao listar backups automáticos.');
+
+        if (!json.backups.length) {
+          el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Nenhum backup automático ainda — o primeiro é gerado no fim do dia de hoje.</span>';
+          return;
+        }
+
+        el.innerHTML = json.backups.map(b => `
+          <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:9px 14px">
+            <span style="font-size:.84rem;color:var(--text-2)">📅 ${b.data.split('-').reverse().join('/')}
+              <span style="color:var(--text-3);font-size:.74rem">(${(b.tamanho / 1024).toFixed(0)} KB)</span></span>
+            <a href="/backups-automaticos/${encodeURIComponent(b.nome)}" style="color:var(--accent);font-size:.82rem;text-decoration:none">⬇ Baixar</a>
+          </div>
+        `).join('');
+      } catch (e) {
+        el.innerHTML = `<span style="color:var(--red);font-size:.82rem">Erro ao carregar: ${e.message}</span>`;
+      }
+    }
+
     // ---- Backup de Dados (admin) ----
     // A lógica de buscar os arquivos de public/db/ e montar o .zip vive em
     // LW.gerarBackupDados() (data.js) — aqui só cuidamos do feedback na tela.
+    // O painel fica aberto durante a geração (pra mostrar o status) e só se
+    // fecha depois que o download foi disparado com sucesso.
     async function fazerBackupDados() {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
 
-      const card = document.getElementById('btn-backup-dados');
-      const descEl = card?.querySelector('.menu-card-desc');
-      const descOriginal = descEl?.textContent;
+      const card = document.getElementById('backup-hub-card-dados');
 
       try {
         if (card) card.style.pointerEvents = 'none';
-        if (descEl) descEl.textContent = 'Gerando backup...';
+        _statusBackupHub('Gerando backup de dados...');
 
         await LW.gerarBackupDados();
+        fecharBackupHub();
       } catch (e) {
         alert('Erro ao gerar backup: ' + e.message);
       } finally {
         if (card) card.style.pointerEvents = '';
-        if (descEl) descEl.textContent = descOriginal;
+        _statusBackupHub(null);
       }
     }
 
@@ -1808,13 +1899,11 @@
     async function fazerBackupGeral() {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
 
-      const card = document.getElementById('btn-backup-geral');
-      const descEl = card?.querySelector('.menu-card-desc');
-      const descOriginal = descEl?.textContent;
+      const card = document.getElementById('backup-hub-card-geral');
 
       try {
         if (card) card.style.pointerEvents = 'none';
-        if (descEl) descEl.textContent = 'Gerando backup geral... pode levar alguns segundos.';
+        _statusBackupHub('Gerando backup geral... pode levar alguns segundos.');
 
         const res = await fetch('/backup-geral');
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1834,11 +1923,13 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+
+        fecharBackupHub();
       } catch (e) {
         alert('Erro ao gerar backup geral: ' + e.message);
       } finally {
         if (card) card.style.pointerEvents = '';
-        if (descEl) descEl.textContent = descOriginal;
+        _statusBackupHub(null);
       }
     }
 
@@ -2503,6 +2594,7 @@
         modo: 'simples',
         tipo,
         paineisPorBerco,
+        corHue: typeof opcao.corHue === 'number' ? opcao.corHue : null,
         cimenticia: (opcao.cimenticia && typeof opcao.cimenticia === 'object')
           ? { leva: !!opcao.cimenticia.leva, quantidade: Number(opcao.cimenticia.quantidade) || 0 }
           : { leva: false, quantidade: 0 },
@@ -2522,6 +2614,7 @@
         label: m.label,
         modo: 'simples',
         tipo: m.tipo,
+        corHue: typeof m.corHue === 'number' ? m.corHue : null,
         cimenticia: {
           leva: !!m.cimenticia?.leva,
           quantidade: m.cimenticia?.leva ? (m.cimenticia.quantidade || 0) : 0,
@@ -2572,8 +2665,12 @@
         const cimenticiaTxt = m.modo === 'hibrida'
           ? 'cimentícia herdada dos tipos simples'
           : (m.cimenticia?.leva ? `${m.cimenticia.quantidade} ciment./painel` : 'sem cimentícia');
+        const swatch = (m.modo === 'simples' && typeof m.corHue === 'number')
+          ? `<span title="Cor gerada automaticamente pra este tipo" style="display:inline-block;width:13px;height:13px;border-radius:50%;background:${LW.corCssDoHue(m.corHue).cor};flex:0 0 auto"></span>`
+          : '';
         return `
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;flex-wrap:wrap">
+      ${swatch}
       <span style="font-family:var(--font-display);font-size:.9rem;font-weight:700;color:var(--text);min-width:90px">${m.label}</span>
       <span style="font-size:.66rem;font-weight:700;color:${corBadge};text-transform:uppercase;letter-spacing:.06em;border:1px solid ${corBadge};border-radius:4px;padding:2px 6px">${m.modo === 'hibrida' ? 'Híbrida' : 'Simples'}</span>
       <span style="font-size:.78rem;color:var(--text-3)">${detalhe}</span>
@@ -2670,8 +2767,16 @@
         return alert('Já existe um tipo simples com esse código de tipo.');
       }
 
+      // Gera uma cor nova, distante das já usadas pelos outros tipos simples
+      // ("largest-gap hue allocation" — ver data.js). Fica vinculada a este
+      // tipo pra sempre (guardada como corHue), não é recalculada depois.
+      const huesExistentes = _cfgDados.montagens
+        .filter(m => m.modo === 'simples' && typeof m.corHue === 'number')
+        .map(m => m.corHue);
+      const corHue = LW.gerarProximaHueDisponivel(huesExistentes);
+
       _cfgDados.montagens.push({
-        label, modo: 'simples', tipo, paineisPorBerco,
+        label, modo: 'simples', tipo, paineisPorBerco, corHue,
         cimenticia: { leva: levaCimenticia, quantidade: levaCimenticia ? qtdCimenticia : 0 },
       });
 

@@ -94,7 +94,8 @@
         "cimenticia": {
           "leva": true,
           "quantidade": 2
-        }
+        },
+        "corHue": 210
       },
       {
         "label": "S/P",
@@ -104,7 +105,8 @@
         "cimenticia": {
           "leva": false,
           "quantidade": 0
-        }
+        },
+        "corHue": 105
       },
       {
         "label": "3T",
@@ -114,7 +116,8 @@
         "cimenticia": {
           "leva": false,
           "quantidade": 0
-        }
+        },
+        "corHue": 53
       },
       {
         "label": "HÍBRIDA 2p/sp",

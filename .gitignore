@@ -1,3 +1,4 @@
+node_modules/
 public/recovery.key
 backups-seguranca/
-node_modules/
+backups-automaticos/

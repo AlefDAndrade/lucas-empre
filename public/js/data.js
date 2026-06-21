@@ -31,6 +31,88 @@ let VOLUME_POR_PLACA = []; // [{ label: 'S/P - 7,5 cm', volume: 0.1373 }, ...]
 let _configReady = false;
 const _configCallbacks = [];
 
+// ---- Cor automática por tipo de montagem SIMPLES ("largest-gap hue allocation") ----
+// A cada tipo simples novo, olha os matizes (hue) já usados pelos tipos
+// simples existentes e escolhe o ponto no meio do maior "vão" livre entre
+// eles — assim cada cor nova fica o mais distante possível das já
+// existentes, sem precisar redistribuir as anteriores. A cor fica vinculada
+// ao tipo simples (guardada como corHue na opção, em config.json) — não é
+// recalculada a cada exibição.
+// Faixa de matiz limitada a 0–300° de propósito: evita cair na faixa de
+// rosa/magenta (300–360°). Saturação/luminosidade fixas, pra todas as cores
+// terem o mesmo "peso" visual (nem apagadas, nem neon/muito brilhantes).
+const COR_HUE_MIN = 0;
+const COR_HUE_MAX = 300;
+const COR_SATURACAO = 60;
+const COR_LUMINOSIDADE = 52;
+
+function gerarProximaHueDisponivel(huesExistentes) {
+  if (!huesExistentes || !huesExistentes.length) return 210; // primeira cor: azul, ponto de partida
+  const pontos = [COR_HUE_MIN, ...[...huesExistentes].sort((a, b) => a - b), COR_HUE_MAX];
+  let maiorGap = -1, hueEscolhido = COR_HUE_MIN;
+  for (let i = 0; i < pontos.length - 1; i++) {
+    const gap = pontos[i + 1] - pontos[i];
+    if (gap > maiorGap) {
+      maiorGap = gap;
+      hueEscolhido = pontos[i] + gap / 2;
+    }
+  }
+  return Math.round(hueEscolhido);
+}
+
+function corCssDoHue(hue) {
+  return {
+    cor: `hsl(${hue}, ${COR_SATURACAO}%, ${COR_LUMINOSIDADE}%)`,
+    bg: `hsla(${hue}, ${COR_SATURACAO}%, ${COR_LUMINOSIDADE}%, .15)`,
+    borda: `hsla(${hue}, ${COR_SATURACAO}%, ${COR_LUMINOSIDADE}%, .3)`,
+  };
+}
+
+// Cor de um tipo de montagem pelo LABEL (ex: "2/P") — busca a cor de verdade
+// vinculada ao tipo. Usa valores literais (não var(--xxx)) porque esses
+// retornos também são usados em gráficos <canvas>, que não entendem
+// variáveis CSS — só cor literal (hex/rgb/hsl).
+//
+// - Tipo SIMPLES: uma cor só (gerada na tela de admin, ver corCssDoHue).
+// - Tipo HÍBRIDO: não tem cor própria — é sempre metade da cor de cada um
+//   dos 2 tipos simples que o compõem (cor1/cor2), pra deixar visualmente
+//   óbvio que é a combinação dos dois. `bg` já vem como um linear-gradient
+//   CSS pronto (50%/50%, sem transição suave) pra uso direto em HTML; quem
+//   desenha em <canvas> usa cor1/cor2 separadamente pra montar o próprio
+//   gradiente (canvas não entende a string CSS linear-gradient()).
+// - Sem cor disponível (tipo desconhecido, ou híbrido cujos componentes
+//   ainda não têm cor): cinza neutro.
+function corMontagemPorLabel(label) {
+  const opcao = (MONTAGEM_OPCOES || []).find(o => o.label === label);
+  if (!opcao) return _corMontagemNeutra();
+
+  if (opcao.modo === 'simples' && typeof opcao.corHue === 'number') {
+    return { ...corCssDoHue(opcao.corHue), hibrida: false };
+  }
+
+  if (opcao.modo === 'hibrida' && Array.isArray(opcao.tipos) && opcao.tipos.length === 2) {
+    const [op1, op2] = opcao.tipos.map(t =>
+      (MONTAGEM_OPCOES || []).find(o => o.modo === 'simples' && o.tipo === t));
+    if (op1 && typeof op1.corHue === 'number' && op2 && typeof op2.corHue === 'number') {
+      const c1 = corCssDoHue(op1.corHue);
+      const c2 = corCssDoHue(op2.corHue);
+      return {
+        hibrida: true,
+        cor1: c1.cor, cor2: c2.cor,
+        cor: c1.cor, // fallback pra quem só aceita 1 cor (ex: cor de texto)
+        bg: `linear-gradient(90deg, ${c1.bg} 50%, ${c2.bg} 50%)`,
+        borda: c1.borda,
+      };
+    }
+  }
+
+  return _corMontagemNeutra();
+}
+
+function _corMontagemNeutra() {
+  return { hibrida: false, cor: '#5c6475', bg: 'rgba(156, 163, 175, .1)', borda: '#2a2f3a' };
+}
+
 /**
  * Extrai os componentes de painéis de uma opção de tipo de montagem,
  * de forma genérica — suporta qualquer quantidade de tipos (2p, sp, 3p, ...).
@@ -675,6 +757,9 @@ window.LW = {
   loadConfig,
   waitConfig,
   aplicarTiposMontagemEmMemoria: _aplicarTiposMontagem,
+  gerarProximaHueDisponivel,
+  corCssDoHue,
+  corMontagemPorLabel,
 
   // Storage
   getOperacaoAtual, saveOperacaoAtual, clearOperacaoAtual,

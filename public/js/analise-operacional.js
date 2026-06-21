@@ -369,7 +369,22 @@
       const x = pad.left + i*(cw/labels.length) + (cw/labels.length - bw)/2;
       const bh = (values[i]/max)*ch;
       const y  = pad.top + ch - bh;
-      const col = Array.isArray(colors) ? colors[i] : colors;
+      const colDescritor = Array.isArray(colors) ? colors[i] : colors;
+
+      // Tipo híbrido: metade de cada cor componente, lado a lado — canvas não
+      // entende a string CSS linear-gradient(), então monta o gradiente real
+      // aqui mesmo, já com os limites (x, x+bw) desta barra específica.
+      let col;
+      if (colDescritor && typeof colDescritor === 'object' && colDescritor.hibrida) {
+        const grad = ctx.createLinearGradient(x, 0, x + bw, 0);
+        grad.addColorStop(0, colDescritor.cor1);
+        grad.addColorStop(0.5, colDescritor.cor1);
+        grad.addColorStop(0.5, colDescritor.cor2);
+        grad.addColorStop(1, colDescritor.cor2);
+        col = grad;
+      } else {
+        col = colDescritor;
+      }
 
       // barra
       ctx.fillStyle = col;
@@ -672,18 +687,18 @@
     })), maxQtd);
   }
 
-  // Paleta cíclica de cores por tipo de montagem — mesmo padrão usado em
-  // motCols (gráfico de motivos de atraso), pra cobrir qualquer quantidade
-  // de tipos sem deixar tudo que não é "2/P" caindo na mesma cor genérica.
-  const MONT_COLS = [C.blue, C.green, C.accent, C.purple, C.cyan, C.orange];
-
   // ── Correlações ───────────────────────────────────────────
   function renderCorrelacoes(kpi, dados) {
-    // Montagem x Atrasos
+    // Montagem x Atrasos — cor real vinculada a cada tipo simples (gerada
+    // automaticamente na tela de admin), igual ao badge do Registro de
+    // Baterias. Tipo híbrido/sem cor própria cai num cinza neutro.
     const mountLabels = Object.keys(kpi.corMontagem);
     const mountAtraso = mountLabels.map(m => kpi.corMontagem[m].total
       ? (kpi.corMontagem[m].atrasos/kpi.corMontagem[m].total)*100 : 0);
-    const mountCols   = mountLabels.map((m, i) => MONT_COLS[i % MONT_COLS.length]);
+    const mountCols   = mountLabels.map(m => {
+      const c = LW.corMontagemPorLabel(m);
+      return c.hibrida ? { hibrida: true, cor1: c.cor1, cor2: c.cor2 } : c.cor;
+    });
     setTimeout(() => drawBar('ao-cor-montagem', mountLabels, mountAtraso, mountCols, 160), 50);
 
     // Dimensão x Tempo

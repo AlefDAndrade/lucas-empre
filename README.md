@@ -48,7 +48,7 @@ server.js               # servidor HTTP + rotas da API
 package.json
 ```
 
-`backups-seguranca/` é criada automaticamente pelo servidor (ver seção *Backup e Restauração*) e nunca deve ser versionada — já está no `.gitignore`.
+`backups-seguranca/` e `backups-automaticos/` são criadas automaticamente pelo servidor (ver seção *Backup e Restauração*) e nunca devem ser versionadas — já estão no `.gitignore`.
 
 ## Perfis de usuário
 
@@ -81,23 +81,45 @@ Em **Menu → Configurações**:
 
 - **Baterias**: ID, dimensão e nº de berços.
 - **Tipos de Montagem**, cadastrados de duas formas:
-  - **Simples**: um tipo de placa (label + código + painéis/berço, máx. 2 — limite físico da operação) e se leva placas cimentícias (e quantas por painel).
-  - **Híbrida**: combina dois tipos *simples* já cadastrados, sempre 1 painel de cada (2/berço). A cimentícia é herdada automaticamente dos tipos simples que a compõem — não é perguntada de novo.
+  - **Simples**: um tipo de placa (label + código + painéis/berço, máx. 2 — limite físico da operação) e se leva placas cimentícias (e quantas por painel). Recebe automaticamente uma cor própria (ver *Cor automática dos tipos de montagem*, abaixo), vinculada a ele pra sempre.
+  - **Híbrida**: combina dois tipos *simples* já cadastrados, sempre 1 painel de cada (2/berço). A cimentícia é herdada automaticamente dos tipos simples que a compõem — não é perguntada de novo. Não tem cor própria: é sempre metade da cor de cada um dos 2 tipos que a compõem (ver abaixo).
 
 Um tipo simples em uso por um híbrido não pode ser removido (a tela bloqueia e avisa quais híbridos dependem dele).
 
+### Cor automática dos tipos de montagem
+
+Cada tipo **simples** novo recebe uma cor gerada automaticamente — algoritmo *largest-gap hue allocation*: olha os matizes (hue) já usados pelos tipos existentes e escolhe o ponto no meio do maior "vão" livre entre eles, então cada cor nova fica o mais distante possível das já existentes, sem precisar redistribuir as anteriores. A cor é gerada uma única vez (na criação) e fica guardada como `corHue` na opção, em `config.json` — não é recalculada depois.
+
+- Faixa de matiz limitada a 0°–300°, evitando de propósito a faixa de rosa/magenta (300°–360°).
+- Saturação (60%) e luminosidade (52%) fixas, pra todas as cores terem o mesmo "peso" visual.
+- Tipos **híbridos** não geram cor própria: aparecem sempre com a tela dividida 50/50 entre a cor de cada um dos 2 tipos simples que os compõem (gradiente CSS no HTML; gradiente real desenhado no `<canvas>`, que não entende a sintaxe `linear-gradient()` do CSS).
+- Aparece em: badge de "Tipo de Montagem" no Registro de Baterias, gráfico "Montagem × Atrasos" da Análise Operacional, e uma bolinha de pré-visualização na própria tela de admin.
+
 ## Backup e Restauração (Administrador)
 
-| Botão | O que faz |
+Um único card no menu ("💾 Backup e Restauração") abre um painel com todas as opções:
+
+| Opção | O que faz |
 |---|---|
 | **Backup de Dados** | Baixa um `.zip` com os 6 arquivos de `public/db/`. Gerado no navegador. |
 | **Backup Geral** | Baixa um `.zip` com o projeto inteiro (código + dados, exceto `node_modules`/`.git`). Gerado no servidor. |
-| **Restaurar Backup de Dados** | Sobrescreve `public/db/` a partir de um backup de dados. |
-| **Restaurar Backup Geral** | Sobrescreve o projeto inteiro a partir de um backup geral. **Exige reiniciar o servidor manualmente depois**, pra mudanças em `server.js` valerem. |
+| **Restaurar Dados** | Sobrescreve `public/db/` a partir de um backup de dados. |
+| **Restaurar Geral** | Sobrescreve o projeto inteiro a partir de um backup geral. **Exige reiniciar o servidor manualmente depois**, pra mudanças em `server.js` valerem. |
+| **Backups Automáticos** | Lista os backups diários gerados pelo servidor (ver abaixo), com link de download pra cada um. |
 
 Toda restauração: exige a senha do administrador (reverificada no servidor), valida o formato de cada arquivo antes de gravar qualquer coisa, e salva automaticamente uma cópia de segurança do estado atual em `backups-seguranca/` (fora de `public/`, nunca servida pela web) antes de sobrescrever. A restauração geral pede também uma frase de confirmação (`RESTAURAR TUDO`) e bloqueia caminhos suspeitos (`../`, `node_modules/`, `.git/`).
 
 `backups-seguranca/` cresce a cada restauração feita — não há limpeza automática; remova as mais antigas manualmente quando quiser.
+
+### Backup automático diário
+
+O próprio `server.js` gera um backup de dados todo fim de dia, sem depender de ninguém com o navegador aberto:
+
+- Roda a partir das **23:50** (horário de Brasília) — checado a cada minuto, e também uma vez no boot do servidor (cobre o caso dele subir depois desse horário).
+- **Só gera se houve pelo menos uma operação registrada em `historico.json` com a data de hoje** — evita gastar um dia de retenção com um backup essencialmente igual ao anterior, em dias que o maquinário não operou.
+- Mantém sempre os **últimos 3 dias**: ao criar um novo, remove automaticamente o mais antigo se já houver 3.
+- Arquivos ficam em `backups-automaticos/` (fora de `public/`, nunca servida como arquivo estático comum), nomeados por data: `backup-dados_AAAA-MM-DD.zip`.
+- Acessível só pelas rotas dedicadas (`/backups-automaticos` e `/backups-automaticos/<nome>`) — essa pasta cresce e diminui sozinha, sem precisar de limpeza manual (diferente de `backups-seguranca/`).
 
 ## OEE
 
@@ -134,6 +156,8 @@ Quando não há traço registrado num turno, a Qualidade (e portanto o OEE) daqu
 | `/importar-historico` | POST | Importação em lote (Excel) de histórico |
 | `/salvar-sobra` | POST | Salva/atualiza `sobra.json` |
 | `/backup-geral` | GET | Gera e baixa o `.zip` do projeto inteiro |
+| `/backups-automaticos` | GET | Lista os backups diários automáticos disponíveis (até 3) |
+| `/backups-automaticos/<nome>` | GET | Baixa um backup automático específico |
 | `/restaurar-backup-dados` | POST | Restaura `public/db/` a partir de um backup |
 | `/restaurar-backup-geral` | POST | Restaura o projeto inteiro a partir de um backup |
 | `/*` (qualquer outro caminho) | GET | Serve arquivos estáticos de `public/` |

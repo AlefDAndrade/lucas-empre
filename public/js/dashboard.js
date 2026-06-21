@@ -386,19 +386,12 @@
     renderRegistro();
   }
 
-  // Cor do badge "Tipo de Montagem" — cada label novo recebe a próxima cor
-  // da paleta, na ordem em que aparece pela primeira vez. Fica em cache pra
-  // o mesmo tipo manter sempre a mesma cor entre renders/filtros, em vez de
-  // só "2/P" e "S/P" terem cor própria e todo o resto cair num "badge-amber"
-  // genérico (era assim antes, e cobria mal tipos novos como 3T/4T).
-  const PALETA_BADGE_MONTAGEM = ['badge-blue', 'badge-green', 'badge-amber', 'badge-gray'];
-  const _coresBadgeMontagem = new Map();
+  // Cor do badge "Tipo de Montagem" — busca a cor de verdade vinculada ao
+  // tipo SIMPLES (gerada automaticamente na tela de admin, "largest-gap hue
+  // allocation" — ver data.js). Cai num cinza neutro pra tipos híbridos ou
+  // sem cor própria ainda; cor de híbrido fica pra depois.
   function _corBadgeMontagem(label) {
-    if (!label) return 'badge-gray';
-    if (!_coresBadgeMontagem.has(label)) {
-      _coresBadgeMontagem.set(label, PALETA_BADGE_MONTAGEM[_coresBadgeMontagem.size % PALETA_BADGE_MONTAGEM.length]);
-    }
-    return _coresBadgeMontagem.get(label);
+    return LW.corMontagemPorLabel(label);
   }
 
   async function renderRegistro() {
@@ -444,6 +437,8 @@
         <td data-col="paineis_${tipo}">${ppt[tipo] || 0}</td>
         <td data-col="m2_${tipo}">${(m2pt[tipo] || 0).toFixed(2)}</td>
       `).join('');
+      const corMont = _corBadgeMontagem(b.tipo_montagem);
+      const corTextoMont = corMont.hibrida ? 'var(--text)' : corMont.cor;
       return `
       <tr style="cursor:pointer" title="Clique para ver os traços desta bateria no Relatório de Injeção"
         onclick="LWDash.navegarParaTracosDoRegistro(window._lwRegistroMapTemp[${idx}])">
@@ -460,7 +455,7 @@
           ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
           : '<span class="badge badge-green">✓ NÃO</span>'}</td>
         <td data-col="motivo_atraso">${b.motivo_atraso || '—'}</td>
-        <td data-col="montagem"><span class="badge ${_corBadgeMontagem(b.tipo_montagem)}">${b.tipo_montagem || '—'}</span></td>
+        <td data-col="montagem"><span class="badge" style="background:${corMont.bg};color:${corTextoMont};border:1px solid ${corMont.borda}">${b.tipo_montagem || '—'}</span></td>
         <td data-col="paineis_2psp">${b.total_paineis || 0}</td>
         <td data-col="paineis_2p">${b.paineis_2p || 0}</td>
         <td data-col="paineis_sp">${b.paineis_sp || 0}</td>
