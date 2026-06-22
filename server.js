@@ -89,6 +89,7 @@ const VALIDADORES_BACKUP_DADOS = {
   'relatorio_injecao.json': v => Array.isArray(v),
   'security.json':           v => v && typeof v === 'object' && typeof v.passwordHash === 'string',
   'sobra.json':              v => v && typeof v === 'object',
+  'paradas.json':            v => Array.isArray(v),
 };
 
 // Alguns desses arquivos legitimamente ficam vazios (0 bytes) até o app
@@ -103,6 +104,7 @@ const DEFAULT_SE_VAZIO_BACKUP_DADOS = {
   'historico_edicoes.json': [],
   'relatorio_injecao.json': [],
   'sobra.json': {},
+  'paradas.json': [],
 };
 
 function parseArquivoBackupDados(nome, texto) {
@@ -642,6 +644,65 @@ http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ── PARADAS: salvar (inserir ou atualizar) uma parada ────────────────────
+  if (req.method === 'POST' && urlPath === '/salvar-parada') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const parada = JSON.parse(body);
+        if (!parada || typeof parada !== 'object' || !parada.id) {
+          throw new Error('Payload inválido: "id" obrigatório.');
+        }
+        const paradasPath = path.join(DB_DIR, 'paradas.json');
+        let paradas = [];
+        try { paradas = JSON.parse(fs.readFileSync(paradasPath, 'utf8') || '[]'); } catch (_) {}
+        const idx = paradas.findIndex(p => p.id === parada.id);
+        if (idx !== -1) {
+          paradas[idx] = { ...paradas[idx], ...parada };
+        } else {
+          paradas.push(parada);
+        }
+        const tmp = paradasPath + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(paradas, null, 2), 'utf8');
+        fs.renameSync(tmp, paradasPath);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ── PARADAS: excluir uma parada pelo id ───────────────────────────────────
+  if (req.method === 'POST' && urlPath === '/excluir-parada') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { id } = JSON.parse(body);
+        if (!id || typeof id !== 'string') throw new Error('ID inválido.');
+        const paradasPath = path.join(DB_DIR, 'paradas.json');
+        let paradas = [];
+        try { paradas = JSON.parse(fs.readFileSync(paradasPath, 'utf8') || '[]'); } catch (_) {}
+        const antes = paradas.length;
+        paradas = paradas.filter(p => p.id !== id);
+        if (paradas.length === antes) throw new Error('Parada não encontrada (id: ' + id + ').');
+        const tmp = paradasPath + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(paradas, null, 2), 'utf8');
+        fs.renameSync(tmp, paradasPath);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, erro: e.message }));
       }

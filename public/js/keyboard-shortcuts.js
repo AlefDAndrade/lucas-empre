@@ -17,14 +17,15 @@
 
   /** Atalhos de navegação: Alt + Dígito → página */
   const NAV_CONFIG = [
-    { key: '1', page: 'operacao', label: 'Operação', icon: '⚙' },
-    { key: '2', page: 'registro', label: 'Relatorio de Baterias', icon: '📋' },
-    { key: '3', page: 'relatorio', label: 'Relatório de Injeção', icon: '🧾' },
-    { key: '4', page: 'qualidade-tracos', label: 'Qualidade dos Traços', icon: '📐' },
-    { key: '5', page: 'analise-operacional', label: 'Análise Operacional', icon: '📊' },
-    { key: '6', page: 'turnos', label: 'Turnos', icon: '⏳' },
-    { key: '7', page: 'menu', label: 'Menu Principal', icon: '⬡' },
-    { key: '8', page: 'oee', label: 'OEE', icon: '🎯' },
+    { key: '1', page: 'menu', label: 'Menu Principal', icon: '⬡' },
+    { key: '2', page: 'operacao', label: 'Operação', icon: '⚙' },
+    { key: '3', page: 'registro', label: 'Relatorio de Baterias', icon: '📋' },
+    { key: '4', page: 'relatorio', label: 'Relatório de Injeção', icon: '🧾' },
+    { key: '5', page: 'paradas', label: 'Registro de Paradas', icon: '🛑' },
+    { key: '6', page: 'oee', label: 'OEE', icon: '🎯' },
+    { key: '7', page: 'qualidade-tracos', label: 'Qualidade dos Traços', icon: '📐' },
+    { key: '8', page: 'analise-operacional', label: 'Análise Operacional', icon: '📊' },
+    { key: '9', page: 'turnos', label: 'Turnos', icon: '⏳' },
   ];
 
   /**
@@ -62,6 +63,12 @@
       description: 'Abrir Debriefing do Dia',
       icon: '📓',
       handler: () => _toggleDebriefing(),
+    },
+    {
+      combo: 'Ctrl+Shift+P',
+      description: 'Registrar nova parada',
+      icon: '🛑',
+      handler: () => _novaParada(),
     },
     {
       combo: 'Ctrl+Space',
@@ -216,6 +223,7 @@
       relatorio: () => typeof LWDash !== 'undefined' && LWDash.initRelatorio?.(),
       'analise-operacional': () => typeof AOp !== 'undefined' && AOp.render?.(),
       'qualidade-tracos': () => typeof LWQualidade !== 'undefined' && LWQualidade.render?.(),
+      'paradas': () => typeof LWParadas !== 'undefined' && LWParadas.aplicarFiltros?.(),
     };
 
     const fn = refreshMap[pageId];
@@ -263,6 +271,24 @@
     } else {
       _showToast('📓', 'Debriefing não disponível');
     }
+  }
+
+  /**
+   * Navega para a página de Paradas e foca o campo de início,
+   * preparando o formulário para um novo registro.
+   */
+  function _novaParada() {
+    if (typeof showPage === 'function') showPage('paradas');
+    _highlightNavItem('paradas');
+    // Aguarda a página ativar antes de focar
+    setTimeout(() => {
+      if (typeof LWParadas !== 'undefined' && typeof LWParadas.cancelarEdicao === 'function') {
+        LWParadas.cancelarEdicao(); // garante formulário limpo
+      }
+      const campo = document.getElementById('parada-inicio');
+      if (campo) campo.focus();
+    }, 80);
+    _showToast('🛑', 'Nova parada — preencha o formulário');
   }
 
   function _startInjectionTimer() {

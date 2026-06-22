@@ -2046,3 +2046,36 @@ td.mono {
   color: var(--text-3);
   font-style: italic;
 }
+/* ============================================================
+   MÓDULO DE PARADAS
+   ============================================================ */
+
+.parada-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  font-family: var(--font-body);
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  animation: parada-toast-in .2s ease;
+}
+
+.parada-toast--ok {
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+
+.parada-toast--erro {
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  color: var(--red);
+}
+
+@keyframes parada-toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
