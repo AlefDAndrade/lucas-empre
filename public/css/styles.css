@@ -870,6 +870,88 @@ td.mono {
   background: rgba(255, 255, 255, .015);
 }
 
+/* ---- Relatório de Injeção: linha expansível com os reajustes de receita ---- */
+
+/* Linha principal: clicável pra abrir/fechar o detalhamento */
+#relatorio-tbody tr.linha-relatorio-clicavel {
+  cursor: pointer;
+  transition: background .15s;
+}
+#relatorio-tbody tr.linha-relatorio-clicavel:hover td {
+  background: rgba(59, 130, 246, .07);
+}
+
+/* Setinha indicando expandir/recolher, antes da data */
+.relatorio-expand-icon {
+  display: inline-block;
+  width: 12px;
+  margin-right: 5px;
+  color: var(--accent);
+  font-size: .65rem;
+}
+
+/* Linha de detalhe (escondida por padrão, alternada via JS) */
+.relatorio-detalhe-row td {
+  background: rgba(255, 255, 255, .015);
+  padding: 16px 22px;
+  text-align: left;
+  cursor: default;
+}
+
+/* Grade com um cartão por insumo/resultado que teve reajuste */
+.relatorio-ajuste-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.relatorio-ajuste-item {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+}
+
+.relatorio-ajuste-label {
+  font-family: var(--font-display);
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.relatorio-ajuste-valores {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: .8rem;
+}
+
+.relatorio-ajuste-original {
+  color: var(--text-2);
+}
+
+.relatorio-ajuste-final {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.relatorio-ajuste-seta {
+  color: var(--text-2);
+  opacity: .5;
+  font-size: .72rem;
+}
+
+.relatorio-ajuste-vazio {
+  color: var(--text-2);
+  font-size: .84rem;
+  padding: 4px 2px;
+}
+
 /* ---- Grid helpers ---- */
 .grid-2 {
   display: grid;

@@ -163,6 +163,7 @@
     id_traco: new Set(), // filtro de navegação via Registro de Baterias
     id_bateria_traco: new Set(), // só para exibição do chip "🔗 Bateria: X"
     op_navegacao: null, // id_operacao exato da bateria clicada — usado para filtrar (id_bateria pode repetir entre operações, id_operacao não)
+    apenas_com_ajuste: false, // filtro rápido: mostra só traços que tiveram algum reajuste de receita
   };
 
   // Data de corte: produções anteriores a esta data não possuem vínculo de traço
@@ -696,6 +697,14 @@
       el.addEventListener('change', _onDataRelatorio);
     });
 
+    const cbAjuste = document.getElementById('rel-apenas-ajuste');
+    if (cbAjuste) {
+      cbAjuste.checked = !!_filtrosRelatorio.apenas_com_ajuste;
+      cbAjuste.removeEventListener('change', _onApenasAjusteRelatorio);
+      cbAjuste.addEventListener('change', _onApenasAjusteRelatorio);
+    }
+    _sincronizarVisualApenasAjuste();
+
     renderRelatorio();
   }
 
@@ -726,6 +735,129 @@
     renderRelatorio();
   }
 
+  // Filtro rápido "Apenas com reajustes"
+  function _onApenasAjusteRelatorio(e) {
+    _filtrosRelatorio.apenas_com_ajuste = e.target.checked;
+    _sincronizarVisualApenasAjuste();
+    renderRelatorio();
+  }
+
+  // Destaca visualmente o chip do checkbox quando o filtro está ativo
+  function _sincronizarVisualApenasAjuste() {
+    const label = document.getElementById('rel-apenas-ajuste-label');
+    if (!label) return;
+    const ativo = !!_filtrosRelatorio.apenas_com_ajuste;
+    label.style.background = ativo ? 'rgba(245,158,11,.12)' : 'transparent';
+    label.style.borderColor = ativo ? 'var(--accent)' : 'var(--border)';
+    label.style.color = ativo ? 'var(--accent)' : 'var(--text-2)';
+  }
+
+  // ── DETALHAMENTO DE AJUSTES (linha expansível do Relatório de Injeção) ──
+  // Campos que podem vir como objeto { original, ajustes[], total }.
+  // resultado:true  → cada ajuste é uma NOVA LEITURA que substitui a anterior
+  //                    (ex: densidade, flow — o último valor é o que vale).
+  // resultado:false → cada ajuste é um ACRÉSCIMO somado ao original
+  //                    (ex: cimento, água — insumos da receita).
+  const _CAMPOS_DETALHE_RELATORIO = [
+    { campo: 'cimento_real',      label: 'Cimento',            unidade: 'kg', resultado: false },
+    { campo: 'agua_real',         label: 'Água',                unidade: 'L',  resultado: false },
+    { campo: 'eps_real',          label: 'EPS',                 unidade: 'kg', resultado: false },
+    { campo: 'superplast_real',   label: 'Superplastificante',  unidade: 'kg', resultado: false },
+    { campo: 'incorporador_real', label: 'Incorporador de Ar',  unidade: 'kg', resultado: false },
+    {
+      campo: 'tempo_batida', label: 'Tempo de Batida', resultado: false,
+      // tempo_batida é guardado em segundos — formata como H:MM:SS, igual à coluna da tabela
+      formatador: v => (v === null || v === undefined || v === '' || isNaN(v)) ? '—' : LW.formatDuration(parseFloat(v) / 60),
+    },
+    { campo: 'densidade',         label: 'Densidade',           unidade: '',   resultado: true },
+    { campo: 'flow',              label: 'Flow',                unidade: '',   resultado: true },
+  ];
+
+  // Corta zeros à direita inúteis (320.0 → 320; 12.50 → 12.5)
+  function _fmtNumDetalhe(v) {
+    if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+    const n = Math.round(parseFloat(v) * 100) / 100;
+    return String(n);
+  }
+
+  // Formata um valor de acordo com a definição do campo (usa formatador
+  // customizado, se houver — ex: tempo_batida em H:MM:SS — senão número + unidade)
+  function _fmtValorDetalhe(def, v) {
+    if (def.formatador) return def.formatador(v);
+    return _fmtNumDetalhe(v) + (def.unidade || '');
+  }
+
+  // Monta o cartão de UM insumo/resultado dentro do painel de detalhamento.
+  // Retorna null se esse campo não teve nenhum ajuste — não há reajuste pra
+  // mostrar, então ele simplesmente não aparece no painel.
+  function _linhaDetalheCampo(def, valorBruto) {
+    if (!valorBruto || typeof valorBruto !== 'object' || !('ajustes' in valorBruto)) return null;
+
+    const ajustes = Array.isArray(valorBruto.ajustes) ? valorBruto.ajustes : [];
+    if (!ajustes.length) return null; // formato de objeto, mas nunca foi reajustado
+
+    const original = parseFloat(valorBruto.original);
+    const final = def.resultado
+      ? parseFloat(ajustes[ajustes.length - 1])
+      : ajustes.reduce((s, a) => s + (parseFloat(a) || 0), isNaN(original) ? 0 : original);
+
+    const chips = ajustes.map((a, i) => {
+      const num = parseFloat(a);
+      if (def.resultado) {
+        const ehFinal = i === ajustes.length - 1;
+        return `<span class="badge ${ehFinal ? 'badge-blue' : 'badge-gray'}" title="${ehFinal ? 'Leitura final' : 'Leitura intermediária'}">${_fmtValorDetalhe(def, num)}</span>`;
+      }
+      const sinal = num >= 0 ? '+' : '';
+      const textoExibido = def.formatador ? `${sinal}${_fmtValorDetalhe(def, num)}` : `${sinal}${_fmtNumDetalhe(num)}${def.unidade}`;
+      return `<span class="badge ${num >= 0 ? 'badge-green' : 'badge-red'}" title="Reajuste aplicado">${textoExibido}</span>`;
+    }).join('<span class="relatorio-ajuste-seta">→</span>');
+
+    return `
+      <div class="relatorio-ajuste-item">
+        <div class="relatorio-ajuste-label">${def.label}</div>
+        <div class="relatorio-ajuste-valores">
+          <span class="relatorio-ajuste-original" title="Valor planejado (receita original)">${_fmtValorDetalhe(def, original)}</span>
+          <span class="relatorio-ajuste-seta">→</span>
+          ${chips}
+          <span class="relatorio-ajuste-seta">→</span>
+          <span class="relatorio-ajuste-final" title="Valor final aplicado na injeção">${_fmtValorDetalhe(def, final)}</span>
+        </div>
+      </div>`;
+  }
+
+  // Monta o painel completo de detalhamento de reajustes pra um traço `l`.
+  function _construirDetalheRelatorio(l) {
+    const itens = _CAMPOS_DETALHE_RELATORIO
+      .map(def => _linhaDetalheCampo(def, l[def.campo]))
+      .filter(Boolean);
+
+    if (!itens.length) {
+      return `<div class="relatorio-ajuste-vazio">Nenhum reajuste de receita foi registrado para este traço — os valores aplicados na injeção foram exatamente os planejados.</div>`;
+    }
+    return `<div class="relatorio-ajuste-grid">${itens.join('')}</div>`;
+  }
+
+  // Verifica se o traço teve QUALQUER reajuste em qualquer campo — usado
+  // pelo filtro rápido "Apenas com reajustes". Usa a mesma lista de campos
+  // do painel de detalhamento, então sempre fica em sincronia com ele.
+  function _tracoTemAjuste(l) {
+    return _CAMPOS_DETALHE_RELATORIO.some(def => {
+      const v = l[def.campo];
+      return v && typeof v === 'object' && Array.isArray(v.ajustes) && v.ajustes.length > 0;
+    });
+  }
+
+  // Abre/fecha a linha de detalhe associada a uma linha do Relatório de
+  // Injeção. rowId é o mesmo usado em data-traco-row-id / id="detalhe-...".
+  function toggleDetalheRelatorio(rowId) {
+    const detalhe = document.getElementById('detalhe-' + rowId);
+    const icone = document.getElementById('icone-' + rowId);
+    if (!detalhe) return;
+    const estavaAberta = detalhe.style.display !== 'none';
+    detalhe.style.display = estavaAberta ? 'none' : '';
+    if (icone) icone.textContent = estavaAberta ? '▸' : '▾';
+  }
+
   async function renderRelatorio() {
     const tbody = document.getElementById('relatorio-tbody');
     if (!tbody) return;
@@ -744,6 +876,7 @@
     if (f.turno.size) linhas = linhas.filter(l => f.turno.has(l.turno));
     if (f.silo.size) linhas = linhas.filter(l => f.silo.has(l.silo));
     if (f.expansao.size) linhas = linhas.filter(l => f.expansao.has(l.expansao));
+    if (f.apenas_com_ajuste) linhas = linhas.filter(l => _tracoTemAjuste(l));
     document.getElementById('rel-count').textContent = linhas.length + ' registros';
 
     if (!linhas.length) {
@@ -760,7 +893,7 @@
       const opB = b.ultilizado?.operacao?.[0]?.id_operacao || '';
       return opB.localeCompare(opA);
     });
-    tbody.innerHTML = sorted.map(l => {
+    tbody.innerHTML = sorted.map((l, lIdx) => {
       // Um traço pode ter sido reaproveitado em mais de uma bateria — cada uso
       // fica registrado em l.ultilizado.operacao. Aqui geramos UMA LINHA VISUAL
       // por uso (bateria/berço inicial/berço final mudam a cada reaproveitamento),
@@ -784,10 +917,15 @@
 
       if (!operacoes.length) return ''; // este traço não pertence à bateria filtrada
 
-      return operacoes.map((op, idx) => `
-      <tr${idx > 0 ? ' class="linha-traco-reaproveitado"' : ''}>
-        <td class="mono">${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
-        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" title="Traço reaproveitado nesta bateria">♻ reaproveitado</span>' : ''}</td>
+      return operacoes.map((op, idx) => {
+        const rowId = `rel-${lIdx}-${(l.id_traco || '')}-${idx}`.replace(/[^a-zA-Z0-9_-]/g, '');
+
+        return `
+      <tr${idx > 0 ? ' class="linha-traco-reaproveitado linha-relatorio-clicavel"' : ' class="linha-relatorio-clicavel"'}
+        data-traco-row-id="${rowId}" title="Clique para ver os reajustes de receita deste traço"
+        onclick="LWDash.toggleDetalheRelatorio('${rowId}')">
+        <td class="mono"><span class="relatorio-expand-icon" id="icone-${rowId}">▸</span>${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
+        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" title="Traço reaproveitado nesta bateria">♻</span>' : ''}</td>
         <td>${l.num_traco || '—'}</td>
         <td class="mono">${op.berco_inicio || '—'}</td>
         <td class="mono">${op.berco_finalizacao || '—'}</td>
@@ -808,7 +946,11 @@
       })()}</td>
         <td>${(op.obs !== undefined ? op.obs : l.obs) || '—'}</td>
       </tr>
-    `).join('');
+      <tr class="relatorio-detalhe-row" id="detalhe-${rowId}" style="display:none">
+        <td colspan="17">${_construirDetalheRelatorio(l)}</td>
+      </tr>
+    `;
+      }).join('');
     }).join('');
   }
 
@@ -1181,6 +1323,7 @@
     navegarParaTracosDoRegistro,
     toggleModoEdicaoRegistro,
     onClickLinhaRegistro,
+    toggleDetalheRelatorio,
     exportCSV: exportXLSX, abrirExportModal, fecharExportModal, onExportPeriodoChange,
     selecionarTodasColunas, atualizarPreviewCount, confirmarExport,
     toggleColMenu, toggleColunaRegistro, toggleGrupoTiposPlaca,
