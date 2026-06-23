@@ -332,6 +332,26 @@
   }
 
   /**
+   * Verifica se um traço tem TODOS os campos obrigatórios preenchidos.
+   * Único campo opcional é "Observações" (obs) — não entra nesta checagem.
+   */
+  function tracoCompleto(t) {
+    const insumoPreenchido = (key) => {
+      const insumo = t[key];
+      return !!(insumo && insumo.original !== '' && insumo.original !== null && insumo.original !== undefined);
+    };
+    return !!t.berco_ini && !!t.berco_fim && !!t.silo && !!t.expansao && !!t.densidadeEPS
+      && insumoPreenchido('cimento_real')
+      && insumoPreenchido('agua_real')
+      && insumoPreenchido('eps_real')
+      && insumoPreenchido('superplast_real')
+      && insumoPreenchido('incorporador_real')
+      && insumoPreenchido('tempo_batida')
+      && insumoPreenchido('densidade_insumo')
+      && insumoPreenchido('flow_insumo');
+  }
+
+  /**
    * Renumera os traços NOVOS (não reaproveitados) do state em sequência,
    * a partir de state.baseNumTraco. Chamada após qualquer criação/remoção de
    * traço, garantindo que a numeração de prévia exibida na tela esteja sempre
@@ -788,7 +808,7 @@
 
     return `
       <div class="form-group insumo-group tempo-batida-group" id="tempo-batida-group-${i}">
-        <label class="form-label">⏱ Tempo de Batida</label>
+        <label class="form-label">⏱ Tempo de Batida <span class="required">*</span></label>
         <div class="duration-picker">
           <div class="duration-col">
             <button class="dur-btn dur-up ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'h',1) ${t._reaproveitado ? 'disabled' : ''}">▲</button>
@@ -880,7 +900,7 @@
 
     return `
       <div class="form-group insumo-group">
-        <label class="form-label">${label}</label>
+        <label class="form-label">${label} <span class="required">*</span></label>
         <div class="insumo-input-row">
           <input class="form-input ${t._reaproveitado ? 'readonly-reaproveitado' : ''}" type="number" step="${step}"
             value="${valorExibido}"
@@ -923,8 +943,11 @@
       html += `<div class="traco-tabs-nav">`;
       state.tracos.forEach((t, i) => {
         const isExpanded = i === expandedTracoIndex;
-        const isComplete = t.berco_ini && t.berco_fim && t.silo && t.expansao && t.densidadeEPS;
-        const hasData = t.berco_ini || t.berco_fim || t.silo || t.expansao || t.densidadeEPS || t.obs;
+        const isComplete = tracoCompleto(t);
+        const hasData = t.berco_ini || t.berco_fim || t.silo || t.expansao || t.densidadeEPS || t.obs
+          || !!t.cimento_real?.original || !!t.agua_real?.original || !!t.eps_real?.original
+          || !!t.superplast_real?.original || !!t.incorporador_real?.original
+          || !!t.tempo_batida?.original || !!t.densidade_insumo?.original || !!t.flow_insumo?.original;
 
         const statusIcon = isComplete ? '✅' : (hasData ? '⚠️' : '⚪');
         const statusClass = isComplete ? 'complete' : (hasData ? 'pending' : 'empty');
@@ -1009,7 +1032,7 @@
           <div class="traco-section-label">📊 Resultado Obtido</div>
           <div class="traco-fields-grid traco-fields-grid--4">
             <div class="form-group">
-              <label class="form-label">Densidade EPS</label>
+              <label class="form-label">Densidade EPS <span class="required">*</span></label>
                 <input class="form-input" type="number" step="0.01" value="${t.densidadeEPS}"
                 oninput="LWOp.updateTraco(${i},\'densidadeEPS\',this.value)" placeholder="kg/m³"
                 ${t._reaproveitado ? 'readonly class="readonly-reaproveitado"' : ''}>
@@ -1030,9 +1053,7 @@
   }
 
   function updatePendencias() {
-    const tracosComSilo = state.tracos.length > 0 && state.tracos.every(t => !!t.silo);
-    const tracosComExp = state.tracos.length > 0 && state.tracos.every(t => !!t.expansao);
-    const tracosComDensidadeEPS = state.tracos.length > 0 && state.tracos.every(t => !!t.densidadeEPS);
+    const tracosCompletos = state.tracos.length > 0 && state.tracos.every(tracoCompleto);
     const checks = [
       { label: 'Turno definido', ok: !!state.turno },
       { label: 'Dimensão da bateria', ok: !!state.dimensao },
@@ -1042,9 +1063,7 @@
       { label: 'Injeção finalizada', ok: !!state.fim },
       { label: 'Motivo do atraso', ok: state.houve_atraso === 'NÃO' || !!state.motivo_atraso },
       { label: 'Ao menos 1 traço', ok: state.tracos.length > 0 },
-      { label: 'Silo em todos os traços', ok: tracosComSilo },
-      { label: 'Expansão em todos os traços', ok: tracosComExp },
-      { label: 'Densidade EPS em todos os traços', ok: tracosComDensidadeEPS }
+      { label: 'Informações do traço (todos os campos obrigatórios)', ok: tracosCompletos }
     ];
 
     const allOk = checks.every(c => c.ok);

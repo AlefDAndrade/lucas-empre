@@ -2266,6 +2266,7 @@
       'relatorio_injecao.json': v => Array.isArray(v),
       'security.json':           v => v && typeof v === 'object' && typeof v.passwordHash === 'string',
       'sobra.json':              v => v && typeof v === 'object',
+      'paradas.json':            v => Array.isArray(v),
     };
 
     // Alguns desses arquivos legitimamente ficam vazios (0 bytes) até o app
@@ -2277,6 +2278,7 @@
       'historico_edicoes.json': [],
       'relatorio_injecao.json': [],
       'sobra.json': {},
+      'paradas.json': [],
     };
 
     function parseArquivoRestaurar(nome, texto) {
