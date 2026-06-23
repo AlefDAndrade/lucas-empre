@@ -524,6 +524,38 @@ function formatDuration(minutes) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// ---- Desemplaque (tempo de cura) ----
+// Regra operacional: depois do FIM da injeção, a bateria precisa de
+// TEMPO_CURA_HORAS horas de cura antes de poder ser desemplacada. O
+// horário do desemplaque é sempre calculado a partir do FIM (nunca do
+// início) da injeção.
+const TEMPO_CURA_HORAS = 8;
+
+/**
+ * Calcula o horário de desemplaque (ISO string) a partir do horário de FIM
+ * da injeção, somando TEMPO_CURA_HORAS horas de cura.
+ * @param {string} fimISO - horário de fim da injeção (ISO string)
+ * @returns {string|null}
+ */
+function calcularDesemplaque(fimISO) {
+  if (!fimISO) return null;
+  const fim = new Date(fimISO);
+  if (isNaN(fim.getTime())) return null;
+  return new Date(fim.getTime() + TEMPO_CURA_HORAS * 60 * 60 * 1000).toISOString();
+}
+
+// Formata uma data/hora como "DD/MM HH:MM" — usada pelo horário de
+// desemplaque, que (por ser 8h depois do fim da injeção) pode cair num dia
+// diferente do início/fim, então mostrar só a hora seria ambíguo.
+function formatDateTime(isoString) {
+  if (!isoString) return '—';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return '—';
+  const data = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+  return `${data} ${hora}`;
+}
+
 // ---- Seeder — import data from original spreadsheet ----
 // Pre-load the historical records from the original xlsm into localStorage
 // so dashboards show real data from day one.
@@ -739,6 +771,11 @@ async function getStats(filtros = {}) {
   const baterias = await fetch('db/historico.json').then(r => r.json());
   // Garante paineis_por_tipo/m2_por_tipo em todos os registros (antigos e novos)
   baterias.forEach(normalizarPaineisRegistro);
+  // Garante desemplaque em todos os registros — calculado na hora pros
+  // registros antigos (de antes deste campo existir), que só têm "fim"
+  // salvo. Registros novos já vêm com "desemplaque" salvo por operacao.js;
+  // aqui só preenchemos quando estiver faltando.
+  baterias.forEach(b => { if (!b.desemplaque) b.desemplaque = calcularDesemplaque(b.fim); });
   let data = baterias;
 
   if (filtros.dataInicio) {
@@ -1114,7 +1151,10 @@ window.LW = {
   extrairComponentesMontagem,
 
   // Formatação
-  formatTime, diffMinutes, formatDuration,
+  formatTime, diffMinutes, formatDuration, formatDateTime,
+
+  // Desemplaque (tempo de cura)
+  TEMPO_CURA_HORAS, calcularDesemplaque,
 
   // Relatório de Injeção
   registrarRelatorioInjecao,

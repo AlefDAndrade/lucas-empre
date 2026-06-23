@@ -425,6 +425,13 @@
                   </div>
                 </div>
               </div>
+              <div id="op-desemplaque-row" style="display:none;margin-top:14px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 16px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius)">
+                  <span style="color:var(--text-2);font-size:.85rem">🔓 Horário do Desemplaque
+                    <span style="color:var(--text-3);font-size:.78rem">(cura de 8h após o fim da injeção)</span></span>
+                  <strong id="op-desemplaque" class="mono" style="color:var(--accent);font-size:1rem">—</strong>
+                </div>
+              </div>
             </div>
 
             <div class="card">
@@ -698,6 +705,7 @@
                 <th data-col="id_bateria">ID Bateria</th>
                 <th data-col="inicio">Início</th>
                 <th data-col="fim">Fim</th>
+                <th data-col="desemplaque">Desemplaque</th>
                 <th data-col="duracao">Duração</th>
                 <th data-col="tracos">Traços</th>
                 <th data-col="atraso">Atraso</th>
@@ -1595,6 +1603,10 @@
           <div style="font-family:var(--font-display);font-size:1.2rem;font-weight:700;color:var(--text)" id="modal-m2">
             —</div>
         </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:10px 14px;background:var(--bg-2);border-radius:var(--radius)">
+        <span style="color:var(--text-2);font-size:.85rem">🔓 Desemplaque (cura de 8h):</span>
+        <strong id="modal-desemplaque" class="mono" style="color:var(--accent)">—</strong>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
         <span style="color:var(--text-2);font-size:.85rem">Atraso:</span>
@@ -3314,7 +3326,7 @@
       // inicialização) já aparecem atualizados, sem precisar de F5 manual.
       fecharConfig();
       await LW.mostrarAlerta(
-        'Configurações salvas com sucesso!',
+        'Configurações salvas com sucesso! A página será recarregada para aplicar as mudanças.',
         { tipo: 'sucesso' }
       );
       window.location.reload();
@@ -3344,6 +3356,8 @@
       document.getElementById('eo-ro-data').textContent = bateria.data ? bateria.data.split('-').reverse().join('/') : '—';
       document.getElementById('eo-ro-inicio').textContent = bateria.inicio ? LW.formatTime(bateria.inicio) : '—';
       document.getElementById('eo-ro-fim').textContent = bateria.fim ? LW.formatTime(bateria.fim) : '—';
+      document.getElementById('eo-ro-desemplaque').textContent =
+        LW.formatDateTime(bateria.desemplaque || LW.calcularDesemplaque(bateria.fim));
       document.getElementById('eo-ro-duracao').textContent = LW.formatDuration(bateria.tempo_min);
       document.getElementById('eo-ro-tracos').textContent = bateria.qtd_tracos || 0;
       document.getElementById('eo-ro-atraso').textContent = bateria.houve_atraso === 'SIM' ? '⚠ SIM' : '✓ NÃO';
@@ -3522,6 +3536,7 @@
           <div>Traços: <strong id="eo-ro-tracos" class="mono">—</strong></div>
           <div>Início: <strong id="eo-ro-inicio" class="mono">—</strong></div>
           <div>Fim: <strong id="eo-ro-fim" class="mono">—</strong></div>
+          <div>Desemplaque: <strong id="eo-ro-desemplaque" class="mono">—</strong></div>
           <div>Duração: <strong id="eo-ro-duracao" class="mono">—</strong></div>
           <div>Houve atraso: <strong id="eo-ro-atraso" class="mono">—</strong></div>
         </div>

@@ -458,6 +458,7 @@
         <td data-col="id_bateria">${b.id_bateria || '—'}</td>
         <td data-col="inicio" class="mono">${b.inicio ? LW.formatTime(b.inicio) : '—'}</td>
         <td data-col="fim" class="mono">${b.fim ? LW.formatTime(b.fim) : '—'}</td>
+        <td data-col="desemplaque" class="mono">${LW.formatDateTime(b.desemplaque || LW.calcularDesemplaque(b.fim))}</td>
         <td data-col="duracao" class="mono">${LW.formatDuration(b.tempo_min)}</td>
         <td data-col="tracos">${b.qtd_tracos || 0}</td>
         <td data-col="atraso">${b.houve_atraso === 'SIM'
@@ -497,6 +498,7 @@
     { key: 'id_bateria', label: 'ID Bateria' },
     { key: 'inicio', label: 'Início' },
     { key: 'fim', label: 'Fim' },
+    { key: 'desemplaque', label: 'Desemplaque' },
     { key: 'duracao', label: 'Duração' },
     { key: 'tracos', label: 'Traços' },
     { key: 'atraso', label: 'Atraso' },
@@ -966,6 +968,7 @@
     { campo: 'tipo_montagem', header: 'Tipo Montagem', padrao: true },
     { campo: 'inicio', header: 'Hora Início', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
     { campo: 'fim', header: 'Hora Fim', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
+    { campo: 'desemplaque', header: 'Desemplaque', padrao: true, fmt: v => LW.formatDateTime(v) },
     {
       campo: 'tempo_min', header: 'Duração', padrao: true, fmt: v => {
         if (!v || typeof v !== 'number') return '—';

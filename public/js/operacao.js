@@ -237,6 +237,12 @@
     $('op-fim').value = LW.formatTime(state.fim);
     $('btn-finalizar').disabled = true;
 
+    // Horário do desemplaque = fim da injeção + tempo de cura (8h, regra
+    // operacional fixa) — calculado a partir do FIM, nunca do início.
+    state.desemplaque = LW.calcularDesemplaque(state.fim);
+    $('op-desemplaque').textContent = LW.formatDateTime(state.desemplaque);
+    $('op-desemplaque-row').style.display = 'block';
+
     const minutos = LW.diffMinutes(state.inicio, state.fim);
     state.tempo_min = minutos;
 
@@ -1114,6 +1120,7 @@
       id_bateria: state.id_bateria,
       inicio: state.inicio,
       fim: state.fim,
+      desemplaque: state.desemplaque,
       tempo_min: state.tempo_min,
       qtd_tracos: state.tracos.length,
       houve_atraso: state.houve_atraso,
@@ -1242,6 +1249,7 @@
     $('modal-tempo').textContent = LW.formatDuration(record.tempo_min);
     $('modal-paineis').textContent = record.total_paineis;
     $('modal-m2').textContent = record.m2_total.toFixed(2) + ' m²';
+    $('modal-desemplaque').textContent = LW.formatDateTime(record.desemplaque);
     $('modal-atraso').innerHTML = record.houve_atraso === 'SIM'
       ? '<span class="badge badge-red">SIM</span>'
       : '<span class="badge badge-green">NÃO</span>';
@@ -1270,6 +1278,7 @@
       bercos_reais: '',
       inicio: null,
       fim: null,
+      desemplaque: null,
       status: 'idle',
       tracos: [],
     };
@@ -1290,6 +1299,13 @@
     $('op-inicio').value = state.inicio ? LW.formatTime(state.inicio) : '';
     $('op-fim').value = state.fim ? LW.formatTime(state.fim) : '';
     $('op-tempo-total').textContent = state.tempo_min ? LW.formatDuration(state.tempo_min) : '—';
+
+    if (state.desemplaque) {
+      $('op-desemplaque').textContent = LW.formatDateTime(state.desemplaque);
+      $('op-desemplaque-row').style.display = 'block';
+    } else {
+      $('op-desemplaque-row').style.display = 'none';
+    }
 
     if (state.houve_atraso) {
       const minutos = state.tempo_min || 0;
@@ -1524,4 +1540,4 @@ function _mostrarModalConfirmacaoExclusao(i, onConfirm) {
   document.getElementById('btn-cancelar-exclusao').addEventListener('click', () => {
     modal.remove();
   });
-}
+} 
