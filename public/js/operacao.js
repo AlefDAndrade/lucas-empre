@@ -248,14 +248,21 @@
   }
 
   function startTimerUI() {
+    // Sempre limpa um intervalo anterior antes de criar outro — sem isso,
+    // toda vez que startTimerUI() roda de novo enquanto uma operação já
+    // está em andamento (ex: Ctrl+Shift+R, ou voltar pra esta página),
+    // ficava empilhando um setInterval novo por cima do(s) anterior(es),
+    // todos atualizando o mesmo relógio — daí o cronômetro "pular de X em X
+    // segundos" (cada intervalo extra empilhado soma mais uma atualização
+    // por segundo, todas escrevendo o mesmo valor correto, só que repetido).
+    if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
       if (!state.inicio) return;
       const elapsed = LW.diffMinutes(state.inicio, nowBrasilia().toISOString());
       const el = $('timer-display');
       if (!el) return;
+      el.textContent = LW.formatDuration(elapsed);
       const m = Math.floor(elapsed);
-      const s = Math.floor((elapsed - m) * 60);
-      el.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       el.className = 'timer-display' + (m >= LW.LIMITE_INJECAO_MIN ? ' danger' : m >= 50 ? ' warning' : '');
     }, 1000);
   }
@@ -1112,6 +1119,15 @@
     // operação — apenas esses consomem números do contador diário do servidor.
     const qtdTracosNovos = state.tracos.filter(t => !t._reaproveitado).length;
 
+    // Sem conexão? Não tenta nem perder tempo — já enfileira direto.
+    // navigator.onLine é só um indício (pode estar errado em alguns casos),
+    // então mesmo quando ele diz "online" ainda tentamos enviar de verdade;
+    // é só uma forma de pular a tentativa quando já se sabe que vai falhar.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      _enfileirarEContinuar(historyRecord, fullRecord, qtdTracosNovos, fullRecord);
+      return;
+    }
+
     Promise.all([
       LW.registrarOperacao(historyRecord),
       LW.registrarRelatorioInjecao(fullRecord),
@@ -1126,8 +1142,69 @@
         _perguntarSobraAoFinalizar(fullRecord);
       })
       .catch(err => {
+        // TypeError é o que o fetch() do navegador lança quando não
+        // consegue NEM CHEGAR no servidor (sem internet, servidor fora do
+        // ar) — diferente de um Error "normal", que é o que o próprio
+        // código lança quando o servidor respondeu mas recusou o registro
+        // por algum motivo de verdade (esse caso continua mostrando o erro
+        // pra a pessoa corrigir, não faz sentido enfileirar algo que o
+        // servidor já disse que não aceita).
+        if (err instanceof TypeError) {
+          _enfileirarEContinuar(historyRecord, fullRecord, qtdTracosNovos, fullRecord);
+          return;
+        }
         alert('Erro ao salvar operação: ' + err.message);
       });
+  }
+
+  /**
+   * Guarda a operação na fila de pendentes (será enviada de verdade quando
+   * a conexão voltar — ver LW.tentarSincronizarFilaPendentes em data.js) e
+   * libera a tela na mesma hora, em vez de deixar travado esperando a
+   * internet. Mostra um aviso bem claro de que isso ainda NÃO foi
+   * confirmado pelo servidor.
+   */
+  function _enfileirarEContinuar(historyRecord, fullRecord, qtdTracosNovos) {
+    LW.enfileirarOperacaoPendente(historyRecord, fullRecord, qtdTracosNovos);
+
+    LW.clearOperacaoAtual();
+    clearInterval(timerInterval);
+    resetState();
+    renderAll();
+
+    _mostrarAvisoConexao(
+      '📡 Sem conexão com a internet agora. Esta operação foi salva neste computador e será registrada de verdade automaticamente quando a conexão voltar — não precisa preencher de novo.',
+      'aviso'
+    );
+  }
+
+  /**
+   * Banner não-bloqueante (diferente de alert()) — usado especificamente
+   * pra avisos de conexão, porque um alert() bloqueante daria a impressão
+   * de que o sistema "travou" esperando algo, exatamente o que queremos
+   * evitar aqui.
+   */
+  function _mostrarAvisoConexao(mensagem, tipo) {
+    let el = document.getElementById('op-aviso-conexao');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'op-aviso-conexao';
+      el.style.cssText = 'position:fixed;top:70px;right:24px;max-width:380px;z-index:1200;padding:14px 18px;border-radius:8px;font-size:.85rem;line-height:1.45;box-shadow:0 12px 32px rgba(0,0,0,.4);transition:opacity .3s';
+      document.body.appendChild(el);
+    }
+    const cores = {
+      aviso: 'background:rgba(245,158,11,.15);border:1px solid var(--accent-dim);color:var(--accent)',
+      sucesso: 'background:rgba(16,185,129,.15);border:1px solid var(--green-dim);color:var(--green)',
+    };
+    el.style.cssText += ';' + (cores[tipo] || cores.aviso);
+    el.textContent = mensagem;
+    el.style.opacity = '1';
+    el.style.display = 'block';
+    clearTimeout(el._timeoutOcultar);
+    el._timeoutOcultar = setTimeout(() => {
+      el.style.opacity = '0';
+      setTimeout(() => { el.style.display = 'none'; }, 350);
+    }, 8000);
   }
 
   function showSuccessModal(record) {
@@ -1193,6 +1270,20 @@
 
     $('btn-iniciar').disabled = state.status !== 'idle';
     $('btn-finalizar').disabled = state.status !== 'running';
+
+    // Cronômetro: reflete o estado atual sempre que a tela é renderizada.
+    // Sem isso, depois de Resetar (ou Finalizar) o relógio ficava "congelado"
+    // mostrando o último valor antes do reset, em vez de voltar pra 00:00 —
+    // só era atualizado de novo quando uma nova operação era iniciada.
+    // Enquanto uma operação está 'running', deixa o setInterval de
+    // startTimerUI() ser o único responsável por atualizar o relógio.
+    if (state.status !== 'running') {
+      const elTimer = $('timer-display');
+      if (elTimer) {
+        elTimer.textContent = '00:00';
+        elTimer.className = 'timer-display';
+      }
+    }
 
     const brNow = nowBrasilia();
     $('op-data').textContent = brNow.toLocaleDateString('pt-BR', {

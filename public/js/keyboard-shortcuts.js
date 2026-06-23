@@ -15,75 +15,78 @@
    * 1. CONFIGURAÇÃO CENTRALIZADA
    * ────────────────────────────────────────────────────────── */
 
-  /** Atalhos de navegação: Alt + Dígito → página */
+  /** Atalhos de navegação: Alt + Dígito → página (combo customizável) */
   const NAV_CONFIG = [
-    { key: '1', page: 'menu', label: 'Menu Principal', icon: '⬡' },
-    { key: '2', page: 'operacao', label: 'Operação', icon: '⚙' },
-    { key: '3', page: 'registro', label: 'Relatorio de Baterias', icon: '📋' },
-    { key: '4', page: 'relatorio', label: 'Relatório de Injeção', icon: '🧾' },
-    { key: '5', page: 'paradas', label: 'Registro de Paradas', icon: '🛑' },
-    { key: '6', page: 'oee', label: 'OEE', icon: '🎯' },
-    { key: '7', page: 'qualidade-tracos', label: 'Qualidade dos Traços', icon: '📐' },
-    { key: '8', page: 'analise-operacional', label: 'Análise Operacional', icon: '📊' },
-    { key: '9', page: 'turnos', label: 'Turnos', icon: '⏳' },
+    { id: 'nav_operacao', comboPadrao: 'Alt+1', page: 'operacao', label: 'Operação', icon: '⚙' },
+    { id: 'nav_registro', comboPadrao: 'Alt+2', page: 'registro', label: 'Relatorio de Baterias', icon: '📋' },
+    { id: 'nav_relatorio', comboPadrao: 'Alt+3', page: 'relatorio', label: 'Relatório de Injeção', icon: '🧾' },
+    { id: 'nav_qualidade', comboPadrao: 'Alt+4', page: 'qualidade-tracos', label: 'Qualidade dos Traços', icon: '📐' },
+    { id: 'nav_analise', comboPadrao: 'Alt+5', page: 'analise-operacional', label: 'Análise Operacional', icon: '📊' },
+    { id: 'nav_turnos', comboPadrao: 'Alt+6', page: 'turnos', label: 'Turnos', icon: '⏳' },
+    { id: 'nav_menu', comboPadrao: 'Alt+7', page: 'menu', label: 'Menu Principal', icon: '⬡' },
+    { id: 'nav_oee', comboPadrao: 'Alt+8', page: 'oee', label: 'OEE', icon: '🎯' },
   ];
 
   /**
    * Atalhos de ação genérica.
    * `handler` é o nome da função global ou uma função inline.
-   * `description` aparece no modal de ajuda.
+   * `description` aparece no modal de ajuda. `comboPadrao` é o combo de
+   * fábrica — o combo em uso de fato (que pode ter sido personalizado pelo
+   * usuário) é calculado em tempo real por _comboEfetivo(id, comboPadrao).
    */
   const ACTION_CONFIG = [
     {
-      combo: 'Ctrl+Shift+F',
+      id: 'acao_filtro',
+      comboPadrao: 'Ctrl+Shift+F',
       description: 'Abrir painel de filtros',
       icon: '🔍',
       handler: () => _openFilterPanel(),
     },
     {
-      combo: 'Ctrl+Shift+R',
+      id: 'acao_atualizar',
+      comboPadrao: 'Ctrl+Shift+R',
       description: 'Atualizar dados',
       icon: '↺',
       handler: () => _refreshData(),
     },
     {
-      combo: 'Ctrl+Shift+E',
+      id: 'acao_exportar',
+      comboPadrao: 'Ctrl+Shift+E',
       description: 'Exportar relatório',
       icon: '⬇',
       handler: () => _exportReport(),
     },
     {
-      combo: 'Ctrl+Shift+A',
+      id: 'acao_novo_traco',
+      comboPadrao: 'Ctrl+Shift+A',
       description: 'Adicionar novo traço',
       icon: '➕',
       handler: () => _addNewTraco(),
     },
     {
-      combo: 'Ctrl+Shift+D',
+      id: 'acao_debriefing',
+      comboPadrao: 'Ctrl+Shift+D',
       description: 'Abrir Debriefing do Dia',
       icon: '📓',
       handler: () => _toggleDebriefing(),
     },
     {
-      combo: 'Ctrl+Shift+P',
-      description: 'Registrar nova parada',
-      icon: '🛑',
-      handler: () => _novaParada(),
-    },
-    {
-      combo: 'Ctrl+Space',
+      id: 'acao_cronometro',
+      comboPadrao: 'Ctrl+Space',
       description: 'Iniciar/Finalizar cronômetro',
       icon: '▶',
       handler: () => _startInjectionTimer(),
     },
     {
-      combo: 'Ctrl+R',
+      id: 'acao_resetar',
+      comboPadrao: 'Ctrl+R',
       description: 'Resetar operação',
       icon: '↺',
       handler: () => _resetOperation(),
     },
     {
-      combo: 'Ctrl+Enter',
+      id: 'acao_registrar',
+      comboPadrao: 'Ctrl+Enter',
       description: 'Registrar operação',
       icon: '✓',
       handler: () => _registerOperation(),
@@ -96,6 +99,95 @@
 
   /** Índice da página atual dentro de NAV_CONFIG */
   let _currentNavIndex = 0;
+
+  /**
+   * Atalhos personalizados pelo usuário — { [id]: 'Ctrl+Shift+X', ... }.
+   * Fica salvo no localStorage (preferência pessoal deste navegador, não do
+   * servidor — cada pessoa pode ter o seu próprio jeito mais confortável).
+   * Vazio = todo mundo usa o padrão de fábrica.
+   */
+  const LS_KEY_ATALHOS = 'lw_atalhos_customizados';
+  let _overrides = {};
+
+  function _carregarOverrides() {
+    try {
+      const raw = localStorage.getItem(LS_KEY_ATALHOS);
+      _overrides = raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      _overrides = {};
+    }
+  }
+
+  function _salvarOverrides() {
+    try {
+      localStorage.setItem(LS_KEY_ATALHOS, JSON.stringify(_overrides));
+    } catch (_) { /* localStorage indisponível — segue só em memória */ }
+  }
+
+  /** Combo em uso de fato pra um atalho — o personalizado, se houver, senão o padrão. */
+  function _comboEfetivo(id, comboPadrao) {
+    return _overrides[id] || comboPadrao;
+  }
+
+  /** Lista plana de todos os atalhos remapeáveis (navegação + ações), cada
+   * um já com seu combo efetivo calculado — usada pela tela de Configurações. */
+  function _todosAtalhos() {
+    const nav = NAV_CONFIG.map(n => ({
+      id: n.id, grupo: 'navegacao', label: n.label, icon: n.icon,
+      comboPadrao: n.comboPadrao, comboAtual: _comboEfetivo(n.id, n.comboPadrao),
+    }));
+    const acoes = ACTION_CONFIG.map(a => ({
+      id: a.id, grupo: 'acao', label: a.description, icon: a.icon,
+      comboPadrao: a.comboPadrao, comboAtual: _comboEfetivo(a.id, a.comboPadrao),
+    }));
+    return [...nav, ...acoes];
+  }
+
+  /**
+   * Define um novo combo pra um atalho (por id). Recusa se o combo já
+   * estiver em uso por OUTRO atalho (compara contra o combo EFETIVO de
+   * todos os outros, não só os padrões de fábrica).
+   * @returns {{ok:true}|{ok:false, erro:string}}
+   */
+  function _definirAtalho(id, novoCombo) {
+    const todos = _todosAtalhos();
+    const alvo = todos.find(a => a.id === id);
+    if (!alvo) return { ok: false, erro: 'Atalho não encontrado.' };
+
+    const conflito = todos.find(a => a.id !== id && a.comboAtual === novoCombo);
+    if (conflito) return { ok: false, erro: `"${novoCombo}" já está em uso por "${conflito.label}".` };
+
+    _overrides[id] = novoCombo;
+    _salvarOverrides();
+    return { ok: true };
+  }
+
+  /** Restaura TODOS os atalhos pro padrão de fábrica, de uma vez. */
+  function _resetarAtalhos() {
+    _overrides = {};
+    _salvarOverrides();
+  }
+
+  /**
+   * Callback pendente de captura de tecla — enquanto não-nulo, o listener
+   * principal desvia o PRÓXIMO keydown pra cá em vez de tratar como atalho
+   * normal. Usado pela tela de Configurações ao remapear um atalho.
+   */
+  let _capturarCallback = null;
+
+  /**
+   * Liga o "modo de escuta": a próxima tecla (ou combinação) pressionada é
+   * capturada e passada pra `callback`, em vez de disparar normalmente.
+   * `callback` recebe: null (cancelado com Esc), { erro } (combo inválido,
+   * sem nenhuma tecla modificadora) ou { combo } (capturado com sucesso).
+   */
+  function _capturarProximoCombo(callback) {
+    _capturarCallback = callback;
+  }
+
+  function _cancelarCaptura() {
+    _capturarCallback = null;
+  }
 
   /* ──────────────────────────────────────────────────────────
    * 3. UTILITÁRIOS
@@ -223,7 +315,6 @@
       relatorio: () => typeof LWDash !== 'undefined' && LWDash.initRelatorio?.(),
       'analise-operacional': () => typeof AOp !== 'undefined' && AOp.render?.(),
       'qualidade-tracos': () => typeof LWQualidade !== 'undefined' && LWQualidade.render?.(),
-      'paradas': () => typeof LWParadas !== 'undefined' && LWParadas.aplicarFiltros?.(),
     };
 
     const fn = refreshMap[pageId];
@@ -271,24 +362,6 @@
     } else {
       _showToast('📓', 'Debriefing não disponível');
     }
-  }
-
-  /**
-   * Navega para a página de Paradas e foca o campo de início,
-   * preparando o formulário para um novo registro.
-   */
-  function _novaParada() {
-    if (typeof showPage === 'function') showPage('paradas');
-    _highlightNavItem('paradas');
-    // Aguarda a página ativar antes de focar
-    setTimeout(() => {
-      if (typeof LWParadas !== 'undefined' && typeof LWParadas.cancelarEdicao === 'function') {
-        LWParadas.cancelarEdicao(); // garante formulário limpo
-      }
-      const campo = document.getElementById('parada-inicio');
-      if (campo) campo.focus();
-    }, 80);
-    _showToast('🛑', 'Nova parada — preencha o formulário');
   }
 
   function _startInjectionTimer() {
@@ -368,14 +441,17 @@
    * ────────────────────────────────────────────────────────── */
 
   function _buildHelpModal() {
-    if (document.getElementById('kb-help-modal')) return;
+    // Sempre reconstrói — os combos podem ter sido personalizados desde a
+    // última vez que esse modal foi aberto (tela de Configurações).
+    document.getElementById('kb-help-modal')?.remove();
 
-    const navRows = NAV_CONFIG.map(n =>
-      `<tr>
-        <td><kbd>Alt</kbd> + <kbd>${n.key}</kbd></td>
+    const navRows = NAV_CONFIG.map(n => {
+      const kbds = _comboEfetivo(n.id, n.comboPadrao).split('+').map(p => `<kbd>${p}</kbd>`).join(' + ');
+      return `<tr>
+        <td>${kbds}</td>
         <td class="kb-help-desc">${n.icon} ${n.label}</td>
-      </tr>`
-    ).join('');
+      </tr>`;
+    }).join('');
 
     const navArrowRows = `
       <tr>
@@ -388,7 +464,7 @@
       </tr>`;
 
     const actionRows = ACTION_CONFIG.map(a => {
-      const parts = a.combo.split('+');
+      const parts = _comboEfetivo(a.id, a.comboPadrao).split('+');
       const kbds = parts.map(p => `<kbd>${p}</kbd>`).join(' + ');
       return `<tr>
         <td>${kbds}</td>
@@ -467,6 +543,29 @@
    * ────────────────────────────────────────────────────────── */
 
   document.addEventListener('keydown', function (e) {
+    // ── Captura de novo combo (tela de Configurações remapeando um atalho) ──
+    // Tem prioridade sobre tudo o mais — enquanto este modo estiver ativo,
+    // nenhum atalho de verdade deve disparar.
+    if (_capturarCallback) {
+      e.preventDefault();
+      e.stopPropagation();
+      const teclasPuras = ['Control', 'Alt', 'Shift', 'Meta'];
+      if (teclasPuras.includes(e.key)) return; // só modificador ainda — espera a tecla final
+      const cb = _capturarCallback;
+      _capturarCallback = null;
+
+      if (e.key === 'Escape') { cb(null); return; } // cancelou a captura
+
+      const ehTeclaFuncao = /^F\d{1,2}$/.test(e.key); // F1-F12 podem ser usadas sozinhas
+      const temModificador = e.ctrlKey || e.altKey || e.shiftKey;
+      if (!temModificador && !ehTeclaFuncao) {
+        cb({ erro: 'Use ao menos uma tecla modificadora (Ctrl, Alt ou Shift) — só uma tecla normal sozinha conflitaria com digitação.' });
+        return;
+      }
+      cb({ combo: _comboFromEvent(e) });
+      return;
+    }
+
     // Fecha o modal de ajuda com Esc
     if (e.key === 'Escape' && _isHelpModalOpen()) {
       e.preventDefault();
@@ -486,16 +585,16 @@
       return;
     }
 
-    // ── Navegação Alt + Dígito ─────────────────────────────
-    if (e.altKey && !e.ctrlKey && !e.shiftKey) {
-      const nav = NAV_CONFIG.find(n => n.key === e.key);
-      if (nav) {
-        e.preventDefault();
-        _navigateTo(nav);
-        return;
-      }
+    // ── Navegação (combo customizável, padrão Alt + Dígito) ─
+    const nav = NAV_CONFIG.find(n => _comboEfetivo(n.id, n.comboPadrao) === combo);
+    if (nav) {
+      e.preventDefault();
+      _navigateTo(nav);
+      return;
+    }
 
-      // Alt + ← / Alt + →
+    // Alt + ← / Alt + → — fixos, não remapeáveis (atalho de "anterior/próximo")
+    if (e.altKey && !e.ctrlKey && !e.shiftKey) {
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         _navigatePrev();
@@ -508,8 +607,8 @@
       }
     }
 
-    // ── Ações Genéricas (Combos dinâmicos) ──────────────────
-    const action = ACTION_CONFIG.find(a => a.combo === combo);
+    // ── Ações Genéricas (combo customizável) ────────────────
+    const action = ACTION_CONFIG.find(a => _comboEfetivo(a.id, a.comboPadrao) === combo);
     if (action) {
       e.preventDefault();
       action.handler();
@@ -694,15 +793,30 @@
     closeHelp: _closeHelpModal,
     /**
      * Registra um novo atalho de ação dinamicamente.
-     * @param {string} combo  ex.: 'Ctrl+Shift+P'
+     * @param {string} comboPadrao  ex.: 'Ctrl+Shift+P'
      * @param {string} description
      * @param {string} icon
      * @param {Function} handler
      */
-    registerAction(combo, description, icon, handler) {
-      ACTION_CONFIG.push({ combo, description, icon, handler });
+    registerAction(comboPadrao, description, icon, handler) {
+      const id = 'acao_custom_' + description.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      ACTION_CONFIG.push({ id, comboPadrao, description, icon, handler });
     },
+
+    // ---- API usada pela tela de Configurações → Atalhos de Teclado ----
+
+    /** Lista todos os atalhos remapeáveis, já com o combo efetivo calculado. */
+    listarAtalhos: _todosAtalhos,
+    /** Define um novo combo pra um atalho (por id). Recusa se houver conflito. */
+    definirAtalho: _definirAtalho,
+    /** Restaura todos os atalhos pro padrão de fábrica. */
+    resetarAtalhos: _resetarAtalhos,
+    /** Liga o "modo de escuta" da próxima tecla — ver _capturarProximoCombo. */
+    capturarProximoCombo: _capturarProximoCombo,
+    /** Cancela uma captura em andamento (ex: ao fechar a tela sem terminar). */
+    cancelarCaptura: _cancelarCaptura,
   };
 
+  _carregarOverrides();
   console.log('[LWKeyboard] Atalhos globais carregados. Pressione F1 ou ? para ajuda.');
 })();

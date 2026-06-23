@@ -31,20 +31,24 @@ let VOLUME_POR_PLACA = []; // [{ label: 'S/P - 7,5 cm', volume: 0.1373 }, ...]
 let _configReady = false;
 const _configCallbacks = [];
 
-// ---- Cor automática por tipo de montagem SIMPLES ("largest-gap hue allocation") ----
-// A cada tipo simples novo, olha os matizes (hue) já usados pelos tipos
-// simples existentes e escolhe o ponto no meio do maior "vão" livre entre
-// eles — assim cada cor nova fica o mais distante possível das já
-// existentes, sem precisar redistribuir as anteriores. A cor fica vinculada
-// ao tipo simples (guardada como corHue na opção, em config.json) — não é
-// recalculada a cada exibição.
-// Faixa de matiz limitada a 0–300° de propósito: evita cair na faixa de
-// rosa/magenta (300–360°). Saturação/luminosidade fixas, pra todas as cores
-// terem o mesmo "peso" visual (nem apagadas, nem neon/muito brilhantes).
+// ---- Cor por tipo de montagem SIMPLES ----
+// O programa sempre SUGERE uma cor nova automaticamente ("largest-gap hue
+// allocation": olha os matizes já usados pelos tipos existentes e escolhe o
+// ponto no meio do maior "vão" livre entre eles, pra ficar o mais distante
+// possível das já existentes) — mas quem cadastra pode trocar por qualquer
+// outra cor à mão. O que fica guardado de verdade é sempre a cor FINAL (hex,
+// em `cor`), tenha sido aceita a sugestão ou escolhida manualmente — não
+// diferenciamos uma coisa da outra depois de salvo.
+//
+// Faixa de matiz da sugestão limitada a 0–300° de propósito: evita cair na
+// faixa de rosa/magenta (300–360°). Saturação/luminosidade fixas na
+// sugestão, pra ela ter o mesmo "peso" visual das demais cores do app — mas
+// isso só vale pra sugestão; uma cor escolhida manualmente é guardada como
+// foi escolhida, sem forçar essa saturação/luminosidade.
 const COR_HUE_MIN = 0;
 const COR_HUE_MAX = 300;
-const COR_SATURACAO = 60;
-const COR_LUMINOSIDADE = 52;
+const COR_SATURACAO_SUGESTAO = 60;
+const COR_LUMINOSIDADE_SUGESTAO = 52;
 
 function gerarProximaHueDisponivel(huesExistentes) {
   if (!huesExistentes || !huesExistentes.length) return 210; // primeira cor: azul, ponto de partida
@@ -60,11 +64,60 @@ function gerarProximaHueDisponivel(huesExistentes) {
   return Math.round(hueEscolhido);
 }
 
-function corCssDoHue(hue) {
+// ---- Conversões de cor (hue/hsl ↔ hex/rgb) — sem libs externas ----
+
+function hslParaHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const paraHex = x => Math.round(255 * x).toString(16).padStart(2, '0');
+  return `#${paraHex(f(0))}${paraHex(f(8))}${paraHex(f(4))}`;
+}
+
+function hexParaRgb(hex) {
+  let h = String(hex || '').replace('#', '').trim();
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const num = parseInt(h, 16) || 0;
+  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+}
+
+function hexParaHue(hex) {
+  const { r, g, b } = hexParaRgb(hex);
+  const rN = r / 255, gN = g / 255, bN = b / 255;
+  const max = Math.max(rN, gN, bN), min = Math.min(rN, gN, bN);
+  const d = max - min;
+  if (d === 0) return 0;
+  let h;
+  if (max === rN) h = ((gN - bN) / d) % 6;
+  else if (max === gN) h = (bN - rN) / d + 2;
+  else h = (rN - gN) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+
+function hexParaRgba(hex, alpha) {
+  const { r, g, b } = hexParaRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Sugestão de cor pra um tipo simples novo — recebe as cores (hex) já usadas
+// pelos outros tipos simples, e devolve uma cor hex nova, gerada pelo
+// algoritmo de maior vão. É só uma SUGESTÃO pra pré-preencher o seletor de
+// cor da tela de admin — quem estiver cadastrando pode aceitar ou trocar.
+function gerarProximaCorDisponivel(coresExistentesHex) {
+  const hues = (coresExistentesHex || []).filter(Boolean).map(hexParaHue);
+  const hue = gerarProximaHueDisponivel(hues);
+  return hslParaHex(hue, COR_SATURACAO_SUGESTAO, COR_LUMINOSIDADE_SUGESTAO);
+}
+
+// Monta as 3 variações (sólida, fundo sutil, borda) usadas nos badges/gráficos
+// a partir de uma cor hex — usado tanto pra cor automática quanto manual.
+function corCssDoHex(hex) {
   return {
-    cor: `hsl(${hue}, ${COR_SATURACAO}%, ${COR_LUMINOSIDADE}%)`,
-    bg: `hsla(${hue}, ${COR_SATURACAO}%, ${COR_LUMINOSIDADE}%, .15)`,
-    borda: `hsla(${hue}, ${COR_SATURACAO}%, ${COR_LUMINOSIDADE}%, .3)`,
+    cor: hex,
+    bg: hexParaRgba(hex, .15),
+    borda: hexParaRgba(hex, .3),
   };
 }
 
@@ -73,7 +126,8 @@ function corCssDoHue(hue) {
 // retornos também são usados em gráficos <canvas>, que não entendem
 // variáveis CSS — só cor literal (hex/rgb/hsl).
 //
-// - Tipo SIMPLES: uma cor só (gerada na tela de admin, ver corCssDoHue).
+// - Tipo SIMPLES: uma cor só, guardada como hex em `cor` (sugerida
+//   automaticamente ou escolhida à mão na tela de admin — ver corCssDoHex).
 // - Tipo HÍBRIDO: não tem cor própria — é sempre metade da cor de cada um
 //   dos 2 tipos simples que o compõem (cor1/cor2), pra deixar visualmente
 //   óbvio que é a combinação dos dois. `bg` já vem como um linear-gradient
@@ -86,16 +140,32 @@ function corMontagemPorLabel(label) {
   const opcao = (MONTAGEM_OPCOES || []).find(o => o.label === label);
   if (!opcao) return _corMontagemNeutra();
 
-  if (opcao.modo === 'simples' && typeof opcao.corHue === 'number') {
-    return { ...corCssDoHue(opcao.corHue), hibrida: false };
+  if (opcao.modo === 'simples') {
+    // cor (hex) é o formato atual; corHue (número) é o formato antigo,
+    // mantido só pra não perder a cor de registros salvos antes desta
+    // mudança — convertido na hora, nunca migrado silenciosamente no disco.
+    if (typeof opcao.cor === 'string' && opcao.cor) {
+      return { ...corCssDoHex(opcao.cor), hibrida: false };
+    }
+    if (typeof opcao.corHue === 'number') {
+      return { ...corCssDoHex(hslParaHex(opcao.corHue, COR_SATURACAO_SUGESTAO, COR_LUMINOSIDADE_SUGESTAO)), hibrida: false };
+    }
   }
 
   if (opcao.modo === 'hibrida' && Array.isArray(opcao.tipos) && opcao.tipos.length === 2) {
     const [op1, op2] = opcao.tipos.map(t =>
       (MONTAGEM_OPCOES || []).find(o => o.modo === 'simples' && o.tipo === t));
-    if (op1 && typeof op1.corHue === 'number' && op2 && typeof op2.corHue === 'number') {
-      const c1 = corCssDoHue(op1.corHue);
-      const c2 = corCssDoHue(op2.corHue);
+    const corDoTipo = op => {
+      if (!op) return null;
+      if (typeof op.cor === 'string' && op.cor) return op.cor;
+      if (typeof op.corHue === 'number') return hslParaHex(op.corHue, COR_SATURACAO_SUGESTAO, COR_LUMINOSIDADE_SUGESTAO);
+      return null;
+    };
+    const hex1 = corDoTipo(op1);
+    const hex2 = corDoTipo(op2);
+    if (hex1 && hex2) {
+      const c1 = corCssDoHex(hex1);
+      const c2 = corCssDoHex(hex2);
       return {
         hibrida: true,
         cor1: c1.cor, cor2: c2.cor,
@@ -437,11 +507,21 @@ function diffMinutes(start, end) {
   return (e - s) / 60000;
 }
 
+// Formata uma duração em minutos (o que continua guardado em tempo_min, sem
+// mudar nenhum cálculo) como horas:minutos:segundos — H:MM:SS — pra ficar
+// mais fácil de visualizar do que só minutos corridos (ex: "1:15:32" em vez
+// de "75m 32s"). Usada tanto pelo cronômetro da tela de Operação quanto
+// pela coluna "Duração" do Registro de Baterias (e os outros lugares que
+// mostram duração — Desempenho Turnos, exportação Excel, tela de Editar
+// Operação — todos ganham o mesmo formato automaticamente, por usarem esta
+// mesma função).
 function formatDuration(minutes) {
   if (!minutes || isNaN(minutes)) return '—';
-  const m = Math.floor(minutes);
-  const s = Math.round((minutes - m) * 60);
-  return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+  const totalSegundos = Math.round(minutes * 60);
+  const h = Math.floor(totalSegundos / 3600);
+  const m = Math.floor((totalSegundos % 3600) / 60);
+  const s = totalSegundos % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 // ---- Seeder — import data from original spreadsheet ----
@@ -546,6 +626,113 @@ async function registrarOperacao(record) {
   });
   const json = await res.json();
   if (!json.ok) throw new Error(json.erro || 'Erro ao registrar operação');
+}
+
+// ============================================================
+//  FILA DE OPERAÇÕES PENDENTES (registro offline)
+//
+//  Se "Registrar Operação" for clicado sem internet (ou a tentativa de
+//  envio falhar por erro de REDE — não por rejeição de verdade do
+//  servidor), a operação não é perdida nem fica travando a tela esperando
+//  a conexão voltar: ela é guardada aqui e o sistema segue livre pra
+//  começar a próxima. Assim que a conexão volta (evento 'online' do
+//  navegador, ou a checagem periódica de segurança), tenta enviar tudo que
+//  está na fila, na ordem em que foi registrado.
+// ============================================================
+
+const DB_KEY_FILA_PENDENTES = 'lw_fila_operacoes_pendentes';
+
+function _lerFilaPendentes() {
+  try {
+    const raw = localStorage.getItem(DB_KEY_FILA_PENDENTES);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) { return []; }
+}
+
+function _salvarFilaPendentes(fila) {
+  try { localStorage.setItem(DB_KEY_FILA_PENDENTES, JSON.stringify(fila)); } catch (_) { /* localStorage indisponível */ }
+}
+
+/** Quantas operações estão esperando pra ser enviadas de verdade. */
+function tamanhoFilaPendentes() {
+  return _lerFilaPendentes().length;
+}
+
+/**
+ * Guarda uma operação pra ser registrada de verdade quando a conexão
+ * voltar. `historyRecord`/`fullRecord`/`qtdTracosNovos` são exatamente os
+ * mesmos parâmetros que iriam pra registrarOperacao/registrarRelatorioInjecao
+ * /confirmarTracosHoje numa tentativa normal — só ficam guardados pra tentar
+ * de novo depois.
+ */
+function enfileirarOperacaoPendente(historyRecord, fullRecord, qtdTracosNovos) {
+  const fila = _lerFilaPendentes();
+  fila.push({ historyRecord, fullRecord, qtdTracosNovos, enfileiradoEm: new Date().toISOString() });
+  _salvarFilaPendentes(fila);
+  _notificarFilaMudou();
+}
+
+// Callbacks pra UI reagir a mudanças na fila (atualizar um indicador,
+// mostrar um aviso) — ver aoMudarFilaPendentes / aoSincronizarPendentes.
+let _onFilaPendentesMudou = null;
+let _onOperacoesPendentesSincronizadas = null;
+
+function aoMudarFilaPendentes(callback) { _onFilaPendentesMudou = callback; }
+function aoSincronizarPendentes(callback) { _onOperacoesPendentesSincronizadas = callback; }
+
+function _notificarFilaMudou() {
+  if (_onFilaPendentesMudou) _onFilaPendentesMudou(tamanhoFilaPendentes());
+}
+
+let _sincronizandoFilaPendentes = false;
+
+/**
+ * Tenta enviar pro servidor, em ordem, tudo que estiver na fila pendente.
+ * Para no primeiro item que falhar (preserva a ordem cronológica — não
+ * faz sentido a operação 3 chegar no servidor antes da operação 2, que
+ * ainda nem foi enviada). Os itens que falharem continuam na fila pra
+ * tentar de novo na próxima chamada.
+ * Segura contra chamadas concorrentes (evento 'online' + checagem
+ * periódica disparando quase ao mesmo tempo, por exemplo).
+ */
+async function tentarSincronizarFilaPendentes() {
+  if (_sincronizandoFilaPendentes) return;
+  const fila = _lerFilaPendentes();
+  if (!fila.length) return;
+
+  _sincronizandoFilaPendentes = true;
+  try {
+    let processados = 0;
+    for (const item of fila) {
+      try {
+        await registrarOperacao(item.historyRecord);
+        await registrarRelatorioInjecao(item.fullRecord);
+        if (item.qtdTracosNovos > 0) await confirmarTracosHoje(item.qtdTracosNovos);
+        processados++;
+      } catch (_) {
+        break; // ainda sem conexão (ou outro problema) — tenta o resto depois
+      }
+    }
+    if (processados > 0) {
+      _salvarFilaPendentes(fila.slice(processados));
+      _notificarFilaMudou();
+      if (_onOperacoesPendentesSincronizadas) _onOperacoesPendentesSincronizadas(processados);
+    }
+  } finally {
+    _sincronizandoFilaPendentes = false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  // Dispara assim que a conexão volta...
+  window.addEventListener('online', () => tentarSincronizarFilaPendentes());
+  // ...e também checa periodicamente, como rede de segurança — o evento
+  // 'online' do navegador nem sempre é 100% confiável (pode disparar com
+  // wifi conectado mas sem internet de verdade).
+  setInterval(() => tentarSincronizarFilaPendentes(), 30000);
+  // Tenta uma vez já ao carregar a página, pro caso de terem sobrado itens
+  // de uma sessão anterior que nunca chegaram a sincronizar.
+  setTimeout(() => tentarSincronizarFilaPendentes(), 3000);
 }
 
 async function getStats(filtros = {}) {
@@ -759,11 +946,16 @@ window.LW = {
   waitConfig,
   aplicarTiposMontagemEmMemoria: _aplicarTiposMontagem,
   gerarProximaHueDisponivel,
-  corCssDoHue,
+  gerarProximaCorDisponivel,
+  corCssDoHex,
+  hslParaHex,
+  hexParaHue,
   corMontagemPorLabel,
 
   // Storage
   getOperacaoAtual, saveOperacaoAtual, clearOperacaoAtual,
+  enfileirarOperacaoPendente, tamanhoFilaPendentes,
+  tentarSincronizarFilaPendentes, aoMudarFilaPendentes, aoSincronizarPendentes,
 
   // Cálculos
   calcPaineis,
