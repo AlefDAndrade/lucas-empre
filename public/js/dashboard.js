@@ -450,6 +450,13 @@
       `).join('');
       const corMont = _corBadgeMontagem(b.tipo_montagem);
       const corTextoMont = corMont.hibrida ? 'var(--text)' : corMont.cor;
+      // Montagem Personalizada não tem cor própria (cinza neutro — ver
+      // README, "Limitação conhecida") e até agora não tinha como ver quais
+      // tipos foram usados sem abrir o registro completo. O hover no badge
+      // mostra esse resumo (contagem por tipo), sem precisar de UI nova.
+      const tituloMontagem = b.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA
+        ? LW.resumoBercosPersonalizados(b.bercos_personalizados).replace(/"/g, '&quot;')
+        : '';
       const tituloLinha = _modoEdicaoRegistro
         ? 'Clique para editar esta operação'
         : 'Clique para ver os traços desta bateria no Relatório de Injeção';
@@ -470,7 +477,7 @@
           ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
           : '<span class="badge badge-green">✓ NÃO</span>'}</td>
         <td data-col="motivo_atraso">${b.motivo_atraso || '—'}</td>
-        <td data-col="montagem"><span class="badge" style="background:${corMont.bg};color:${corTextoMont};border:1px solid ${corMont.borda}">${b.tipo_montagem || '—'}</span></td>
+        <td data-col="montagem"><span class="badge" style="background:${corMont.bg};color:${corTextoMont};border:1px solid ${corMont.borda}" ${tituloMontagem ? `title="${tituloMontagem}"` : ''}>${b.tipo_montagem || '—'}</span></td>
         <td data-col="paineis_2psp">${b.total_paineis || 0}</td>
         <td data-col="paineis_2p">${b.paineis_2p || 0}</td>
         <td data-col="paineis_sp">${b.paineis_sp || 0}</td>
@@ -503,7 +510,7 @@
     { key: 'id_bateria', label: 'ID Bateria' },
     { key: 'inicio', label: 'Início' },
     { key: 'fim', label: 'Fim' },
-    { key: 'desemplaque', label: 'Desemplaque' },
+    { key: 'desemplaque', label: 'Previsão Desemplaque' },
     { key: 'duracao', label: 'Duração' },
     { key: 'tracos', label: 'Traços' },
     { key: 'atraso', label: 'Atraso' },
@@ -832,8 +839,80 @@
       </div>`;
   }
 
+  // ── Mini tabela por AJUSTE (ação) — fonte: ajustes_tracos.json ──────────
+  // Cada ajuste_N já é uma ação só (tempo de batida + insumos que vieram
+  // junto naquele momento) — diferente dos arrays soltos de cada campo em
+  // relatorio_injecao.json, que não garantem dizer quais aconteceram juntos
+  // (ver README, seção "Editar Traço"). Por isso essa é a fonte preferida
+  // pra exibir "1º ajuste: cimento -5 / 2º ajuste: cimento -10" etc.
+  const _CAMPOS_AJUSTE_EVENTO = [
+    { nome: 'tempo_batida', label: '⏱ Batida', formatador: v => LW.formatDuration(v) }, // já em MINUTOS em ajustes_tracos.json
+    { nome: 'cimento', label: 'Cimento', unidade: 'kg' },
+    { nome: 'agua', label: 'Água', unidade: 'L' },
+    { nome: 'eps', label: 'EPS', unidade: 'kg' },
+    { nome: 'superplast', label: 'Superplastificante', unidade: 'kg' },
+    { nome: 'incorporador', label: 'Incorp. de Ar', unidade: 'kg' },
+  ];
+
+  // Monta a mini tabela. Retorna null se a entrada não tiver nenhum
+  // "ajuste_N" (ex: traço legado, nunca migrado pra ajustes_tracos.json).
+  function _construirTabelaAjustesPorEvento(entradaAjustes) {
+    const chaves = Object.keys(entradaAjustes)
+      .filter(k => /^ajuste_\d+$/.test(k))
+      .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10));
+    if (!chaves.length) return null;
+
+    const ajustesOrdenados = chaves.map(k => entradaAjustes[k]);
+
+    // Só mostra coluna pra insumo que teve valor em PELO MENOS um ajuste
+    // deste traço — evita colunas vazias pra insumos nunca tocados.
+    const colunas = _CAMPOS_AJUSTE_EVENTO.filter(def =>
+      ajustesOrdenados.some(aj => aj && aj[def.nome] !== undefined && aj[def.nome] !== null && aj[def.nome] !== ''));
+
+    const linhas = ajustesOrdenados.map((aj, i) => {
+      const celulas = colunas.map(def => {
+        const v = aj?.[def.nome];
+        if (v === undefined || v === null || v === '') {
+          return `<td class="relatorio-ajusteN-vazio">—</td>`;
+        }
+        const num = parseFloat(v);
+        const texto = def.formatador ? def.formatador(num) : `${_fmtNumDetalhe(num)}${def.unidade || ''}`;
+        return `<td class="mono">${texto}</td>`;
+      }).join('');
+      return `
+        <tr>
+          <td class="relatorio-ajusteN-num">${i + 1}º ajuste</td>
+          <td class="relatorio-ajusteN-quando">${aj?.registrado_em ? LW.formatDateTime(aj.registrado_em) : '—'}</td>
+          ${celulas}
+        </tr>`;
+    }).join('');
+
+    return `
+      <table class="relatorio-ajusteN-tabela">
+        <thead>
+          <tr>
+            <th>Ajuste</th>
+            <th>Quando</th>
+            ${colunas.map(def => `<th>${def.label}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>`;
+  }
+
   // Monta o painel completo de detalhamento de reajustes pra um traço `l`.
-  function _construirDetalheRelatorio(l) {
+  // entradaAjustes (opcional) é a entrada de ajustes_tracos.json pra este
+  // id_traco, se existir — buscada uma única vez em renderRelatorio().
+  function _construirDetalheRelatorio(l, entradaAjustes) {
+    if (entradaAjustes) {
+      const tabela = _construirTabelaAjustesPorEvento(entradaAjustes);
+      if (tabela) return tabela;
+    }
+
+    // Fallback: traços sem entrada em ajustes_tracos.json (anteriores à
+    // migração/Editar Traço) — não dá pra saber quais ajustes de campos
+    // diferentes aconteceram juntos, então mostra do jeito antigo, por
+    // insumo (total acumulado), em vez de por ação.
     const itens = _CAMPOS_DETALHE_RELATORIO
       .map(def => _linhaDetalheCampo(def, l[def.campo]))
       .filter(Boolean);
@@ -841,7 +920,9 @@
     if (!itens.length) {
       return `<div class="relatorio-ajuste-vazio">Nenhum reajuste de receita foi registrado para este traço — os valores aplicados na injeção foram exatamente os planejados.</div>`;
     }
-    return `<div class="relatorio-ajuste-grid">${itens.join('')}</div>`;
+    return `
+      <div class="relatorio-ajuste-vazio" style="margin-bottom:8px">Traço sem histórico individual de ajustes (dado anterior à migração) — mostrando o total acumulado por insumo:</div>
+      <div class="relatorio-ajuste-grid">${itens.join('')}</div>`;
   }
 
   // Verifica se o traço teve QUALQUER reajuste em qualquer campo — usado
@@ -872,6 +953,10 @@
     tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-3);padding:20px">Carregando...</td></tr>`;
 
     let linhas = await LW.getRelatorioInjecao();
+    // Busca a fonte de verdade dos ajustes (por id_traco) uma única vez —
+    // usada no painel de detalhe pra agrupar por AÇÃO, não por campo.
+    const todosAjustes = await LW.getAjustesTracos();
+    const mapaAjustesPorTraco = new Map(todosAjustes.map(a => [a.id_traco, a]));
 
     const f = _filtrosRelatorio;
     if (f.data_inicio) linhas = linhas.filter(l => l.data >= f.data_inicio);
@@ -960,7 +1045,7 @@
         <td>${(op.obs !== undefined ? op.obs : l.obs) || '—'}</td>
       </tr>
       <tr class="relatorio-detalhe-row" id="detalhe-${rowId}" style="display:none">
-        <td colspan="17">${_construirDetalheRelatorio(l)}</td>
+        <td colspan="17">${_construirDetalheRelatorio(l, mapaAjustesPorTraco.get(l.id_traco))}</td>
       </tr>
     `;
       }).join('');
@@ -979,7 +1064,7 @@
     { campo: 'tipo_montagem', header: 'Tipo Montagem', padrao: true },
     { campo: 'inicio', header: 'Hora Início', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
     { campo: 'fim', header: 'Hora Fim', padrao: true, fmt: v => { if (!v) return ''; const d = new Date(v); return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }); } },
-    { campo: 'desemplaque', header: 'Desemplaque', padrao: true, fmt: v => LW.formatDateTime(v) },
+    { campo: 'desemplaque', header: 'Previsão Desemplaque', padrao: true, fmt: v => LW.formatDateTime(v) },
     {
       campo: 'tempo_min', header: 'Duração', padrao: true, fmt: v => {
         if (!v || typeof v !== 'number') return '—';
@@ -1050,7 +1135,8 @@
   // Lista efetiva usada pela UI de export — recalculada em abrirExportModal()
   let EXPORT_COLUNAS = [...EXPORT_COLUNAS_BASE];
 
-  function gerarDownloadXLSX(dados, colsSel, sufixo) {
+  function gerarDownloadXLSX(dados, colsSel, sufixo, opcoes = {}) {
+    const { nomeAba = 'Produção', prefixoArquivo = 'lightwall_baterias_' } = opcoes;
     // _gerarExportColunas() cria colunas dinâmicas como "paineis_3t"/"m2_3t" pra
     // tipos não nativos, mas o registro só guarda esses valores DENTRO de
     // paineis_por_tipo/m2_por_tipo (ex: item.paineis_por_tipo['3t']), nunca como
@@ -1108,10 +1194,10 @@
 
     // 5. Cria um Livro (Workbook) e adiciona a planilha
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Produção");
+    XLSX.utils.book_append_sheet(wb, ws, nomeAba);
 
     // 6. Gera o arquivo e inicia o download
-    const nomeArquivo = 'lightwall_baterias_' + sufixo + '.xlsx';
+    const nomeArquivo = prefixoArquivo + sufixo + '.xlsx';
     XLSX.writeFile(wb, nomeArquivo);
   }
 
@@ -1196,6 +1282,150 @@
     if (!colsSel.length) { LW.mostrarAlerta('Selecione ao menos uma coluna.', { tipo: 'aviso' }); return; }
     gerarDownloadXLSX(dados, colsSel, sufixo);
     fecharExportModal();
+  }
+
+  // ---- Export Excel — Relatório de Injeção ----
+  // Mesmo padrão/UI da exportação de Registro de Baterias (mesmo modal,
+  // só com ids "expr-" pra não colidir com o de baterias), reaproveitando
+  // gerarDownloadXLSX() — só os dados e as colunas mudam.
+
+  const EXPORT_COLUNAS_INJECAO = [
+    { campo: 'data', header: 'Data', padrao: true, fmt: v => v ? v.split('-').reverse().join('/') : '' },
+    { campo: 'id_bateria', header: 'ID Bateria', padrao: true },
+    { campo: 'reaproveitado', header: 'Traço Reaproveitado', padrao: true, fmt: v => v ? 'Sim' : 'Não' },
+    { campo: 'num_traco', header: 'Traço', padrao: true },
+    { campo: 'berco_inicio', header: 'Berço Início', padrao: true },
+    { campo: 'berco_fim', header: 'Berço Fim', padrao: true },
+    { campo: 'densidade', header: 'Densidade', padrao: true },
+    { campo: 'flow', header: 'Flow', padrao: true },
+    { campo: 'densidade_eps', header: 'Densidade EPS', padrao: true },
+    { campo: 'expansao', header: 'Expansão', padrao: true },
+    { campo: 'silo', header: 'Silo EPS', padrao: true },
+    { campo: 'cimento', header: 'Cimento', padrao: true },
+    { campo: 'agua', header: 'Água', padrao: true },
+    { campo: 'eps', header: 'EPS', padrao: true },
+    { campo: 'superplast', header: 'Superplastificante', padrao: true },
+    { campo: 'incorporador', header: 'Incorporador de Ar', padrao: true },
+    {
+      campo: 'tempo_batida_seg', header: 'Tempo de Batida', padrao: true,
+      fmt: v => (v === '' || v === null || v === undefined) ? '—' : LW.formatDuration(parseFloat(v) / 60),
+    },
+    { campo: 'obs', header: 'Observações', padrao: true },
+  ];
+
+  /**
+   * "Achata" relatorio_injecao.json em 1 linha por (traço × uso) — mesma
+   * expansão já feita em renderRelatorio() pra exibição na tela (um traço
+   * reaproveitado em 3 baterias gera 3 linhas) — e resolve cada campo
+   * {original, ajustes} pro valor TOTAL exibido na tabela (via _valRel),
+   * em vez do original sozinho.
+   */
+  function _gerarLinhasExportRelatorio(linhas) {
+    const out = [];
+    (linhas || []).forEach(l => {
+      const usos = (l.ultilizado?.operacao && l.ultilizado.operacao.length) ? l.ultilizado.operacao : [{}];
+      usos.forEach((op, idx) => {
+        const limpa = v => (v === '—' ? '' : v); // _valRel devolve '—' pra vazio — fica '' na planilha
+        const tempoTotal = limpa(_valRel(l.tempo_batida, 'tempo_batida'));
+        out.push({
+          data: l.data,
+          id_bateria: op.id_bateria || '',
+          reaproveitado: idx > 0,
+          num_traco: l.num_traco ?? '',
+          berco_inicio: op.berco_inicio ?? '',
+          berco_fim: op.berco_finalizacao ?? '',
+          densidade: limpa(_valRel(l.densidade, 'densidade')),
+          flow: limpa(_valRel(l.flow, 'flow')),
+          densidade_eps: l.densidade_eps ?? '',
+          expansao: l.expansao ?? '',
+          silo: l.silo ?? '',
+          cimento: limpa(_valRel(l.cimento_real)),
+          agua: limpa(_valRel(l.agua_real)),
+          eps: limpa(_valRel(l.eps_real)),
+          superplast: limpa(_valRel(l.superplast_real)),
+          incorporador: limpa(_valRel(l.incorporador_real)),
+          tempo_batida_seg: tempoTotal,
+          obs: (op.obs !== undefined ? op.obs : l.obs) || '',
+        });
+      });
+    });
+    return out;
+  }
+
+  async function abrirExportModalRelatorio() {
+    const grid = document.getElementById('expr-colunas-grid');
+    grid.innerHTML = EXPORT_COLUNAS_INJECAO.map((c, i) =>
+      '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 10px;' +
+      'border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-2)">' +
+      '<input type="checkbox" id="expr-col-' + i + '" ' + (c.padrao ? 'checked' : '') +
+      ' style="accent-color:var(--accent);width:15px;height:15px" onchange="LWDash.atualizarPreviewCountRelatorio()">' +
+      '<span style="font-size:.85rem">' + c.header + '</span></label>'
+    ).join('');
+    document.getElementById('expr-radio-tudo').checked = true;
+    document.getElementById('expr-periodo-inputs').style.display = 'none';
+    document.getElementById('expr-data-inicio').value = '';
+    document.getElementById('expr-data-fim').value = '';
+    await atualizarPreviewCountRelatorio();
+    document.getElementById('export-relatorio-modal').style.display = 'flex';
+  }
+
+  function fecharExportModalRelatorio() {
+    document.getElementById('export-relatorio-modal').style.display = 'none';
+  }
+
+  function onExportPeriodoChangeRelatorio(valor) {
+    document.getElementById('expr-periodo-inputs').style.display = valor === 'periodo' ? 'flex' : 'none';
+    atualizarPreviewCountRelatorio();
+  }
+
+  function selecionarTodasColunasRelatorio(marcar) {
+    EXPORT_COLUNAS_INJECAO.forEach((_, i) => {
+      const el = document.getElementById('expr-col-' + i);
+      if (el) el.checked = marcar;
+    });
+    atualizarPreviewCountRelatorio();
+  }
+
+  async function atualizarPreviewCountRelatorio() {
+    const linhas = await LW.getRelatorioInjecao();
+    let dados = linhas;
+    const radio = document.querySelector('input[name="export-periodo-relatorio"]:checked');
+    if (radio && radio.value === 'periodo') {
+      const ini = document.getElementById('expr-data-inicio').value;
+      const fim = document.getElementById('expr-data-fim').value;
+      if (ini) dados = dados.filter(l => l.data >= ini);
+      if (fim) dados = dados.filter(l => l.data <= fim);
+    }
+    const qtdLinhasExport = _gerarLinhasExportRelatorio(dados).length;
+    const qtdCols = EXPORT_COLUNAS_INJECAO.filter((_, i) => {
+      const el = document.getElementById('expr-col-' + i);
+      return el && el.checked;
+    }).length;
+    const el = document.getElementById('expr-preview-count');
+    if (el) el.textContent = qtdLinhasExport + ' registros · ' + qtdCols + ' colunas selecionadas';
+  }
+
+  async function confirmarExportRelatorio() {
+    const linhas = await LW.getRelatorioInjecao();
+    let dados = linhas;
+    let sufixo = 'completo';
+    const radio = document.querySelector('input[name="export-periodo-relatorio"]:checked');
+    if (radio && radio.value === 'periodo') {
+      const ini = document.getElementById('expr-data-inicio').value;
+      const fim = document.getElementById('expr-data-fim').value;
+      if (ini) dados = dados.filter(l => l.data >= ini);
+      if (fim) dados = dados.filter(l => l.data <= fim);
+      if (ini || fim) sufixo = (ini || 'inicio') + '_a_' + (fim || 'fim');
+    }
+    const colsSel = EXPORT_COLUNAS_INJECAO.filter((_, i) => {
+      const el = document.getElementById('expr-col-' + i);
+      return el && el.checked;
+    });
+    if (!colsSel.length) { LW.mostrarAlerta('Selecione ao menos uma coluna.', { tipo: 'aviso' }); return; }
+
+    const linhasExport = _gerarLinhasExportRelatorio(dados);
+    gerarDownloadXLSX(linhasExport, colsSel, sufixo, { nomeAba: 'Traços', prefixoArquivo: 'lightwall_relatorio_injecao_' });
+    fecharExportModalRelatorio();
   }
 
   // ================================================================
@@ -1371,6 +1601,8 @@
     toggleDetalheRelatorio,
     exportCSV: exportXLSX, abrirExportModal, fecharExportModal, onExportPeriodoChange,
     selecionarTodasColunas, atualizarPreviewCount, confirmarExport,
+    abrirExportModalRelatorio, fecharExportModalRelatorio, onExportPeriodoChangeRelatorio,
+    selecionarTodasColunasRelatorio, atualizarPreviewCountRelatorio, confirmarExportRelatorio,
     toggleColMenu, toggleColunaRegistro, toggleGrupoTiposPlaca,
   };
 })();

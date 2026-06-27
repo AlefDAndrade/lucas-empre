@@ -952,6 +952,57 @@ td.mono {
   padding: 4px 2px;
 }
 
+/* Mini tabela por AJUSTE (ação) — 1º ajuste, 2º ajuste, etc. */
+.relatorio-ajusteN-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+
+.relatorio-ajusteN-tabela th {
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-2);
+}
+
+.relatorio-ajusteN-tabela td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.relatorio-ajusteN-tabela tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.relatorio-ajusteN-tabela tbody tr:hover td {
+  background: rgba(255, 255, 255, .02);
+}
+
+.relatorio-ajusteN-num {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.relatorio-ajusteN-quando {
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  font-size: .76rem;
+  white-space: nowrap;
+}
+
+.relatorio-ajusteN-vazio {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
 /* ---- Grid helpers ---- */
 .grid-2 {
   display: grid;
@@ -1936,6 +1987,195 @@ td.mono {
   border-color: var(--border-2);
 }
 
+/* Relógio de Tempo de Batida travado (traço reaproveitado ou já com
+   ajuste aplicado) — as regras acima não cobriam o duration-picker
+   (nenhuma usava .dur-input/.dur-btn), por isso os botões não ficavam
+   visualmente travados mesmo quando deveriam. */
+.duration-picker.readonly-reaproveitado .dur-input {
+  background-color: var(--bg-2);
+  opacity: 0.7;
+  cursor: not-allowed;
+  border-color: var(--border-2);
+}
+
+.duration-picker.readonly-reaproveitado .dur-btn {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: var(--bg-3);
+}
+
+/* ── Copiloto IA (botão flutuante + painel de chat) ─────────────────────── */
+#copiloto-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .4);
+  z-index: 998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s ease;
+}
+
+#copiloto-btn:hover {
+  transform: scale(1.06);
+}
+
+#copiloto-panel {
+  display: none;
+  position: fixed;
+  bottom: 92px;
+  right: 24px;
+  width: 380px;
+  max-width: 92vw;
+  height: 520px;
+  max-height: 75vh;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 60px rgba(0, 0, 0, .5);
+  z-index: 998;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#copiloto-panel.active {
+  display: flex;
+}
+
+.copiloto-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+
+.copiloto-mensagens {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.copiloto-msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  font-size: .85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.copiloto-msg-user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 12px 12px 2px 12px;
+}
+
+.copiloto-msg-bot {
+  align-self: flex-start;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 2px;
+}
+
+.copiloto-msg-carregando {
+  align-self: flex-start;
+  color: var(--text-3);
+  font-size: .82rem;
+  font-style: italic;
+}
+
+.copiloto-input-row {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.copiloto-input-row .form-input {
+  flex: 1;
+}
+
+/* ── Product Tour (overlay + spotlight + balão) ─────────────────────────── */
+#tour-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+#tour-overlay.active {
+  display: block;
+}
+
+/* "Recorte" no escurecimento — um box-shadow gigante faz as vezes de máscara,
+   sem precisar de SVG/clip-path: a "sombra" cobre a tela toda EXCETO a área
+   exata desta caixinha, que fica sobre o elemento em destaque. */
+#tour-spotlight {
+  position: fixed;
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .7);
+  transition: top .25s ease, left .25s ease, width .25s ease, height .25s ease;
+  pointer-events: none;
+  outline: 2px solid var(--accent);
+}
+
+#tour-balao {
+  position: fixed;
+  width: 300px;
+  background: var(--bg-card);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, .5);
+  padding: 16px 18px;
+  transition: top .25s ease, left .25s ease;
+}
+
+.tour-balao-passo {
+  font-size: .68rem;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-bottom: 6px;
+}
+
+.tour-balao-titulo {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.tour-balao-texto {
+  font-size: .85rem;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.tour-balao-botoes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 /* Estilo para o modal de confirmação de exclusão */
 .modal-confirmacao-exclusao {
   position: fixed;
@@ -2253,4 +2493,39 @@ td.mono {
 .switch input:disabled + .switch-slider {
   opacity: .5;
   cursor: not-allowed;
+}
+
+/* ── "Tema de Teste" — Registrar Operação ───────────────────────────────
+   Antes, ativar o Modo de Teste só trocava um banner no topo — fácil de
+   perder de vista ao rolar a página. Agora a página inteira ganha um tom
+   violeta: retinta --accent/--accent-dim (consumidos por botões, bordas
+   de foco, badges etc. em ~40 regras deste arquivo — qualquer componente
+   que já usa var(--accent) muda de cor automaticamente, sem precisar
+   listar cada um) e adiciona uma textura diagonal sutil de fundo, pra
+   ficar óbvio à distância — mesmo sem ler o banner — que esta sessão é um
+   teste e não afeta dados reais. Ativada/desativada via JS em
+   _aplicarTravaDeAutorizacao() (operacao.js), que dá toggle na classe
+   "modo-teste-ativo" no #page-operacao. */
+#page-operacao.modo-teste-ativo {
+  --accent: #a78bfa;
+  --accent-dim: #4c1d95;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(167, 139, 250, .05) 0px,
+    rgba(167, 139, 250, .05) 14px,
+    transparent 14px,
+    transparent 28px
+  );
+  box-shadow: inset 0 0 0 2px rgba(167, 139, 250, .25);
+}
+
+/* Banner "MODO DE TESTE ATIVO" fixo no topo da rolagem — #page-operacao
+   é o próprio elemento com scroll (overflow-y:auto), então sticky aqui
+   ancora nele: o aviso continua visível mesmo depois de rolar a página
+   pra baixo, em vez de desaparecer assim que o topo sai da tela. */
+#op-aviso-modo-teste {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
 }

@@ -277,6 +277,18 @@
           </div>
         </div>
 
+        <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:24px 0 10px">
+          Mesclar dados de outra instalação <span style="text-transform:none;font-weight:400">— adiciona sem apagar
+            nada do que já existe aqui</span></div>
+        <div style="display:grid;grid-template-columns:1fr;gap:12px">
+          <div class="menu-card" onclick="fecharBackupHub();abrirMesclarBackup()">
+            <div class="menu-card-icon">🔗</div>
+            <div class="menu-card-title">Mesclar Backup de Dados</div>
+            <div class="menu-card-desc">A partir de um "Backup de Dados" gerado em OUTRA instalação deste sistema —
+              soma operações, traços, ajustes e paradas aos dados atuais, sem apagar nem sobrescrever nada.</div>
+          </div>
+        </div>
+
         <div
           style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:24px 0 10px">
           Backups Automáticos <span style="text-transform:none;font-weight:400">— gerados todo fim de dia, mantém os
@@ -290,9 +302,12 @@
 
     <!-- ============ PAGE: OPERAÇÃO ============ -->
     <main class="main" id="page-operacao">
-      <div class="page-header">
+      <div class="page-header" style="position:relative">
         <h1 class="page-title">Registro de <span>Operação</span></h1>
         <p class="page-desc" id="op-data">Carregando...</p>
+        <button class="btn btn-ghost btn-sm" style="position:absolute;top:10px;right:32px"
+          onclick="LWTour.iniciar('operacao', { forcado: true })" title="Refazer o tour guiado desta página">❔
+          Tour</button>
       </div>
 
       <div class="page-body">
@@ -393,12 +408,14 @@
                 </div>
                 <div class="form-group">
                   <label class="form-label">Tipo de Montagem <span class="required">*</span></label>
-                  <select class="form-select" id="op-montagem">
-                    <option value="">Carregando...</option>
-                  </select>
-                  <button type="button" id="btn-configurar-bercos" style="display:none;margin-top:6px;width:100%"
-                    class="btn btn-outline-accent btn-sm" onclick="LWOp.abrirGradeMontagem()">🔧 Configurar
-                    Berços</button>
+                  <div style="display:flex;gap:6px;align-items:stretch">
+                    <select class="form-select" id="op-montagem" style="flex:1;min-width:0">
+                      <option value="">Carregando...</option>
+                    </select>
+                    <button type="button" id="btn-configurar-bercos" style="display:none;flex:0 0 auto;padding:0 12px;align-items:center;justify-content:center"
+                      class="btn btn-outline-accent btn-sm" title="Ver/editar os berços da Montagem Personalizada"
+                      onclick="LWOp.abrirGradeMontagem()">🔧</button>
+                  </div>
                 </div>
                 <div class="form-group berco-parcial">
                   <label class="form-label">Berços Injetados (Real)</label>
@@ -446,7 +463,7 @@
               </div>
               <div id="op-desemplaque-row" style="display:none;margin-top:14px">
                 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 16px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius)">
-                  <span style="color:var(--text-2);font-size:.85rem">🔓 Horário do Desemplaque
+                  <span style="color:var(--text-2);font-size:.85rem">🔓 Previsão de Desemplaque
                     <span style="color:var(--text-3);font-size:.78rem">(cura de 8h após o fim da injeção)</span></span>
                   <strong id="op-desemplaque" class="mono" style="color:var(--accent);font-size:1rem">—</strong>
                 </div>
@@ -662,11 +679,14 @@
 
     <!-- ============ PAGE: Relatorio de Baterias ============ -->
     <main class="main" id="page-registro">
-      <div class="page-header">
+      <div class="page-header" style="position:relative">
         <h1 class="page-title">Registro de <span>Baterias</span></h1>
         <p class="page-desc">Histórico completo de injeções &nbsp;·&nbsp; <span
             style="color:var(--accent);font-size:.82rem">🔗 Clique em qualquer linha para ver os traços vinculados no
             Relatório de Injeção</span></p>
+        <button class="btn btn-ghost btn-sm" style="position:absolute;top:10px;right:32px"
+          onclick="LWTour.iniciar('registro', { forcado: true })" title="Refazer o tour guiado desta página">❔
+          Tour</button>
       </div>
 
 
@@ -695,7 +715,7 @@
                 <div class="col-menu-divider"></div>
                 <div id="col-menu-list"></div>
               </div>
-              <button class="btn btn-ghost btn-sm" onclick="LWDash.abrirExportModal()">⬇ Exportar Excel (.xlsx)</button>
+              <button class="btn btn-ghost btn-sm" id="btn-exportar-registro" onclick="LWDash.abrirExportModal()">⬇ Exportar Excel (.xlsx)</button>
               <button class="btn btn-ghost btn-sm" id="btn-editar-registro" data-admin-only
                 title="Corrigir dados de uma operação já registrada" onclick="LWDash.toggleModoEdicaoRegistro()">✏️
                 Editar</button>
@@ -725,7 +745,7 @@
                 <th data-col="id_bateria">ID Bateria</th>
                 <th data-col="inicio">Início</th>
                 <th data-col="fim">Fim</th>
-                <th data-col="desemplaque">Desemplaque</th>
+                <th data-col="desemplaque">Previsão Desemplaque</th>
                 <th data-col="duracao">Duração</th>
                 <th data-col="tracos">Traços</th>
                 <th data-col="atraso">Atraso</th>
@@ -754,9 +774,12 @@
     </main>
     <!-- ============ PAGE: RELATÓRIO DE INJEÇÃO ============ -->
     <main class="main" id="page-relatorio">
-      <div class="page-header">
+      <div class="page-header" style="position:relative">
         <h1 class="page-title">Relatório de <span>Injeção</span></h1>
         <p class="page-desc">Histórico completo de injeções</p>
+        <button class="btn btn-ghost btn-sm" style="position:absolute;top:10px;right:32px"
+          onclick="LWTour.iniciar('relatorio', { forcado: true })" title="Refazer o tour guiado desta página">❔
+          Tour</button>
       </div>
 
       <div class="page-body">
@@ -779,6 +802,8 @@
               <span style="font-size:.78rem;color:var(--text-3)" id="rel-count"></span>
               <button class="btn btn-ghost btn-sm" id="btn-limpar-filtros-relatorio" style="display:none"
                 onclick="limparTodosFiltros('filtros-relatorio')">✕ Limpar Todos</button>
+              <button class="btn btn-ghost btn-sm" id="btn-exportar-relatorio" onclick="LWDash.abrirExportModalRelatorio()">⬇ Exportar Excel
+                (.xlsx)</button>
               <button class="btn btn-ghost btn-sm" id="btn-editar-relatorio" data-admin-only
                 title="Corrigir dados de um traço já registrado" onclick="LWDash.toggleModoEdicaoRelatorio()">✏️
                 Editar</button>
@@ -798,7 +823,7 @@
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table id="relatorio-table">
             <thead>
               <tr>
                 <th>Data</th>
@@ -1607,7 +1632,8 @@
   ">
       <div style="text-align:center;margin-bottom:24px">
         <div style="font-size:3rem;margin-bottom:12px">✅</div>
-        <h2 style="font-family:var(--font-display);font-size:1.6rem;color:var(--green)">Operação Registrada!</h2>
+        <h2 id="success-modal-titulo" style="font-family:var(--font-display);font-size:1.6rem;color:var(--green)">Operação Registrada!</h2>
+        <p id="success-modal-subtitulo" style="display:none;color:var(--text-3);font-size:.82rem;margin:4px 0 0"></p>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
         <div class="kpi-card" style="padding:14px">
@@ -1632,7 +1658,7 @@
         </div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:10px 14px;background:var(--bg-2);border-radius:var(--radius)">
-        <span style="color:var(--text-2);font-size:.85rem">🔓 Desemplaque (cura de 8h):</span>
+        <span style="color:var(--text-2);font-size:.85rem">🔓 Previsão de Desemplaque (cura de 8h):</span>
         <strong id="modal-desemplaque" class="mono" style="color:var(--accent)">—</strong>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
@@ -1655,8 +1681,12 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
         <h2 style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">⚙
           CONFIGURAÇÕES</h2>
-        <button onclick="fecharConfig()"
-          style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-ghost btn-sm" onclick="LWTour.iniciar('config', { forcado: true })"
+            title="Refazer o tour guiado desta tela">❔ Tour</button>
+          <button onclick="fecharConfig()"
+            style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+        </div>
       </div>
 
       <div style="display:flex;gap:24px;align-items:flex-start">
@@ -1694,8 +1724,9 @@
                     <input class="form-input" id="cfg-bateria-novo" placeholder="Ex: B14" style="width:130px">
                   </div>
                   <div class="form-group" style="margin-bottom:0">
-                    <label class="form-label">Dimensão</label>
-                    <input class="form-input" id="cfg-bateria-label" placeholder="Ex: 15 cm" style="width:130px">
+                    <label class="form-label">Dimensão (em cm)</label>
+                    <input class="form-input" type="text" inputmode="decimal" id="cfg-bateria-label"
+                      placeholder="Ex: 15" style="width:130px">
                   </div>
                   <div class="form-group" style="margin-bottom:0">
                     <label class="form-label">Qtd. Berços</label>
@@ -1782,15 +1813,18 @@
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
               <div class="form-group" style="margin-bottom:0">
                 <label class="form-label">Label</label>
-                <input class="form-input" id="cfg-mont-hibrida-label" placeholder="Ex: HÍBRIDA 2P/3T" style="width:200px">
+                <input class="form-input auto-filled" id="cfg-mont-hibrida-label" readonly
+                  placeholder="Escolha os 2 tipos →" style="width:200px">
               </div>
               <div class="form-group" style="margin-bottom:0">
                 <label class="form-label">1º Tipo</label>
-                <select class="form-select" id="cfg-mont-hibrida-tipo1" style="width:170px"></select>
+                <select class="form-select" id="cfg-mont-hibrida-tipo1" style="width:170px"
+                  onchange="_cfgAtualizarLabelHibrida()"></select>
               </div>
               <div class="form-group" style="margin-bottom:0">
                 <label class="form-label">2º Tipo</label>
-                <select class="form-select" id="cfg-mont-hibrida-tipo2" style="width:170px"></select>
+                <select class="form-select" id="cfg-mont-hibrida-tipo2" style="width:170px"
+                  onchange="_cfgAtualizarLabelHibrida()"></select>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end">
@@ -1884,6 +1918,34 @@
   <script src="js/operacao.js"></script>
   <script src="js/dashboard.js"></script>
   <script>
+
+    // ─── Re-exige a senha de admin se a página voltar do cache do navegador
+    // (bfcache) já como Administrador — ex: deu F5/saiu, voltou pro login,
+    // e alguém aperta "Avançar" no navegador depois. Sem isso, o navegador
+    // restaura a tela exatamente como estava (ainda como Administrador),
+    // sem passar pela senha de novo. Só entra em ação no caso de restauração
+    // do cache (event.persisted) — um F5 normal como Administrador continua
+    // sem pedir senha de novo, como já era de propósito (ver login.html).
+    window.addEventListener('pageshow', (event) => {
+      if (!event.persisted) return;
+      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+
+      document.documentElement.style.visibility = 'hidden'; // esconde tudo até confirmar a senha
+      if (typeof AdminAuth === 'undefined') { window.location.href = 'login.html'; return; }
+
+      AdminAuth.abrirModal(
+        function onSuccess() { document.documentElement.style.visibility = 'visible'; },
+        function onCancel() {
+          sessionStorage.removeItem('lw_role'); // não deixa 'Administrador' parado na sessão enquanto está no login
+          window.location.href = 'login.html';
+        }
+      );
+      // O modal herdaria visibility:hidden do <html> (ele não define a
+      // própria visibility) e ficaria escondido junto com o resto da
+      // página — força visible só nele, por cima da herança.
+      const overlayAuth = document.getElementById('admin-auth-modal');
+      if (overlayAuth) overlayAuth.style.visibility = 'visible';
+    });
 
     // ---- Navigation ----
     // Páginas bloqueadas por perfil — Analista não acessa Registrar Operação,
@@ -1993,6 +2055,13 @@
         window._relatorioInit = true;
         LWDash.initRelatorio();
       }
+
+      // Tour guiado automático no 1º acesso a cada página (ver tour.js) —
+      // não faz nada se essa página não tem tour, ou se já foi visto antes
+      // (guardado em localStorage). Roda por último, depois dos inits
+      // acima, pra já achar a tabela/conteúdo carregado na hora de medir
+      // a posição dos elementos.
+      if (typeof LWTour !== 'undefined') LWTour.aoMudarPagina(pageId);
     }
 
     // ---- Tema ----
@@ -2354,6 +2423,7 @@
       'historico.json':          v => Array.isArray(v),
       'historico_edicoes.json': v => Array.isArray(v),
       'relatorio_injecao.json': v => Array.isArray(v),
+      'relatorio_edicoes.json': v => Array.isArray(v),
       'security.json':           v => v && typeof v === 'object' && typeof v.passwordHash === 'string',
       'sobra.json':              v => v && typeof v === 'object',
       'paradas.json':            v => Array.isArray(v),
@@ -2368,6 +2438,7 @@
       'historico.json': [],
       'historico_edicoes.json': [],
       'relatorio_injecao.json': [],
+      'relatorio_edicoes.json': [],
       'sobra.json': {},
       'paradas.json': [],
       'ajustes_tracos.json': [],
@@ -2496,6 +2567,181 @@
         window.location.reload();
       } catch (e) {
         mostrarErroRestaurar(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    }
+
+    // ---- Mesclar Backup de Dados (admin) — de OUTRA instalação ----
+    // Mesmo mecanismo de leitura/validação de .zip do Restaurar Backup de
+    // Dados, mas só com os arquivos que fazem sentido SOMAR de outra
+    // instalação (nunca config/security/sobra/contador — isso é estado
+    // DESTA instalação). O servidor (/mesclar-backup-dados) é quem
+    // garante, de fato, que nada existente é apagado — aqui é só
+    // leitura/validação do arquivo antes de enviar.
+    const MESCLAR_VALIDACOES = {
+      'historico.json':         v => Array.isArray(v),
+      'historico_edicoes.json': v => Array.isArray(v),
+      'relatorio_injecao.json': v => Array.isArray(v),
+      'ajustes_tracos.json':    v => Array.isArray(v),
+      'paradas.json':           v => Array.isArray(v),
+    };
+    const MESCLAR_DEFAULT_SE_VAZIO = {
+      'historico.json': [], 'historico_edicoes.json': [], 'relatorio_injecao.json': [],
+      'ajustes_tracos.json': [], 'paradas.json': [],
+    };
+    const MESCLAR_LABELS = {
+      'historico.json': 'Operações (Registro de Baterias)',
+      'historico_edicoes.json': 'Histórico de edição de operações',
+      'relatorio_injecao.json': 'Traços (Relatório de Injeção)',
+      'ajustes_tracos.json': 'Ajustes de receita',
+      'paradas.json': 'Paradas',
+    };
+
+    function parseArquivoMesclar(nome, texto) {
+      if (texto.trim() === '' && MESCLAR_DEFAULT_SE_VAZIO.hasOwnProperty(nome)) {
+        return MESCLAR_DEFAULT_SE_VAZIO[nome];
+      }
+      return JSON.parse(texto);
+    }
+
+    let _mesclarArquivos = null; // { 'historico.json': '<texto original>', ... } já validados
+
+    function abrirMesclarBackup() {
+      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      document.getElementById('mesclar-backup-modal').style.display = 'flex';
+      resetMesclarBackupModal();
+    }
+
+    function fecharMesclarBackup() {
+      document.getElementById('mesclar-backup-modal').style.display = 'none';
+    }
+
+    function resetMesclarBackupModal() {
+      _mesclarArquivos = null;
+      document.getElementById('mesclar-step-0').style.display = 'block';
+      document.getElementById('mesclar-step-1').style.display = 'none';
+      document.getElementById('mesclar-step-2').style.display = 'none';
+      document.getElementById('mesclar-erro').style.display = 'none';
+      document.getElementById('mesclar-file-input').value = '';
+      document.getElementById('mesclar-senha').value = '';
+    }
+
+    function voltarMesclarStep0() {
+      document.getElementById('mesclar-step-0').style.display = 'block';
+      document.getElementById('mesclar-step-1').style.display = 'none';
+    }
+
+    function mostrarErroMesclar(msg) {
+      const el = document.getElementById('mesclar-erro');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function handleMesclarDrop(e) {
+      e.preventDefault();
+      e.currentTarget.style.borderColor = 'var(--border)';
+      e.currentTarget.style.background = 'var(--bg-2)';
+      const file = e.dataTransfer.files[0];
+      if (file) handleMesclarArquivo(file);
+    }
+
+    async function handleMesclarArquivo(file) {
+      document.getElementById('mesclar-erro').style.display = 'none';
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.zip')) {
+        mostrarErroMesclar('Selecione um arquivo .zip — o gerado pelo botão "Backup de Dados", na OUTRA instalação.');
+        return;
+      }
+
+      try {
+        const zip = await JSZip.loadAsync(file);
+        // Diferente do Restaurar (que exige TODOS os 9 arquivos), aqui só
+        // processa os que existirem dentre os mescláveis — um backup só com
+        // relatório de injeção, por exemplo, ainda é válido pra mesclar.
+        const presentes = Object.keys(MESCLAR_VALIDACOES).filter(nome => !!zip.file(nome));
+        if (!presentes.length) {
+          mostrarErroMesclar('Nenhum arquivo mesclável encontrado neste .zip (historico.json, relatorio_injecao.json, ajustes_tracos.json ou paradas.json).');
+          return;
+        }
+
+        const conteudos = {};
+        const resumo = [];
+        for (const nome of presentes) {
+          const texto = await zip.file(nome).async('string');
+          let valor;
+          try {
+            valor = parseArquivoMesclar(nome, texto);
+          } catch (e) {
+            mostrarErroMesclar(`"${nome}" não é um JSON válido.`);
+            return;
+          }
+          if (!MESCLAR_VALIDACOES[nome](valor)) {
+            mostrarErroMesclar(`"${nome}" não tem o formato esperado.`);
+            return;
+          }
+          conteudos[nome] = texto;
+          resumo.push(`• ${MESCLAR_LABELS[nome]}: ${valor.length} registro(s)`);
+        }
+
+        _mesclarArquivos = conteudos;
+        document.getElementById('mesclar-preview').innerHTML = resumo.map(l => `<div>${l}</div>`).join('');
+        document.getElementById('mesclar-step-0').style.display = 'none';
+        document.getElementById('mesclar-step-1').style.display = 'block';
+      } catch (e) {
+        mostrarErroMesclar('Não foi possível ler o .zip: ' + e.message);
+      }
+    }
+
+    async function confirmarMesclarBackup() {
+      if (!_mesclarArquivos) return;
+      document.getElementById('mesclar-erro').style.display = 'none';
+
+      const senha = document.getElementById('mesclar-senha').value;
+      if (!senha) { mostrarErroMesclar('Digite sua senha de administrador.'); return; }
+
+      const confirmou = await LW.mostrarConfirmacao(
+        'Isso vai ADICIONAR os registros deste backup aos dados atuais. Nada do que já existe aqui será apagado ou alterado.',
+        { titulo: 'Mesclar backup de dados?', textoConfirmar: 'Mesclar', icon: '🔗' }
+      );
+      if (!confirmou) return;
+
+      const btn = document.getElementById('mesclar-btn-confirmar');
+      const textoOriginal = btn.textContent;
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Mesclando...';
+
+        const res = await fetch('/mesclar-backup-dados', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ senha, arquivos: _mesclarArquivos }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.erro || 'Erro ao mesclar backup.');
+
+        const r = json.resultado;
+        const linhas = [];
+        if (r.operacoes.inseridos || r.operacoes.duplicatas) {
+          linhas.push(`Operações: <strong>${r.operacoes.inseridos} adicionadas</strong>, ${r.operacoes.duplicatas} já existiam aqui`);
+        }
+        if (r.tracos.inseridos || r.tracos.duplicatas) {
+          linhas.push(`Traços: <strong>${r.tracos.inseridos} adicionados</strong>, ${r.tracos.duplicatas} já existiam aqui`);
+        }
+        if (r.paradas.inseridos || r.paradas.duplicatas) {
+          linhas.push(`Paradas: <strong>${r.paradas.inseridos} adicionadas</strong>, ${r.paradas.duplicatas} já existiam aqui`);
+        }
+        if (r.edicoes_operacao.inseridos) {
+          linhas.push(`Histórico de edição: <strong>${r.edicoes_operacao.inseridos}</strong> registro(s)`);
+        }
+        if (!linhas.length) linhas.push('Nenhum registro novo encontrado — tudo neste backup já existia aqui.');
+
+        document.getElementById('mesclar-step-1').style.display = 'none';
+        document.getElementById('mesclar-step-2').style.display = 'block';
+        document.getElementById('mesclar-resultado').innerHTML = linhas.map(l => `<div>${l}</div>`).join('');
+      } catch (e) {
+        mostrarErroMesclar(e.message);
       } finally {
         btn.disabled = false;
         btn.textContent = textoOriginal;
@@ -3059,6 +3305,7 @@
       cfgRenderTudo();
       cfgMostrarSecao('dados');
       document.getElementById('config-modal').style.display = 'flex';
+      if (typeof LWTour !== 'undefined') LWTour.aoAbrirModal('config');
     }
 
     function fecharConfig() {
@@ -3112,9 +3359,11 @@
       const outroCapturando = _cfgAtalhoCapturando && !capturando;
       const comboHtml = capturando
         ? '<span style="color:var(--accent);font-size:.78rem">Pressione a nova combinação... (Esc cancela)</span>'
-        : a.comboAtual.split('+').map(p =>
-          `<kbd style="display:inline-block;padding:2px 7px;font-family:var(--font-mono);font-size:.74rem;color:var(--text);background:var(--bg-3);border:1px solid var(--border-2);border-radius:4px">${p}</kbd>`
-        ).join(' + ');
+        : (a.comboAtual === ''
+          ? '<span style="color:var(--text-3);font-size:.78rem;font-style:italic">Sem atalho</span>'
+          : a.comboAtual.split('+').map(p =>
+            `<kbd style="display:inline-block;padding:2px 7px;font-family:var(--font-mono);font-size:.74rem;color:var(--text);background:var(--bg-3);border:1px solid var(--border-2);border-radius:4px">${p}</kbd>`
+          ).join(' + '));
       return `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-3);border:1px solid ${capturando ? 'var(--accent)' : 'var(--border)'};border-radius:var(--radius);padding:9px 14px;flex-wrap:wrap">
           <span style="font-size:.84rem;color:var(--text-2)">${a.icon} ${a.label}</span>
@@ -3148,10 +3397,32 @@
           cfgRenderAtalhos();
           return;
         }
-        const r = LWKeyboard.definirAtalho(id, resultado.combo);
-        if (!r.ok) LW.mostrarAlerta(r.erro, { tipo: 'erro' });
-        cfgRenderAtalhos();
+        _cfgAplicarNovoCombo(id, resultado.combo);
       });
+    }
+
+    // Tenta aplicar o novo combo; se já estiver em uso por outro atalho,
+    // pergunta antes de substituir — confirmado, o antigo titular do combo
+    // fica sem atalho (não herda o combo anterior de `id`).
+    async function _cfgAplicarNovoCombo(id, combo) {
+      const r = LWKeyboard.definirAtalho(id, combo);
+      if (r.ok) { cfgRenderAtalhos(); return; }
+
+      if (r.conflito) {
+        const confirmou = await LW.mostrarConfirmacao(
+          `"${combo}" já está em uso por "${r.conflito.icon ? r.conflito.icon + ' ' : ''}${r.conflito.label}". Substituir mesmo assim? "${r.conflito.label}" ficará sem atalho.`,
+          { titulo: 'Atalho já em uso', textoConfirmar: 'Substituir', icon: '⌨️' }
+        );
+        if (confirmou) {
+          const r2 = LWKeyboard.definirAtalho(id, combo, { substituirConflito: true });
+          if (!r2.ok) LW.mostrarAlerta(r2.erro || 'Não foi possível definir o atalho.', { tipo: 'erro' });
+        }
+        cfgRenderAtalhos();
+        return;
+      }
+
+      LW.mostrarAlerta(r.erro || 'Não foi possível definir o atalho.', { tipo: 'erro' });
+      cfgRenderAtalhos();
     }
 
     async function cfgResetarAtalhos() {
@@ -3212,11 +3483,18 @@
       const inputBercos = document.getElementById('cfg-bateria-bercos');
 
       const id = inputId.value.trim().toUpperCase();
-      const label = inputLabel.value.trim();
+      const dimRaw = inputLabel.value.trim();
       const bercos = parseInt(inputBercos.value);
 
       if (!id) { LW.mostrarAlerta('Digite o ID da bateria (ex: B14).', { tipo: 'aviso' }); return; }
-      if (!label) { LW.mostrarAlerta('Digite a dimensão da bateria (ex: 15 cm).', { tipo: 'aviso' }); return; }
+      if (!dimRaw) { LW.mostrarAlerta('Digite a dimensão da bateria, em cm (ex: 15).', { tipo: 'aviso' }); return; }
+      // Só número — quem digita não precisa (e não deve) escrever "cm" aqui;
+      // o "cm" é adicionado automaticamente ao montar o label exibido.
+      if (!/^\d+([.,]\d+)?$/.test(dimRaw)) {
+        LW.mostrarAlerta('Digite só o número da dimensão, em cm (ex: 15) — sem "cm" ou outro texto.', { tipo: 'aviso' });
+        return;
+      }
+      const label = dimRaw + 'cm';
       if (!bercos || bercos < 1) { LW.mostrarAlerta('Digite a quantidade de berços válida.', { tipo: 'aviso' }); return; }
       if (_cfgDados.baterias.find(b => b.id === id)) { LW.mostrarAlerta('Este ID de bateria já existe.', { tipo: 'aviso' }); return; }
 
@@ -3287,6 +3565,23 @@
       sel1.innerHTML = '<option value="">— selecione —</option>' + opts;
       sel2.innerHTML = '<option value="">— selecione —</option>' + opts;
       sel1.value = valor1; sel2.value = valor2;
+      _cfgAtualizarLabelHibrida();
+    }
+
+    // Monta o label do tipo Híbrida automaticamente a partir dos 2 tipos
+    // simples escolhidos — sempre "HÍBRIDA <tipo1>/<tipo2>" (ex: escolher
+    // 2p e 4t gera "HÍBRIDA 2P/4T"). Quem cadastra não digita o label dessa
+    // combinação — só escolhe os tipos; o campo de label é só exibição
+    // (readonly), recalculado aqui a cada troca de 1º/2º Tipo.
+    function _cfgAtualizarLabelHibrida() {
+      const elLabel = document.getElementById('cfg-mont-hibrida-label');
+      if (!elLabel) return;
+      const tipo1 = document.getElementById('cfg-mont-hibrida-tipo1')?.value;
+      const tipo2 = document.getElementById('cfg-mont-hibrida-tipo2')?.value;
+      if (!tipo1 || !tipo2) { elLabel.value = ''; return; }
+      elLabel.value = tipo1 === tipo2
+        ? '⚠ escolha dois tipos diferentes'
+        : `HÍBRIDA ${tipo1.toUpperCase()}/${tipo2.toUpperCase()}`;
     }
 
     // Cria um novo tipo de montagem SIMPLES: 1 tipo de placa, painéis/berço
@@ -3335,18 +3630,23 @@
     // cimentícia não é perguntada aqui — é herdada de cada tipo simples na
     // hora do cálculo (calcPaineis(), em data.js).
     function cfgAdicionarMontagemHibrida() {
-      const label = document.getElementById('cfg-mont-hibrida-label').value.trim().toUpperCase();
       const tipo1 = document.getElementById('cfg-mont-hibrida-tipo1').value;
       const tipo2 = document.getElementById('cfg-mont-hibrida-tipo2').value;
 
-      if (!label) { LW.mostrarAlerta('Digite um label para o tipo híbrido.', { tipo: 'aviso' }); return; }
       if (!tipo1 || !tipo2) { LW.mostrarAlerta('Escolha os dois tipos que compõem a montagem híbrida.', { tipo: 'aviso' }); return; }
       if (tipo1 === tipo2) { LW.mostrarAlerta('Escolha dois tipos diferentes.', { tipo: 'aviso' }); return; }
+
+      // Label sempre derivado dos 2 tipos escolhidos — nunca digitado (ver
+      // _cfgAtualizarLabelHibrida) — recalculado aqui de novo, direto dos
+      // selects, em vez de confiar no campo readonly (só exibição).
+      const label = `HÍBRIDA ${tipo1.toUpperCase()}/${tipo2.toUpperCase()}`;
       if (_cfgDados.montagens.find(m => m.label === label)) { LW.mostrarAlerta('Este label já existe.', { tipo: 'aviso' }); return; }
 
       _cfgDados.montagens.push({ label, modo: 'hibrida', tipos: [tipo1, tipo2] });
 
-      document.getElementById('cfg-mont-hibrida-label').value = '';
+      document.getElementById('cfg-mont-hibrida-tipo1').value = '';
+      document.getElementById('cfg-mont-hibrida-tipo2').value = '';
+      _cfgAtualizarLabelHibrida();
       cfgRenderTudo();
     }
 
@@ -3758,6 +4058,27 @@
       return (v && typeof v === 'object' && Array.isArray(v.ajustes)) ? [...v.ajustes] : [];
     }
 
+    // ---- Relógio (h:m:s) de Tempo de Batida — mesma lógica de conversão
+    // usada no picker de Registrar Operação (operacao.js: segParaHMS/hmsParaSeg) ----
+    function _etSegParaHMS(seg) {
+      const s = Math.max(0, Math.round(seg || 0));
+      return { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60), s: s % 60 };
+    }
+    function _etHmsParaSeg(h, m, s) {
+      return (parseInt(h) || 0) * 3600 + (parseInt(m) || 0) * 60 + (parseInt(s) || 0);
+    }
+    // tempo_batida.original (relatorio_injecao.json) está em SEGUNDOS; o
+    // formulário envia tempo_batida_min (minutos) — mesma conversão que
+    // já era feita no número simples, só que agora a partir do relógio.
+    function _etSegParaMin(seg) {
+      return Math.round((seg / 60) * 100) / 100;
+    }
+    // ajustes_tracos.json guarda tempo_batida em MINUTOS — converte pra
+    // h:m:s (via segundos) só pra exibir no relógio.
+    function _etMinParaHMS(min) {
+      return _etSegParaHMS(Math.round((min || 0) * 60));
+    }
+
     async function abrirEdicaoTraco(traco, uso) {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
       _etTracoOriginal = JSON.parse(JSON.stringify(traco));
@@ -3788,9 +4109,12 @@
       document.getElementById('et-original-eps').value = _etExtrairOriginal(traco.eps_real);
       document.getElementById('et-original-superplast').value = _etExtrairOriginal(traco.superplast_real);
       document.getElementById('et-original-incorporador').value = _etExtrairOriginal(traco.incorporador_real);
-      // tempo_batida.original está em SEGUNDOS em relatorio_injecao.json — mostra em MINUTOS no formulário
+      // tempo_batida.original está em SEGUNDOS em relatorio_injecao.json — mostra no relógio h:m:s
       const origTempoSeg = _etExtrairOriginal(traco.tempo_batida);
-      document.getElementById('et-original-tempo').value = origTempoSeg === '' ? '' : Math.round((origTempoSeg / 60) * 100) / 100;
+      const hmsOriginal = _etSegParaHMS(origTempoSeg === '' ? 0 : origTempoSeg);
+      document.getElementById('et-original-tempo-h').value = hmsOriginal.h;
+      document.getElementById('et-original-tempo-m').value = hmsOriginal.m;
+      document.getElementById('et-original-tempo-s').value = hmsOriginal.s;
 
       document.getElementById('et-original-densidade').value = _etExtrairOriginal(traco.densidade);
       document.getElementById('et-original-flow').value = _etExtrairOriginal(traco.flow);
@@ -3820,6 +4144,30 @@
       document.getElementById('editar-traco-modal').style.display = 'flex';
     }
 
+    // Ajusta um campo (h/m/s) do relógio do tempo de batida original com
+    // ▲▼ — mesmo padrão de wrap-around do picker de Registrar Operação.
+    function _etAjustarDuracaoOriginal(campo, delta) {
+      const el = document.getElementById(`et-original-tempo-${campo}`);
+      if (!el) return;
+      const max = campo === 'h' ? 23 : 59;
+      let val = (parseInt(el.value) || 0) + delta;
+      if (val < 0) val = max;
+      if (val > max) val = 0;
+      el.value = val;
+    }
+    // Só pra normalizar o campo se o admin digitar direto (sem setas).
+    function _etOnDuracaoOriginalInput() { /* leitura é feita ao salvar — ver _etLerDuracaoOriginalMin() */ }
+
+    // Lê o relógio h:m:s do tempo de batida original e devolve em MINUTOS
+    // (formato que o servidor espera em originais.tempo_batida_min).
+    function _etLerDuracaoOriginalMin() {
+      const h = document.getElementById('et-original-tempo-h').value;
+      const m = document.getElementById('et-original-tempo-m').value;
+      const s = document.getElementById('et-original-tempo-s').value;
+      const seg = _etHmsParaSeg(h, m, s);
+      return seg === 0 ? '' : _etSegParaMin(seg);
+    }
+
     function fecharEdicaoTraco() {
       document.getElementById('editar-traco-modal').style.display = 'none';
       _etTracoOriginal = null;
@@ -3837,13 +4185,35 @@
         { nome: 'eps', label: 'EPS' }, { nome: 'superplast', label: 'Superplast.' },
         { nome: 'incorporador', label: 'Incorp. Ar' },
       ];
-      cont.innerHTML = _etAjustesAtuais.map((a, i) => `
+      cont.innerHTML = _etAjustesAtuais.map((a, i) => {
+        const hms = _etMinParaHMS(a.tempo_batida);
+        return `
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px">
           <div style="font-size:.7rem;color:var(--text-3);width:100%;margin-bottom:-2px">Ajuste #${i + 1}${a.registrado_em ? ' — ' + LW.formatDateTime(a.registrado_em) : ' (novo)'}</div>
-          <div class="form-group" style="margin:0;width:110px">
-            <label class="form-label" style="font-size:.68rem">Batida (min) *</label>
-            <input class="form-input" type="number" step="0.1" value="${a.tempo_batida ?? ''}"
-              oninput="_etAtualizarAjuste(${i},'tempo_batida',this.value)">
+          <div class="form-group" style="margin:0;width:190px">
+            <label class="form-label" style="font-size:.68rem">⏱ Batida *</label>
+            <div class="duration-picker duration-picker--sm">
+              <div class="duration-col">
+                <button type="button" class="dur-btn dur-up" onclick="_etAjustarDuracaoAjuste(${i},'h',1)">▲</button>
+                <input class="dur-input" type="number" min="0" max="23" id="et-aj-${i}-h" value="${hms.h}" readonly>
+                <button type="button" class="dur-btn dur-dn" onclick="_etAjustarDuracaoAjuste(${i},'h',-1)">▼</button>
+                <span class="dur-label">h</span>
+              </div>
+              <span class="dur-sep">:</span>
+              <div class="duration-col">
+                <button type="button" class="dur-btn dur-up" onclick="_etAjustarDuracaoAjuste(${i},'m',1)">▲</button>
+                <input class="dur-input" type="number" min="0" max="59" id="et-aj-${i}-m" value="${hms.m}" readonly>
+                <button type="button" class="dur-btn dur-dn" onclick="_etAjustarDuracaoAjuste(${i},'m',-1)">▼</button>
+                <span class="dur-label">min</span>
+              </div>
+              <span class="dur-sep">:</span>
+              <div class="duration-col">
+                <button type="button" class="dur-btn dur-up" onclick="_etAjustarDuracaoAjuste(${i},'s',1)">▲</button>
+                <input class="dur-input" type="number" min="0" max="59" id="et-aj-${i}-s" value="${hms.s}" readonly>
+                <button type="button" class="dur-btn dur-dn" onclick="_etAjustarDuracaoAjuste(${i},'s',-1)">▼</button>
+                <span class="dur-label">seg</span>
+              </div>
+            </div>
           </div>
           ${CAMPOS.map(c => `
           <div class="form-group" style="margin:0;width:95px">
@@ -3854,7 +4224,27 @@
           <button type="button" onclick="_etRemoverAjuste(${i})" title="Remover este ajuste"
             style="background:none;border:none;color:var(--red);cursor:pointer;font-size:1rem;margin-left:auto">✕</button>
         </div>
-      `).join('');
+      `;
+      }).join('');
+    }
+
+    // Ajusta um campo (h/m/s) do relógio de um ajuste específico (i) com
+    // ▲▼ — readonly/só-setas, igual ao modal de Ajuste de Receita ao vivo
+    // (operacao.js) — e já recalcula o total em minutos pro state.
+    function _etAjustarDuracaoAjuste(i, campo, delta) {
+      const el = document.getElementById(`et-aj-${i}-${campo}`);
+      if (!el) return;
+      const max = campo === 'h' ? 23 : 59;
+      let val = (parseInt(el.value) || 0) + delta;
+      if (val < 0) val = max;
+      if (val > max) val = 0;
+      el.value = val;
+
+      const h = document.getElementById(`et-aj-${i}-h`).value;
+      const m = document.getElementById(`et-aj-${i}-m`).value;
+      const s = document.getElementById(`et-aj-${i}-s`).value;
+      const seg = _etHmsParaSeg(h, m, s);
+      _etAtualizarAjuste(i, 'tempo_batida', seg === 0 ? '' : _etSegParaMin(seg));
     }
 
     function _etAtualizarAjuste(i, campo, valor) {
@@ -3937,7 +4327,7 @@
           eps_real: lerNum('et-original-eps'),
           superplast_real: lerNum('et-original-superplast'),
           incorporador_real: lerNum('et-original-incorporador'),
-          tempo_batida_min: lerNum('et-original-tempo'),
+          tempo_batida_min: _etLerDuracaoOriginalMin(),
         },
         densidade: { original: lerNum('et-original-densidade'), leituras: _etLeiturasDensidade },
         flow: { original: lerNum('et-original-flow'), leituras: _etLeiturasFlow },
@@ -4049,7 +4439,7 @@
           <div>Traços: <strong id="eo-ro-tracos" class="mono">—</strong></div>
           <div>Início: <strong id="eo-ro-inicio" class="mono">—</strong></div>
           <div>Fim: <strong id="eo-ro-fim" class="mono">—</strong></div>
-          <div>Desemplaque: <strong id="eo-ro-desemplaque" class="mono">—</strong></div>
+          <div>Previsão Desemplaque: <strong id="eo-ro-desemplaque" class="mono">—</strong></div>
           <div>Duração: <strong id="eo-ro-duracao" class="mono">—</strong></div>
           <div>Houve atraso: <strong id="eo-ro-atraso" class="mono">—</strong></div>
         </div>
@@ -4205,8 +4595,32 @@
           <input class="form-input" type="number" step="0.001" id="et-original-incorporador">
         </div>
         <div class="form-group" style="margin-bottom:0">
-          <label class="form-label">Tempo de Batida (min)</label>
-          <input class="form-input" type="number" step="0.1" id="et-original-tempo">
+          <label class="form-label">⏱ Tempo de Batida</label>
+          <div class="duration-picker">
+            <div class="duration-col">
+              <button type="button" class="dur-btn dur-up" onclick="_etAjustarDuracaoOriginal('h',1)">▲</button>
+              <input class="dur-input" type="number" min="0" max="23" id="et-original-tempo-h" value="0"
+                oninput="_etOnDuracaoOriginalInput()">
+              <button type="button" class="dur-btn dur-dn" onclick="_etAjustarDuracaoOriginal('h',-1)">▼</button>
+              <span class="dur-label">h</span>
+            </div>
+            <span class="dur-sep">:</span>
+            <div class="duration-col">
+              <button type="button" class="dur-btn dur-up" onclick="_etAjustarDuracaoOriginal('m',1)">▲</button>
+              <input class="dur-input" type="number" min="0" max="59" id="et-original-tempo-m" value="0"
+                oninput="_etOnDuracaoOriginalInput()">
+              <button type="button" class="dur-btn dur-dn" onclick="_etAjustarDuracaoOriginal('m',-1)">▼</button>
+              <span class="dur-label">min</span>
+            </div>
+            <span class="dur-sep">:</span>
+            <div class="duration-col">
+              <button type="button" class="dur-btn dur-up" onclick="_etAjustarDuracaoOriginal('s',1)">▲</button>
+              <input class="dur-input" type="number" min="0" max="59" id="et-original-tempo-s" value="0"
+                oninput="_etOnDuracaoOriginalInput()">
+              <button type="button" class="dur-btn dur-dn" onclick="_etAjustarDuracaoOriginal('s',-1)">▼</button>
+              <span class="dur-label">seg</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4325,6 +4739,77 @@
     </div>
   </div>
 
+  <!-- ============ MODAL EXPORTAÇÃO EXCEL — RELATÓRIO DE INJEÇÃO ============ -->
+  <div id="export-relatorio-modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
+    <div
+      style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:640px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;color:var(--accent);letter-spacing:.08em">⬇
+          EXPORTAR EXCEL (.XLSX) — RELATÓRIO DE INJEÇÃO</h2>
+        <button onclick="LWDash.fecharExportModalRelatorio()"
+          style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+      </div>
+
+      <!-- Período -->
+      <div style="margin-bottom:20px">
+        <div
+          style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
+          Período</div>
+        <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="radio" name="export-periodo-relatorio" id="expr-radio-tudo" value="tudo" checked
+              onchange="LWDash.onExportPeriodoChangeRelatorio(this.value)"
+              style="accent-color:var(--accent);width:16px;height:16px">
+            <span style="font-size:.9rem">Exportar tudo</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="radio" name="export-periodo-relatorio" id="expr-radio-periodo" value="periodo"
+              onchange="LWDash.onExportPeriodoChangeRelatorio(this.value)"
+              style="accent-color:var(--accent);width:16px;height:16px">
+            <span style="font-size:.9rem">Por período</span>
+          </label>
+        </div>
+        <div id="expr-periodo-inputs" style="display:none;align-items:center;gap:10px;flex-wrap:wrap">
+          <input class="form-input" type="date" id="expr-data-inicio" style="width:155px"
+            onchange="LWDash.atualizarPreviewCountRelatorio()">
+          <span style="color:var(--text-3);font-size:.85rem">até</span>
+          <input class="form-input" type="date" id="expr-data-fim" style="width:155px"
+            onchange="LWDash.atualizarPreviewCountRelatorio()">
+        </div>
+      </div>
+
+      <div style="height:1px;background:var(--border);margin-bottom:20px"></div>
+
+      <!-- Seleção de colunas -->
+      <div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em">Colunas</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="LWDash.selecionarTodasColunasRelatorio(true)">Marcar
+              todas</button>
+            <button class="btn btn-ghost btn-sm" onclick="LWDash.selecionarTodasColunasRelatorio(false)">Desmarcar
+              todas</button>
+          </div>
+        </div>
+        <div id="expr-colunas-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      </div>
+
+      <div style="height:1px;background:var(--border);margin-bottom:20px"></div>
+
+      <!-- Rodapé -->
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span id="expr-preview-count" style="font-size:.82rem;color:var(--text-3)"></span>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost" onclick="LWDash.fecharExportModalRelatorio()">Cancelar</button>
+          <button class="btn btn-primary" onclick="LWDash.confirmarExportRelatorio()">⬇ Baixar Excel (.xlsx)</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ============ MODAL: RESTAURAR BACKUP DE DADOS ============ -->
   <div id="restaurar-backup-modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
@@ -4391,6 +4876,94 @@
           <button class="btn btn-ghost" onclick="fecharRestaurarBackup()">Cancelar</button>
           <button class="btn btn-danger" id="restaurar-btn-confirmar" onclick="confirmarRestaurarBackup()">Restaurar
             agora</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ MODAL: MESCLAR BACKUP DE DADOS (de outra instalação) ============ -->
+  <div id="mesclar-backup-modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
+    <div
+      style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <h2 style="font-family:var(--font-display);font-size:1.3rem;color:var(--accent);letter-spacing:.06em">🔗
+          MESCLAR BACKUP DE DADOS</h2>
+        <button onclick="fecharMesclarBackup()"
+          style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+      </div>
+
+      <div id="mesclar-erro"
+        style="display:none;margin-bottom:16px;padding:12px 16px;background:rgba(239,68,68,.08);border:1px solid var(--red-dim);border-radius:var(--radius);color:var(--red);font-size:.85rem">
+      </div>
+
+      <!-- Passo 0: escolher o arquivo -->
+      <div id="mesclar-step-0">
+        <p style="color:var(--text-2);font-size:.9rem;margin-bottom:20px">
+          Some <strong>operações, traços, ajustes de receita e paradas</strong> de um arquivo "Backup de Dados" (.zip)
+          gerado em <strong>OUTRA instalação</strong> deste mesmo sistema — diferente de "Restaurar Dados", aqui nada
+          do que já existe aqui é apagado ou alterado, só registros novos são adicionados. Configurações, senha,
+          sobra e contador de traços desta instalação não são tocados.
+        </p>
+
+        <div id="mesclar-dropzone" style="
+            border:2px dashed var(--border);border-radius:var(--radius);padding:48px 24px;
+            text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
+            background:var(--bg-2)
+          " onclick="document.getElementById('mesclar-file-input').click()"
+          ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(0,229,255,.06)'"
+          ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg-2)'"
+          ondrop="handleMesclarDrop(event)">
+          <div style="font-size:2.5rem;margin-bottom:12px">📦</div>
+          <div style="color:var(--text);font-weight:600;margin-bottom:6px">Arraste o backup da OUTRA instalação aqui
+          </div>
+          <div style="color:var(--text-3);font-size:.85rem">ou clique para selecionar — .zip</div>
+        </div>
+        <input type="file" id="mesclar-file-input" accept=".zip" style="display:none"
+          onchange="handleMesclarArquivo(this.files[0])">
+      </div>
+
+      <!-- Passo 1: preview do conteúdo + senha + confirmação -->
+      <div id="mesclar-step-1" style="display:none">
+        <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="voltarMesclarStep0()">←
+          Voltar</button>
+
+        <div
+          style="background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:18px;font-size:.85rem;color:var(--text-2)">
+          <div style="font-weight:700;color:var(--text);margin-bottom:10px">Encontrado neste backup:</div>
+          <div id="mesclar-preview"></div>
+        </div>
+
+        <p style="color:var(--accent);font-size:.85rem;font-weight:600;margin-bottom:16px">
+          ✓ Isso vai ADICIONAR esses registros aos dados atuais — nada existente é apagado ou alterado.
+        </p>
+
+        <label style="display:block;font-size:.85rem;color:var(--text-2);margin-bottom:6px">Confirme sua senha de
+          administrador para continuar:</label>
+        <input type="password" id="mesclar-senha" class="form-input" style="margin-bottom:20px;width:100%"
+          placeholder="Senha de administrador" autocomplete="current-password">
+
+        <div style="display:flex;justify-content:flex-end;gap:12px">
+          <button class="btn btn-ghost" onclick="fecharMesclarBackup()">Cancelar</button>
+          <button class="btn btn-success" id="mesclar-btn-confirmar" onclick="confirmarMesclarBackup()">🔗 Mesclar
+            agora</button>
+        </div>
+      </div>
+
+      <!-- Passo 2: resultado -->
+      <div id="mesclar-step-2" style="display:none">
+        <div style="text-align:center;padding:8px 0 20px">
+          <div style="font-size:2.5rem;margin-bottom:10px">✅</div>
+          <div style="color:var(--text);font-weight:700;margin-bottom:14px">Mesclagem concluída!</div>
+          <div id="mesclar-resultado"
+            style="text-align:left;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-size:.85rem;color:var(--text-2);display:flex;flex-direction:column;gap:4px">
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:12px">
+          <button class="btn btn-ghost" onclick="fecharMesclarBackup()">Fechar</button>
+          <button class="btn btn-outline-accent" onclick="resetMesclarBackupModal()">Mesclar outro arquivo</button>
         </div>
       </div>
 
@@ -4611,12 +5184,40 @@
 
     </div>
   </div>
+
+  <!-- ============ COPILOTO IA (botão flutuante + painel de chat) ============ -->
+  <!-- Visível em qualquer página (fica fora dos <main> de cada tela) — só
+       LEITURA: as respostas vêm de ferramentas que consultam o banco no
+       servidor (ver POST /copiloto-chat, server.js), nunca inventadas. -->
+  <button id="copiloto-btn" onclick="LWCopiloto.toggle()" title="Copiloto — pergunte sobre a produção">🤖</button>
+
+  <div id="copiloto-panel">
+    <div class="copiloto-header">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:1.15rem">🤖</span>
+        <span style="font-family:var(--font-display);color:var(--accent);letter-spacing:.06em;font-size:.9rem">COPILOTO</span>
+      </div>
+      <button onclick="LWCopiloto.toggle()"
+        style="background:none;border:none;color:var(--text-3);font-size:1.2rem;cursor:pointer;line-height:1">✕</button>
+    </div>
+
+    <div id="copiloto-mensagens" class="copiloto-mensagens"></div>
+
+    <div class="copiloto-input-row">
+      <input class="form-input" id="copiloto-input" placeholder="Pergunte sobre a produção..."
+        onkeydown="if(event.key==='Enter'){event.preventDefault();LWCopiloto.enviar();}">
+      <button class="btn btn-primary btn-sm" id="copiloto-btn-enviar" onclick="LWCopiloto.enviar()">➤</button>
+    </div>
+  </div>
+
   <script src="js/analise-operacional.js"></script>
   <script src="js/qualidade-tracos.js"></script>
   <script src="js/oee.js"></script>
   <script src="js/paradas.js"></script>
   <script src="js/debriefing.js"></script>
   <script src="js/keyboard-shortcuts.js"></script>
+  <script src="js/copiloto.js"></script>
+  <script src="js/tour.js"></script>
 </body>
 
 </html>

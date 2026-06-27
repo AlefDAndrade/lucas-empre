@@ -53,7 +53,7 @@
 
       // A partir daqui, qualquer mudança feita em OUTRA aba/computador
       // nesta mesma operação chega aqui ao vivo (cronômetro incluso).
-      LW.conectarOperacaoAndamento(_aplicarEstadoExterno);
+      LW.conectarOperacaoAndamento(_aplicarEstadoExterno, _notificarOperacaoFinalizadaPorOutro);
 
       // Fecha popovers ao clicar fora
       document.addEventListener('click', (e) => {
@@ -115,7 +115,7 @@
     // (ver abrirGradeMontagemPersonalizada()).
     const optPersonalizada = document.createElement('option');
     optPersonalizada.value = LW.TIPO_MONTAGEM_PERSONALIZADA;
-    optPersonalizada.textContent = '🔧 Personalizado (definir por berço)';
+    optPersonalizada.textContent = 'Personalizada';
     selMont.appendChild(optPersonalizada);
 
     // Atualiza referência rápida
@@ -159,6 +159,7 @@
     });
     $('op-montagem').addEventListener('change', e => {
       state.tipo_montagem = e.target.value;
+      _atualizarBtnConfigurarBercos();
       if (state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA) {
         abrirGradeMontagemPersonalizada();
       }
@@ -330,6 +331,14 @@
     const fieldset = $('op-fieldset-trava');
     const aviso = $('op-aviso-nao-autorizado');
     const avisoTeste = $('op-aviso-modo-teste');
+
+    // "Tema de teste" na página inteira (não só o banner do topo) — ver
+    // CSS de #page-operacao.modo-teste-ativo (styles.css): retinta os
+    // botões/bordas/badges (que já usam var(--accent)) pra violeta e
+    // adiciona uma textura de fundo, pra ficar claro à distância que esta
+    // sessão é um teste, mesmo rolando a página pra baixo.
+    const pagina = $('page-operacao');
+    if (pagina) pagina.classList.toggle('modo-teste-ativo', !!state.modo_teste);
 
     // Modo de teste é um sandbox local — nunca trava a tela (ver
     // _bloqueadoPorAutorizacao) — só troca o banner padrão pelo de teste.
@@ -1020,6 +1029,11 @@
   let _gradeTipoAtivo = null;  // tipo selecionado nas abas (string) — null = nenhum selecionado ainda
   let _gradeTrabalho = [];     // cópia de trabalho de state.bercos_personalizados — só vai pro state em "Confirmar"
   let _gradeSomenteRevisao = false;
+  // Snapshot de _gradeTrabalho no instante em que a revisão foi aberta — só
+  // usado em modo de revisão, pra "desfazer": um 2º clique no mesmo berço
+  // volta ele pro tipo que tinha antes, em vez de ficar apagado pra sempre
+  // por um clique sem querer. Ver _gradeClicarBerco().
+  let _gradeOriginalRevisao = null;
 
   /**
    * Abre a grade de berços. Em modo normal (somenteRevisao: false), mostra
@@ -1043,6 +1057,9 @@
       _gradeTrabalho = Array.from({ length: capacidade }, (_, i) => atual[i] || null);
       _gradeSomenteRevisao = somenteRevisao;
       _gradeTipoAtivo = somenteRevisao ? '' : null; // '' = ferramenta de limpar, em modo de revisão
+      // Guarda o estado de entrada só em modo de revisão — é pra ele que um
+      // berço volta se for clicado de novo (desfazer um clique sem querer).
+      _gradeOriginalRevisao = somenteRevisao ? [..._gradeTrabalho] : null;
 
       const existente = document.getElementById('modal-grade-montagem');
       if (existente) existente.remove();
@@ -1150,11 +1167,20 @@
       gridEl.innerHTML = _gradeTrabalho.map((tipo, i) => {
         const cor = tipo ? LW.corPorTipoSimples(tipo) : null;
         const numero = String(i + 1).padStart(2, '0');
-        return `<button type="button" data-berco-idx="${i}"
+        // Em modo de revisão, um berço que tinha tipo e foi apagado AGORA
+        // (nesta sessão de revisão) ganha uma borda tracejada + "↺" — sinal
+        // de que ainda dá pra clicar de novo e voltar a ser preenchido.
+        // Berço que já estava vazio antes (nunca preenchido) fica neutro,
+        // sem essa dica, porque não há nada pra desfazer ali.
+        const apagadoNestaRevisao = _gradeSomenteRevisao && !tipo && !!_gradeOriginalRevisao?.[i];
+        const titulo = apagadoNestaRevisao
+          ? `title="Marcado como não usado — clique de novo para restaurar (${_gradeOriginalRevisao[i].toUpperCase()})"`
+          : '';
+        return `<button type="button" data-berco-idx="${i}" ${titulo}
           style="padding:8px 4px;border-radius:var(--radius);font-size:.74rem;text-align:center;cursor:pointer;
                  background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-3)'};
-                 border:1px solid ${cor ? cor.borda : 'var(--border)'}">
-          B${numero}${tipo ? '<br><strong>' + tipo.toUpperCase() + '</strong>' : ''}
+                 border:1px ${apagadoNestaRevisao ? 'dashed var(--red-dim)' : 'solid ' + (cor ? cor.borda : 'var(--border)')}">
+          B${numero}${tipo ? '<br><strong>' + tipo.toUpperCase() + '</strong>' : (apagadoNestaRevisao ? '<br>↺' : '')}
         </button>`;
       }).join('');
 
@@ -1169,8 +1195,13 @@
 
   function _gradeClicarBerco(i) {
     if (_gradeSomenteRevisao) {
-      // Só limpa — não tem tipo pra "pintar" nesse modo.
-      _gradeTrabalho[i] = null;
+      // Alterna: 1º clique apaga (marca como não usado); um 2º clique no
+      // MESMO berço desfaz, voltando pro tipo que ele tinha quando a
+      // revisão foi aberta — evita perder o preenchimento por um clique
+      // sem querer (antes só dava pra apagar, sem volta).
+      _gradeTrabalho[i] = _gradeTrabalho[i] === null
+        ? (_gradeOriginalRevisao?.[i] || null)
+        : null;
     } else {
       if (_gradeTipoAtivo === null) {
         LW.mostrarAlerta('Selecione um tipo de montagem nas abas acima primeiro.', { tipo: 'aviso' });
@@ -1415,6 +1446,16 @@
     return `${s}s`;
   }
 
+  // Mesma regra de trava dos outros insumos (ver renderCampoInsumo): traço
+  // reaproveitado, OU o campo já tem pelo menos 1 ajuste aplicado — daí só
+  // editável de novo via "Ajuste de Receita". Usado tanto na renderização
+  // do relógio quanto como defesa extra em ajustarDuracao/onDuracaoInput.
+  function _tempoBatidaTravado(t) {
+    const insumo = t?.tempo_batida;
+    const temAjustes = !!(insumo && typeof insumo === 'object' && insumo.ajustes && insumo.ajustes.length > 0);
+    return !!(t?._reaproveitado || temAjustes);
+  }
+
   function renderCampoTempoBatida(t, i) {
     const insumo = t.tempo_batida || { original: '', ajustes: [] };
     const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
@@ -1430,34 +1471,42 @@
       return partes.join(' + ') + ' = ' + formatDuracao(parseInt(total));
     })() : '';
 
+    // Trava igual aos outros insumos: traço reaproveitado OU este campo já
+    // teve algum ajuste aplicado — só editável de novo via "Ajuste de
+    // Receita". Antes só checava t._reaproveitado (faltava temAjustes), e
+    // o "disabled" dos botões ▲▼ estava escrito DENTRO da string do
+    // onclick (nunca virava atributo de verdade — por isso os botões
+    // nunca ficavam de fato travados, mesmo quando deveriam).
+    const travado = t._reaproveitado || temAjustes;
+
     return `
       <div class="form-group insumo-group tempo-batida-group" id="tempo-batida-group-${i}">
         <label class="form-label">⏱ Tempo de Batida <span class="required">*</span></label>
-        <div class="duration-picker">
+        <div class="duration-picker ${travado ? 'readonly-reaproveitado' : ''}">
           <div class="duration-col">
-            <button class="dur-btn dur-up ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'h',1) ${t._reaproveitado ? 'disabled' : ''}">▲</button>
+            <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracao(${i},'h',1)" ${travado ? 'disabled' : ''}>▲</button>
             <input class="dur-input" type="number" min="0" max="23"
               id="dur-h-${i}" value="${temValor ? h : ''}" placeholder="0"
-              oninput="LWOp.onDuracaoInput(${i})">
-            <button class="dur-btn dur-dn  ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'h',-1)  ${t._reaproveitado ? 'disabled' : ''}">▼</button>
+              ${travado ? 'readonly' : ''} oninput="LWOp.onDuracaoInput(${i})">
+            <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracao(${i},'h',-1)" ${travado ? 'disabled' : ''}>▼</button>
             <span class="dur-label">h</span>
           </div>
           <span class="dur-sep">:</span>
           <div class="duration-col">
-            <button class="dur-btn dur-up  ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'m',1)  ${t._reaproveitado ? 'disabled' : ''}">▲</button>
+            <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracao(${i},'m',1)" ${travado ? 'disabled' : ''}>▲</button>
             <input class="dur-input" type="number" min="0" max="59"
               id="dur-m-${i}" value="${temValor ? m : ''}" placeholder="0"
-              oninput="LWOp.onDuracaoInput(${i})">
-            <button class="dur-btn dur-dn  ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'m',-1)  ${t._reaproveitado ? 'disabled' : ''}">▼</button>
+              ${travado ? 'readonly' : ''} oninput="LWOp.onDuracaoInput(${i})">
+            <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracao(${i},'m',-1)" ${travado ? 'disabled' : ''}>▼</button>
             <span class="dur-label">min</span>
           </div>
           <span class="dur-sep">:</span>
           <div class="duration-col">
-            <button class="dur-btn dur-up ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'s',1)  ${t._reaproveitado ? 'disabled' : ''}">▲</button>
+            <button class="dur-btn dur-up" onclick="LWOp.ajustarDuracao(${i},'s',1)" ${travado ? 'disabled' : ''}>▲</button>
             <input class="dur-input" type="number" min="0" max="59"
               id="dur-s-${i}" value="${temValor ? s : ''}" placeholder="0"
-              oninput="LWOp.onDuracaoInput(${i})">
-            <button class="dur-btn dur-dn ${t._reutilizado ? 'readonly-reaproveitado' : ''}" onclick="LWOp.ajustarDuracao(${i},'s',-1)  ${t._reaproveitado ? 'disabled' : ''}">▼</button>
+              ${travado ? 'readonly' : ''} oninput="LWOp.onDuracaoInput(${i})">
+            <button class="dur-btn dur-dn" onclick="LWOp.ajustarDuracao(${i},'s',-1)" ${travado ? 'disabled' : ''}>▼</button>
             <span class="dur-label">seg</span>
           </div>
         </div>
@@ -1838,8 +1887,25 @@
     }, 8000);
   }
 
-  function showSuccessModal(record) {
+  /**
+   * @param {object} record - resumo da operação (mesmo formato usado no Registrar Operação local)
+   * @param {object} [opts]
+   * @param {boolean} [opts.remoto] - true quando é a notificação de uma operação finalizada em
+   *   OUTRO dispositivo (ver _notificarOperacaoFinalizadaPorOutro) — só troca o título/subtítulo,
+   *   o resto do modal (KPIs, botões) é exatamente o mesmo de sempre.
+   */
+  function showSuccessModal(record, opts = {}) {
     const modal = $('success-modal');
+    const titulo = $('success-modal-titulo');
+    const subtitulo = $('success-modal-subtitulo');
+    if (opts.remoto) {
+      titulo.textContent = '✅ Bateria Finalizada';
+      subtitulo.textContent = 'Registrada agora por outro dispositivo — fim da dinâmica de dono desta operação.';
+      subtitulo.style.display = 'block';
+    } else {
+      titulo.textContent = 'Operação Registrada!';
+      subtitulo.style.display = 'none';
+    }
     $('modal-bateria').textContent = record.id_bateria;
     $('modal-tempo').textContent = LW.formatDuration(record.tempo_min);
     $('modal-paineis').textContent = record.total_paineis;
@@ -1849,6 +1915,31 @@
       ? '<span class="badge badge-red">SIM</span>'
       : '<span class="badge badge-green">NÃO</span>';
     modal.style.display = 'flex';
+  }
+
+  // Caminho do som da notificação — INTENCIONALMENTE sem o arquivo em si
+  // (não dá pra gerar um áudio de verdade por aqui): coloque o arquivo de
+  // som nesse caminho exato (public/sounds/operacao-finalizada.mp3) que ele
+  // passa a tocar sozinho. Até lá, o play() abaixo só falha em silêncio
+  // (404), sem quebrar nada nem mostrar erro pra quem está usando o sistema.
+  const SOM_OPERACAO_FINALIZADA = '/sounds/operacao-finalizada.mp3';
+
+  /**
+   * Chamada quando OUTRO dispositivo (não este) finaliza/registra uma
+   * operação — ver conectarOperacaoAndamento() em data.js, que dispara
+   * isto via WebSocket pra todo mundo "ligado" no sistema na hora, exceto
+   * quem de fato registrou (esse já vê o showSuccessModal local de sempre).
+   * Mostra o MESMO modal de sucesso (texto levemente diferente — ver
+   * showSuccessModal) e toca um som, já que é algo que pode acontecer sem
+   * ninguém estar olhando ativamente pra essa aba.
+   */
+  function _notificarOperacaoFinalizadaPorOutro(resumo) {
+    try {
+      const som = new Audio(SOM_OPERACAO_FINALIZADA);
+      som.volume = 1;
+      som.play().catch(() => { /* navegador pode bloquear autoplay sem interação prévia — ignora */ });
+    } catch (_) { /* Audio indisponível neste navegador — só não toca o som */ }
+    showSuccessModal(resumo, { remoto: true });
   }
 
   async function resetarOperacao() {
@@ -1886,6 +1977,17 @@
     };
   }
 
+  // Mostra/escurece o botão "🔧 Configurar Berços" conforme o tipo de
+  // montagem atual — chamada tanto no render completo (renderAll) quanto
+  // direto no listener de change do select (ver wireEvents()), que antes
+  // só recalculava painéis e persistia, sem atualizar este botão: ao
+  // escolher "Personalizada" pela primeira vez, o botão pra reabrir a
+  // grade depois nunca aparecia (só surgia num reload, via renderAll).
+  function _atualizarBtnConfigurarBercos() {
+    if (!$('btn-configurar-bercos')) return;
+    $('btn-configurar-bercos').style.display = state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA ? 'inline-flex' : 'none';
+  }
+
   function renderAll() {
     // Set form values
     $('op-toggle-teste').checked = !!state.modo_teste;
@@ -1894,9 +1996,7 @@
     $('op-dimensao').value = state.dimensao || '';
 
     $('op-montagem').value = state.tipo_montagem || '';
-    if ($('btn-configurar-bercos')) {
-      $('btn-configurar-bercos').style.display = state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA ? 'block' : 'none';
-    }
+    _atualizarBtnConfigurarBercos();
     $('op-id-bateria').value = state.id_bateria || '';
     $('op-bercos-reais').value = state.bercos_reais || '';
     $('op-motivo').value = state.motivo_atraso || '';
@@ -2011,6 +2111,8 @@
 
     // Ajusta um campo (h/m/s) do picker principal com ▲▼, com wrap-around
     ajustarDuracao(i, campo, delta) {
+      const t = state.tracos[i];
+      if (!t || _tempoBatidaTravado(t)) return; // mesma trava do HTML (defesa extra)
       const id = `dur-${campo}-${i}`;
       const el = document.getElementById(id);
       if (!el) return;
@@ -2024,6 +2126,8 @@
 
     // Chamado quando o operador digita diretamente num campo do picker
     onDuracaoInput(i) {
+      const t = state.tracos[i];
+      if (!t || _tempoBatidaTravado(t)) { renderTracos(); return; } // desfaz qualquer digitação que tenha escapado do readonly
       const seg = this._lerDuracaoPicker('dur', i);
       let insumo = state.tracos[i].tempo_batida;
       if (!insumo || typeof insumo !== 'object' || !('ajustes' in insumo)) {

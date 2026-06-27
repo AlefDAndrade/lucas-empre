@@ -45,6 +45,9 @@ const MIME = {
   '.js':   'application/javascript',
   '.json': 'application/json',
   '.key':  'text/plain',
+  '.mp3':  'audio/mpeg',
+  '.wav':  'audio/wav',
+  '.ogg':  'audio/ogg',
 };
 
 // Retorna a data de hoje em Brasília no formato YYYY-MM-DD (consistente com
@@ -230,6 +233,14 @@ async function gerarZipDadosServidor() {
         zip.file(nome, JSON.stringify(db.todosOsTracos(), null, 2));
       } else if (nome === 'ajustes_tracos.json') {
         zip.file(nome, JSON.stringify(db.todosOsAjustesTracosJSON(), null, 2));
+      } else if (nome === 'relatorio_edicoes.json') {
+        // Faltava este caso — sem ele, cai no fallback `else` (ler arquivo
+        // estático de DB_DIR), que não existe mais desde a migração pra
+        // SQLite (ver edicoes_traco): o fs.readFileSync falhava, o catch
+        // engolia o erro, e o arquivo simplesmente nunca entrava no zip,
+        // sem avisar ninguém — exatamente o bug visto na hora de restaurar.
+        const rows = db.prepare('SELECT id_traco, id_operacao, data_edicao, campos_alterados FROM edicoes_traco ORDER BY id ASC').all();
+        zip.file(nome, JSON.stringify(rows.map(r => ({ ...r, campos_alterados: JSON.parse(r.campos_alterados) })), null, 2));
       } else {
         zip.file(nome, fs.readFileSync(path.join(DB_DIR, nome)));
       }
@@ -449,6 +460,262 @@ function negarDispositivoNaoAutorizado(res) {
   }));
 }
 
+// ─── COPILOTO IA (Fase 1 — só leitura) ──────────────────────────────────────
+// Chat com IA (Claude, via API da Anthropic) que responde perguntas sobre os
+// dados REAIS do sistema, usando "tools" (function calling): o modelo nunca
+// inventa números, ele só pode responder com o que as ferramentas abaixo
+// devolverem. De propósito, NENHUMA ferramenta cria/edita/apaga nada — fase
+// só de leitura (ver conversa que definiu o plano: fácil → médio → difícil).
+//
+// A chave da API (ANTHROPIC_API_KEY) só existe aqui no servidor — nunca é
+// enviada pro navegador. Configure como variável de ambiente antes de
+// iniciar o servidor, ex:
+//   ANTHROPIC_API_KEY=sk-ant-... node server.js
+// Pra trocar de modelo sem editar código, defina também (opcional):
+//   ANTHROPIC_COPILOTO_MODEL=claude-sonnet-4-6
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+// Haiku por padrão: perguntas de chão de fábrica são simples (são só
+// consultas com filtro), então um modelo mais rápido/barato já basta —
+// troque pra um Sonnet via env var acima se quiser respostas mais elaboradas.
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_COPILOTO_MODEL || 'claude-haiku-4-5-20251001';
+const ANTHROPIC_MAX_TOOL_ROUNDS = 5; // limite de idas-e-voltas de ferramenta por pergunta — nunca loop sem fim
+
+const COPILOTO_TOOLS = [
+  {
+    name: 'resumo_producao_periodo',
+    description: 'Resumo agregado de produção num período: quantidade de baterias, traços, painéis, m² e paradas. Use pra perguntas como "quanto produzimos hoje/essa semana".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        data_inicio: { type: 'string', description: 'Data inicial, formato YYYY-MM-DD. Se omitido, usa a data de hoje.' },
+        data_fim: { type: 'string', description: 'Data final, formato YYYY-MM-DD. Se omitido, usa a data de hoje.' },
+      },
+    },
+  },
+  {
+    name: 'buscar_baterias',
+    description: 'Lista operações (baterias) registradas, com filtros opcionais. Use pra perguntas sobre baterias específicas, atrasos ou histórico de produção.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'string', description: 'Filtra por uma data exata, formato YYYY-MM-DD.' },
+        id_bateria: { type: 'string', description: 'Filtra por ID da bateria, ex: B14.' },
+        turno: { type: 'string', description: 'Filtra por turno, ex: "1º TURNO".' },
+        apenas_com_atraso: { type: 'boolean', description: 'Se true, retorna só operações com atraso registrado.' },
+        limite: { type: 'integer', description: 'Máximo de resultados (padrão 20, máximo 100).' },
+      },
+    },
+  },
+  {
+    name: 'buscar_tracos',
+    description: 'Lista traços (Relatório de Injeção), com os valores já TOTALIZADOS (original + ajustes de receita aplicados). Use pra perguntas sobre receitas, ajustes ou qualidade de traços específicos.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'string', description: 'Filtra por uma data exata, formato YYYY-MM-DD.' },
+        num_traco: { type: 'integer', description: 'Filtra por número do traço naquele dia.' },
+        id_bateria: { type: 'string', description: 'Filtra por traços usados nesta bateria.' },
+        limite: { type: 'integer', description: 'Máximo de resultados (padrão 20, máximo 100).' },
+      },
+    },
+  },
+  {
+    name: 'consultar_paradas',
+    description: 'Lista paradas de produção registradas num período, com motivo, equipamento e duração. Use pra perguntas sobre paradas, manutenção ou tempo parado.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        data_inicio: { type: 'string', description: 'Data/hora inicial (YYYY-MM-DD ou ISO completo). Se omitido, usa as últimas 24h.' },
+        data_fim: { type: 'string', description: 'Data/hora final (YYYY-MM-DD ou ISO completo). Se omitido, usa agora.' },
+        limite: { type: 'integer', description: 'Máximo de resultados (padrão 20, máximo 100).' },
+      },
+    },
+  },
+  {
+    name: 'operacao_em_andamento',
+    description: 'Status da operação rodando AGORA no chão de fábrica (se houver alguma). Use pra perguntas como "o que está rodando agora" ou "tem operação em andamento".',
+    input_schema: { type: 'object', properties: {} },
+  },
+];
+
+function _copilotoClamp(n, padrao, max) {
+  const v = parseInt(n);
+  if (!Number.isFinite(v) || v <= 0) return padrao;
+  return Math.min(v, max);
+}
+
+/** Executa 1 ferramenta do Copiloto (todas só-leitura) e devolve um objeto plano (vira JSON no tool_result). */
+function copilotoExecutarFerramenta(nome, input) {
+  input = input || {};
+  switch (nome) {
+    case 'resumo_producao_periodo': {
+      const hoje = todayBrasiliaServer();
+      const ini = input.data_inicio || hoje;
+      const fim = input.data_fim || hoje;
+      const prod = db.prepare(`
+        SELECT COUNT(*) AS qtd_baterias, COALESCE(SUM(qtd_tracos),0) AS qtd_tracos,
+               COALESCE(SUM(total_paineis),0) AS total_paineis, COALESCE(SUM(m2_total),0) AS m2_total
+        FROM operacoes WHERE data BETWEEN @ini AND @fim AND modo_teste = 0
+      `).get({ ini, fim });
+      const paradas = db.prepare(`
+        SELECT COUNT(*) AS qtd_paradas, COALESCE(SUM(duracao_min),0) AS duracao_total_min
+        FROM paradas WHERE substr(inicio,1,10) BETWEEN @ini AND @fim
+      `).get({ ini, fim });
+      return { periodo: { de: ini, ate: fim }, ...prod, ...paradas };
+    }
+
+    case 'buscar_baterias': {
+      const limite = _copilotoClamp(input.limite, 20, 100);
+      const rows = db.prepare(`
+        SELECT id, data, turno, id_bateria, dimensao, tipo_montagem, inicio, fim,
+               qtd_tracos, total_paineis, m2_total, houve_atraso, motivo_atraso
+        FROM operacoes
+        WHERE modo_teste = 0
+          AND (@data IS NULL OR data = @data)
+          AND (@id_bateria IS NULL OR id_bateria = @id_bateria)
+          AND (@turno IS NULL OR turno = @turno)
+          AND (@apenas_atraso = 0 OR houve_atraso = 'Sim')
+        ORDER BY data DESC, inicio DESC
+        LIMIT @limite
+      `).all({
+        data: input.data || null,
+        id_bateria: input.id_bateria || null,
+        turno: input.turno || null,
+        apenas_atraso: input.apenas_com_atraso ? 1 : 0,
+        limite,
+      });
+      return { total_encontrado: rows.length, baterias: rows };
+    }
+
+    case 'buscar_tracos': {
+      const limite = _copilotoClamp(input.limite, 20, 100);
+      const numTraco = parseInt(input.num_traco);
+      const rows = db.prepare(`
+        SELECT t.id_traco, t.data, t.turno, t.num_traco,
+          ROUND(COALESCE(t.cimento_original,0) + COALESCE((SELECT SUM(cimento) FROM ajustes WHERE id_traco=t.id_traco),0), 2) AS cimento_kg,
+          ROUND(COALESCE(t.agua_original,0) + COALESCE((SELECT SUM(agua) FROM ajustes WHERE id_traco=t.id_traco),0), 2) AS agua_kg,
+          ROUND((COALESCE(t.tempo_batida_original,0) + COALESCE((SELECT SUM(tempo_batida)*60 FROM ajustes WHERE id_traco=t.id_traco),0)) / 60.0, 1) AS tempo_batida_min,
+          COALESCE((SELECT valor FROM leituras_resultado WHERE id_traco=t.id_traco AND campo='densidade' ORDER BY ordem DESC LIMIT 1), t.densidade_original) AS densidade,
+          COALESCE((SELECT valor FROM leituras_resultado WHERE id_traco=t.id_traco AND campo='flow' ORDER BY ordem DESC LIMIT 1), t.flow_original) AS flow,
+          (SELECT GROUP_CONCAT(DISTINCT id_bateria) FROM traco_usos WHERE id_traco=t.id_traco) AS baterias_onde_foi_usado
+        FROM tracos t
+        WHERE (@data IS NULL OR t.data = @data)
+          AND (@num_traco IS NULL OR t.num_traco = @num_traco)
+          AND (@id_bateria IS NULL OR EXISTS (SELECT 1 FROM traco_usos WHERE id_traco=t.id_traco AND id_bateria=@id_bateria))
+        ORDER BY t.data DESC, t.num_traco DESC
+        LIMIT @limite
+      `).all({
+        data: input.data || null,
+        num_traco: Number.isFinite(numTraco) ? numTraco : null,
+        id_bateria: input.id_bateria || null,
+        limite,
+      });
+      return { total_encontrado: rows.length, tracos: rows };
+    }
+
+    case 'consultar_paradas': {
+      const limite = _copilotoClamp(input.limite, 20, 100);
+      const agora = new Date().toISOString();
+      const ontem = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const rows = db.prepare(`
+        SELECT id, inicio, fim, duracao_min, motivo, equipamento, classificacao, obs
+        FROM paradas
+        WHERE inicio >= @ini AND inicio <= @fim
+        ORDER BY inicio DESC
+        LIMIT @limite
+      `).all({ ini: input.data_inicio || ontem, fim: input.data_fim || agora, limite });
+      return { total_encontrado: rows.length, paradas: rows };
+    }
+
+    case 'operacao_em_andamento': {
+      const op = lerOperacaoAndamento();
+      if (!op) return { rodando: false, mensagem: 'Nenhuma operação em andamento agora.' };
+      return {
+        rodando: true,
+        status: op.status, turno: op.turno, dimensao: op.dimensao, tipo_montagem: op.tipo_montagem,
+        id_bateria: op.id_bateria, bercos_reais: op.bercos_reais, inicio: op.inicio,
+        qtd_tracos: Array.isArray(op.tracos) ? op.tracos.length : 0, modo_teste: !!op.modo_teste,
+      };
+    }
+
+    default:
+      return { erro: `Ferramenta desconhecida: ${nome}` };
+  }
+}
+
+/** 1 chamada à API de Mensagens da Anthropic. Lança erro se a chave não estiver configurada ou se a API recusar. */
+async function copilotoChamarAnthropic(messages, system) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY não configurada no servidor — defina essa variável de ambiente antes de iniciar.');
+  }
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 1024, system, messages, tools: COPILOTO_TOOLS }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.error?.message || `Erro ${resp.status} na API da Anthropic.`);
+  return data;
+}
+
+/**
+ * Roda o loop completo de tool-use: manda a conversa pra Claude, executa
+ * qualquer ferramenta que ele pedir, manda o resultado de volta, repete —
+ * até ele responder com texto final (sem pedir mais ferramentas) ou até
+ * o limite de rodadas (ANTHROPIC_MAX_TOOL_ROUNDS, evita custo/loop sem fim).
+ */
+async function copilotoResponder(mensagensCliente) {
+  const hoje = todayBrasiliaServer();
+  const system = 'Você é o copiloto do sistema Lightwall SC (injeção de baterias EPS). ' +
+    `Hoje é ${hoje} (fuso de Brasília). Responda em português, de forma direta e curta — ` +
+    'está sendo usado por operadores no chão de fábrica, então evite parágrafos longos. ' +
+    'SEMPRE use as ferramentas disponíveis pra responder qualquer pergunta sobre dados de produção — ' +
+    'nunca invente números. Se a pergunta não tiver relação com produção/operação da fábrica, diga ' +
+    'educadamente que você só responde sobre os dados deste sistema. Você é SOMENTE LEITURA: não pode ' +
+    'nem finge poder registrar, editar ou apagar nada — se pedirem isso, explique que ainda não tem essa ' +
+    'permissão e oriente a fazer pela tela normal do sistema.';
+
+  // Só as últimas 20 mensagens de texto do cliente — não deixa o contexto
+  // (nem o custo) crescer sem limite numa conversa longa.
+  const messages = mensagensCliente.slice(-20).map(m => ({
+    role: m.role === 'assistant' ? 'assistant' : 'user',
+    content: String(m.content || '').slice(0, 4000),
+  }));
+
+  const ferramentasUsadas = [];
+
+  for (let rodada = 0; rodada < ANTHROPIC_MAX_TOOL_ROUNDS; rodada++) {
+    const data = await copilotoChamarAnthropic(messages, system);
+
+    if (data.stop_reason !== 'tool_use') {
+      const texto = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      return { resposta: texto || '(sem resposta)', ferramentasUsadas };
+    }
+
+    // Acrescenta a resposta do assistant (com os tool_use) e executa cada
+    // ferramenta pedida, devolvendo o resultado num próximo turno "user".
+    messages.push({ role: 'assistant', content: data.content });
+    const toolResults = [];
+    for (const bloco of data.content) {
+      if (bloco.type !== 'tool_use') continue;
+      let resultado;
+      try {
+        resultado = copilotoExecutarFerramenta(bloco.name, bloco.input);
+      } catch (e) {
+        resultado = { erro: e.message };
+      }
+      ferramentasUsadas.push({ nome: bloco.name, entrada: bloco.input });
+      toolResults.push({ type: 'tool_result', tool_use_id: bloco.id, content: JSON.stringify(resultado) });
+    }
+    messages.push({ role: 'user', content: toolResults });
+  }
+
+  return {
+    resposta: 'Não consegui terminar de responder (limite de consultas internas atingido) — tente reformular a pergunta de forma mais específica.',
+    ferramentasUsadas,
+  };
+}
+
 const server = http.createServer((req, res) => {
 
   // Extrai o caminho (pathname) da URL e os parâmetros de query (ex:
@@ -632,6 +899,27 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── GET /db/relatorio_edicoes.json: mesma ideia, pra auditoria de edição
+  // de TRAÇO (edicoes_traco) — essa rota estava faltando (as outras 7
+  // existem desde a migração pra SQLite, esta nunca foi criada). Sem ela,
+  // fetch('db/relatorio_edicoes.json') em gerarBackupDados() caía direto
+  // no servidor de arquivo estático, que dá 404 (o arquivo não existe mais
+  // em disco) — o erro era engolido em silêncio ali, e o arquivo nunca
+  // entrava no .zip do "Backup de Dados". Era exatamente esse o motivo do
+  // restore acusar "está faltando": ele nunca chegou a ser incluído.
+  if (req.method === 'GET' && urlPath === '/db/relatorio_edicoes.json') {
+    try {
+      const rows = db.prepare('SELECT id_traco, id_operacao, data_edicao, campos_alterados FROM edicoes_traco ORDER BY id ASC').all();
+      const edicoes = rows.map(r => ({ ...r, campos_alterados: JSON.parse(r.campos_alterados) }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(edicoes));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    }
+    return;
+  }
+
   // ── GET /db/relatorio_injecao.json: mesma estratégia das outras — desde
   // a Fase 5, não existe mais como arquivo (caminho real); reconstrói o
   // mesmo formato de sempre a partir de tracos+traco_usos+ajustes+
@@ -705,6 +993,18 @@ const server = http.createServer((req, res) => {
             modo_teste: 0,
             criado_em: new Date().toISOString(),
           });
+
+          // Avisa todo mundo conectado agora (exceto quem registrou) —
+          // dinâmica de "dono" da operação chegou ao fim. Nunca em modo de
+          // teste (esse ramo nem chega aqui — ver `if (modoTeste)` acima).
+          broadcastOperacaoFinalizada({
+            id_bateria: record.id_bateria,
+            tempo_min: record.tempo_min,
+            total_paineis: record.total_paineis,
+            m2_total: record.m2_total,
+            desemplaque: record.desemplaque,
+            houve_atraso: record.houve_atraso,
+          }, queryParams.get('wsClientId') || '');
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1143,6 +1443,131 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── MESCLAR BACKUP DE DADOS: soma os registros de um "Backup de Dados"
+  // de OUTRA instalação do mesmo sistema ao banco ATUAL — diferente de
+  // /restaurar-backup-dados (que SUBSTITUI tudo), aqui nada existente é
+  // apagado ou alterado, só linhas novas são adicionadas (com a mesma
+  // deduplicação de sempre, pra rodar de novo com o mesmo arquivo não
+  // duplicar nada). Usa a MESMA validação de formato/senha do restore.
+  // De propósito, NUNCA mescla: config.json, security.json, sobra.json,
+  // contador_tracos.json — são estado/config DESTA instalação, não dados
+  // de produção pra trazer de outra fábrica/linha.
+  if (req.method === 'POST' && urlPath === '/mesclar-backup-dados') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        const { senha, arquivos } = payload;
+
+        if (typeof senha !== 'string' || !senha) {
+          throw new Error('Senha de administrador obrigatória.');
+        }
+        const security = lerSecurity();
+        if (sha256(senha) !== (security.passwordHash || HASH_FALLBACK)) {
+          throw new Error('Senha incorreta.');
+        }
+
+        if (!arquivos || typeof arquivos !== 'object') {
+          throw new Error('Payload inválido: "arquivos" ausente.');
+        }
+
+        const MESCLAVEIS = ['historico.json', 'historico_edicoes.json', 'relatorio_injecao.json', 'ajustes_tracos.json', 'paradas.json'];
+        const presentes = MESCLAVEIS.filter(nome => typeof arquivos[nome] === 'string');
+        if (!presentes.length) {
+          throw new Error('Nenhum arquivo mesclável encontrado no backup (historico.json, relatorio_injecao.json, ajustes_tracos.json ou paradas.json).');
+        }
+
+        // Mesma validação de formato de sempre — nunca confia só no que o
+        // navegador já checou antes de mandar pra cá.
+        const conteudo = {};
+        for (const nome of presentes) {
+          let valor;
+          try {
+            valor = parseArquivoBackupDados(nome, arquivos[nome]);
+          } catch (_) {
+            throw new Error(`"${nome}" não é um JSON válido.`);
+          }
+          if (!VALIDADORES_BACKUP_DADOS[nome](valor)) {
+            throw new Error(`"${nome}" não tem o formato esperado.`);
+          }
+          conteudo[nome] = valor;
+        }
+
+        const resultado = {
+          operacoes: { inseridos: 0, duplicatas: 0 },
+          edicoes_operacao: { inseridos: 0 },
+          tracos: { inseridos: 0, duplicatas: 0 },
+          paradas: { inseridos: 0, duplicatas: 0 },
+        };
+        const idsOperacoesImportadas = new Set();
+
+        db.transaction(() => {
+          // Operações (historico.json) — mesma chave de dedup de /importar-historico.
+          if (conteudo['historico.json']) {
+            const existentesRows = db.prepare('SELECT id, data, id_bateria, turno FROM operacoes').all();
+            const existentes = new Set(existentesRows.map(r => r.id || (r.data + '|' + r.id_bateria + '|' + r.turno)));
+            const inserirOperacao = db.prepare(db.SQL_INSERIR_OPERACAO);
+
+            for (const r of conteudo['historico.json']) {
+              const chave = r.id || (r.data + '|' + r.id_bateria + '|' + r.turno);
+              if (existentes.has(chave)) { resultado.operacoes.duplicatas++; continue; }
+              inserirOperacao.run({ ...db.operacaoParaRow(r), modo_teste: 0, criado_em: r.fim || r.inicio || new Date().toISOString() });
+              existentes.add(chave);
+              if (r.id) idsOperacoesImportadas.add(r.id);
+              resultado.operacoes.inseridos++;
+            }
+          }
+
+          // Auditoria de edição (historico_edicoes.json) — só entra a edição
+          // de uma operação que TAMBÉM veio nesta mesma mescla (edição de
+          // uma operação que já existia aqui antes não agrega nada de novo).
+          if (conteudo['historico_edicoes.json']) {
+            const existentesEdicoes = new Set(
+              db.prepare(`SELECT id_operacao || '|' || data_edicao AS chave FROM edicoes_operacao`).all().map(r => r.chave)
+            );
+            const inserirEdicao = db.prepare('INSERT INTO edicoes_operacao (id_operacao, data_edicao, campos_alterados) VALUES (?, ?, ?)');
+
+            for (const e of conteudo['historico_edicoes.json']) {
+              if (!idsOperacoesImportadas.has(e.id_operacao)) continue;
+              const chave = e.id_operacao + '|' + e.data_edicao;
+              if (existentesEdicoes.has(chave)) continue;
+              inserirEdicao.run(e.id_operacao, e.data_edicao, JSON.stringify(e.campos_alterados || []));
+              existentesEdicoes.add(chave);
+              resultado.edicoes_operacao.inseridos++;
+            }
+          }
+
+          // Traços + ajustes + leituras (relatorio_injecao.json + ajustes_tracos.json)
+          if (conteudo['relatorio_injecao.json']) {
+            const ajustes = conteudo['ajustes_tracos.json'] || [];
+            const r = db.mesclarTracosEAjustes(conteudo['relatorio_injecao.json'], ajustes);
+            resultado.tracos.inseridos = r.tracosInseridos;
+            resultado.tracos.duplicatas = r.tracosDuplicados;
+          }
+
+          // Paradas — id próprio já globalmente único, dedup direto por ele.
+          if (conteudo['paradas.json']) {
+            const existentesParadas = new Set(db.prepare('SELECT id FROM paradas').all().map(r => r.id));
+            const inserirParada = db.prepare(db.SQL_INSERIR_PARADA);
+            for (const p of conteudo['paradas.json']) {
+              if (existentesParadas.has(p.id)) { resultado.paradas.duplicatas++; continue; }
+              inserirParada.run(db.paradaParaRow(p));
+              existentesParadas.add(p.id);
+              resultado.paradas.inseridos++;
+            }
+          }
+        })();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, resultado }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
   // ── SOBRA: salvar sobra (real -> tabela sobra; Modo de Teste -> JSON isolado) ──
   if (req.method === 'POST' && urlPath === '/salvar-sobra') {
     let body = '';
@@ -1600,6 +2025,9 @@ const server = http.createServer((req, res) => {
               fs.writeFileSync(path.join(dirSeguranca, nome), JSON.stringify(db.todosOsTracos(), null, 2), 'utf8');
             } else if (nome === 'ajustes_tracos.json') {
               fs.writeFileSync(path.join(dirSeguranca, nome), JSON.stringify(db.todosOsAjustesTracosJSON(), null, 2), 'utf8');
+            } else if (nome === 'relatorio_edicoes.json') {
+              const rows = db.prepare('SELECT id_traco, id_operacao, data_edicao, campos_alterados FROM edicoes_traco ORDER BY id ASC').all();
+              fs.writeFileSync(path.join(dirSeguranca, nome), JSON.stringify(rows.map(r => ({ ...r, campos_alterados: JSON.parse(r.campos_alterados) })), null, 2), 'utf8');
             } else {
               fs.copyFileSync(path.join(DB_DIR, nome), path.join(dirSeguranca, nome));
             }
@@ -1619,7 +2047,7 @@ const server = http.createServer((req, res) => {
         // garantia de "tudo ou nada").
         const nomesArquivo = esperados.filter(n =>
           !['historico.json', 'historico_edicoes.json', 'paradas.json', 'sobra.json', 'contador_tracos.json',
-            'relatorio_injecao.json', 'ajustes_tracos.json'].includes(n));
+            'relatorio_injecao.json', 'ajustes_tracos.json', 'relatorio_edicoes.json'].includes(n));
         const pendentes = nomesArquivo.map(nome => ({
           tmp: path.join(DB_DIR, nome + '.tmp'),
           destino: path.join(DB_DIR, nome),
@@ -1645,6 +2073,20 @@ const server = http.createServer((req, res) => {
             db.prepare('DELETE FROM edicoes_operacao').run();
             for (const e of novasEdicoes) {
               inserirEdicao.run(e.id_operacao, e.data_edicao, JSON.stringify(e.campos_alterados || []));
+            }
+          })();
+        }
+        if (esperados.includes('relatorio_edicoes.json')) {
+          // Faltava completamente — o arquivo já era validado (formato
+          // certo), mas nunca era de fato usado pra repor nada: restaurar
+          // um backup sempre deixava o histórico de edição de traço como
+          // estava antes (perdido se o restore também limpou os traços).
+          const novasEdicoesTraco = JSON.parse(textosValidados['relatorio_edicoes.json']);
+          const inserirEdicaoTraco = db.prepare('INSERT INTO edicoes_traco (id_traco, id_operacao, data_edicao, campos_alterados) VALUES (?, ?, ?, ?)');
+          db.transaction(() => {
+            db.prepare('DELETE FROM edicoes_traco').run();
+            for (const e of novasEdicoesTraco) {
+              inserirEdicaoTraco.run(e.id_traco, e.id_operacao || null, e.data_edicao, JSON.stringify(e.campos_alterados || []));
             }
           })();
         }
@@ -1825,6 +2267,27 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── COPILOTO IA: chat de leitura sobre os dados do sistema ────────────────
+  if (req.method === 'POST' && urlPath === '/copiloto-chat') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        const mensagens = Array.isArray(payload.mensagens) ? payload.mensagens : [];
+        if (!mensagens.length) throw new Error('Nenhuma mensagem enviada.');
+
+        const { resposta, ferramentasUsadas } = await copilotoResponder(mensagens);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, resposta, ferramentasUsadas }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
   // Servir arquivos estáticos normalmente
   let filePath = path.join(DIR, urlPath === '/' ? 'login.html' : urlPath);
   const ext = path.extname(filePath);
@@ -1859,13 +2322,26 @@ wss.on('connection', (ws) => {
   ws.on('error', () => clientesOperacaoAndamento.delete(ws));
 });
 
-function broadcastOperacaoAndamento(dados, origemClientId) {
-  const msg = JSON.stringify({ tipo: 'estado', dados, origemClientId });
+function _enviarWsParaTodos(msg) {
+  const texto = JSON.stringify(msg);
   for (const ws of clientesOperacaoAndamento) {
     if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(msg); } catch (_) { /* cliente pode ter caído nesse exato instante */ }
+      try { ws.send(texto); } catch (_) { /* cliente pode ter caído nesse exato instante */ }
     }
   }
+}
+
+function broadcastOperacaoAndamento(dados, origemClientId) {
+  _enviarWsParaTodos({ tipo: 'estado', dados, origemClientId });
+}
+
+// Avisa todo mundo "ligado" no sistema (exceto quem registrou — esse já
+// vê o resumo localmente) que uma operação foi finalizada/registrada —
+// fim da dinâmica de dono. Disparado por POST /registrar-operacao, nunca
+// em modo de teste. `resumo` é o mesmo formato que showSuccessModal()
+// (operacao.js) já usa pra exibir o modal de sucesso.
+function broadcastOperacaoFinalizada(resumo, origemClientId) {
+  _enviarWsParaTodos({ tipo: 'operacao_finalizada', resumo, origemClientId });
 }
 
 server.listen(PORT, () => {
