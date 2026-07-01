@@ -160,6 +160,28 @@
   // ajustes (ver onClickLinhaRelatorio()).
   let _modoEdicaoRelatorio = false;
 
+  // Controla se o intervalo padrão de 30 dias já foi aplicado nesta sessão
+  // — só entra em ação na PRIMEIRA vez que cada tela é aberta (ver
+  // initRegistro/initRelatorio, abaixo). Sem isso, "✕ Limpar Todos"
+  // (que também passa por initRegistro/initRelatorio pra reconstruir a
+  // tela) reaplicaria os 30 dias por cima do que deveria ficar
+  // genuinamente sem filtro de data nenhum.
+  let _dataInicialRegistroAplicada = false;
+  let _dataInicialRelatorioAplicada = false;
+
+  // Calcula { inicio, fim } do intervalo padrão: hoje e 30 dias atrás,
+  // sempre em Brasília (ver nowBrasilia(), data.js) — mesmo fuso usado em
+  // todo o resto do sistema, pra não desalinhar com "Hoje" (aplicarFiltroHoje).
+  function _intervaloPadrao30Dias() {
+    const fim = nowBrasilia();
+    const inicio = new Date(fim);
+    inicio.setUTCDate(inicio.getUTCDate() - 30);
+    return {
+      inicio: inicio.toISOString().split('T')[0],
+      fim: fim.toISOString().split('T')[0],
+    };
+  }
+
   const _filtrosRelatorio = {
     data_inicio: null, data_fim: null,
     id_bateria: new Set(), num_traco: new Set(),
@@ -193,9 +215,28 @@
   }
 
   // ---- Gera categorias de filtro para Relatório de Injeção ----
+  // id_bateria é tratado à parte dos demais campos (_unicos): um traço pode
+  // ter sido reaproveitado em baterias diferentes ao longo do tempo, então
+  // não existe "o" id_bateria do traço no nível principal — cada uso fica
+  // em l.ultilizado.operacao[].id_bateria (ver _construirDetalheRelatorio
+  // e o loop de renderRelatorio, mais abaixo, que já exibe uma linha por
+  // uso). _unicos(linhas, 'id_bateria') sempre voltava vazio por ler um
+  // campo que não existe nesse nível — por isso esse filtro nunca aparecia
+  // aqui, embora apareça em Registro de Baterias (onde id_bateria É um
+  // campo direto da operação).
+  function _unicosIdBateriaRelatorio(linhas) {
+    const set = new Set();
+    linhas.forEach(l => {
+      (l.ultilizado?.operacao || []).forEach(op => {
+        if (op.id_bateria) set.add(op.id_bateria);
+      });
+    });
+    return [...set].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
+  }
+
   function gerarCategoriasRelatorio(linhas) {
     return [
-      { key: 'id_bateria', label: 'ID da Bateria', opcoes: _unicos(linhas, 'id_bateria') },
+      { key: 'id_bateria', label: 'ID da Bateria', opcoes: _unicosIdBateriaRelatorio(linhas) },
       { key: 'num_traco', label: 'Nº Traço', opcoes: _unicos(linhas, 'num_traco').map(String) },
       { key: 'dimensao', label: 'Dimensão', opcoes: _unicos(linhas, 'dimensao') },
       { key: 'turno', label: 'Turno', opcoes: _unicos(linhas, 'turno') },
@@ -368,11 +409,47 @@
     rebuildFn();
   };
 
+  // Filtro rápido "Hoje" — preenche início e fim do período com a data de
+  // hoje (Brasília) e aplica na hora, sem precisar abrir o calendário duas
+  // vezes. Mesmo containerId usado por limparTodosFiltros, acima — reusa o
+  // mesmo mapeamento pra _filtrosRegistro/_filtrosRelatorio e prefixo de
+  // id (reg-/rel-). Só mexe nas datas — os demais filtros já aplicados
+  // (turno, bateria, etc.) continuam valendo, igual a digitar a data à mão.
+  window.aplicarFiltroHoje = function (containerId) {
+    const filtrosObj = containerId === 'filtros-registro' ? _filtrosRegistro : _filtrosRelatorio;
+    const prefix = containerId === 'filtros-registro' ? 'reg' : 'rel';
+    const hoje = todayBrasilia();
+
+    filtrosObj.data_inicio = hoje;
+    filtrosObj.data_fim = hoje;
+
+    const ini = document.getElementById(`${prefix}-data-inicio`);
+    const fim = document.getElementById(`${prefix}-data-fim`);
+    if (ini) ini.value = hoje;
+    if (fim) fim.value = hoje;
+
+    const renderFn = containerId === 'filtros-registro' ? renderRegistro : renderRelatorio;
+    renderFn();
+  };
+
   // ================================================================
   //  REGISTRO DE BATERIAS
   // ================================================================
 
   async function initRegistro() {
+    if (!_dataInicialRegistroAplicada) {
+      _dataInicialRegistroAplicada = true;
+      if (_filtrosRegistro.data_inicio === null && _filtrosRegistro.data_fim === null) {
+        const { inicio, fim } = _intervaloPadrao30Dias();
+        _filtrosRegistro.data_inicio = inicio;
+        _filtrosRegistro.data_fim = fim;
+        const elIni = document.getElementById('reg-data-inicio');
+        const elFim = document.getElementById('reg-data-fim');
+        if (elIni) elIni.value = inicio;
+        if (elFim) elFim.value = fim;
+      }
+    }
+
     const s = await LW.getStats();
     const cats = gerarCategoriasRegistro(s.data);
     buildFiltrosUI('filtros-registro', cats, _filtrosRegistro, renderRegistro);
@@ -474,9 +551,9 @@
         <td data-col="duracao" class="mono">${LW.formatDuration(b.tempo_min)}</td>
         <td data-col="tracos">${b.qtd_tracos || 0}</td>
         <td data-col="atraso">${b.houve_atraso === 'SIM'
-          ? `<span class="badge badge-red" title="${b.motivo_atraso || ''}">⚠ SIM</span>`
+          ? `<span class="badge badge-red" title="${b.motivo_atraso ? LW.escaparHtml(b.motivo_atraso) : ''}">⚠ SIM</span>`
           : '<span class="badge badge-green">✓ NÃO</span>'}</td>
-        <td data-col="motivo_atraso">${b.motivo_atraso || '—'}</td>
+        <td data-col="motivo_atraso">${b.motivo_atraso ? LW.escaparHtml(b.motivo_atraso) : '—'}</td>
         <td data-col="montagem"><span class="badge" style="background:${corMont.bg};color:${corTextoMont};border:1px solid ${corMont.borda}" ${tituloMontagem ? `title="${tituloMontagem}"` : ''}>${b.tipo_montagem || '—'}</span></td>
         <td data-col="paineis_2p">${b.paineis_2p || 0}</td>
         <td data-col="paineis_sp">${b.paineis_sp || 0}</td>
@@ -717,6 +794,19 @@
 
 
   async function initRelatorio() {
+    if (!_dataInicialRelatorioAplicada) {
+      _dataInicialRelatorioAplicada = true;
+      if (_filtrosRelatorio.data_inicio === null && _filtrosRelatorio.data_fim === null) {
+        const { inicio, fim } = _intervaloPadrao30Dias();
+        _filtrosRelatorio.data_inicio = inicio;
+        _filtrosRelatorio.data_fim = fim;
+        const elIni = document.getElementById('rel-data-inicio');
+        const elFim = document.getElementById('rel-data-fim');
+        if (elIni) elIni.value = inicio;
+        if (elFim) elFim.value = fim;
+      }
+    }
+
     const linhas = await LW.getRelatorioInjecao();
     const cats = gerarCategoriasRelatorio(linhas);
     buildFiltrosUI('filtros-relatorio', cats, _filtrosRelatorio, renderRelatorio);
@@ -979,7 +1069,9 @@
     const f = _filtrosRelatorio;
     if (f.data_inicio) linhas = linhas.filter(l => l.data >= f.data_inicio);
     if (f.data_fim) linhas = linhas.filter(l => l.data <= f.data_fim);
-    if (f.id_bateria.size) linhas = linhas.filter(l => f.id_bateria.has(l.id_bateria));
+    if (f.id_bateria.size) {
+      linhas = linhas.filter(l => (l.ultilizado?.operacao || []).some(op => f.id_bateria.has(op.id_bateria)));
+    }
     if (f.num_traco.size) linhas = linhas.filter(l => f.num_traco.has(String(l.num_traco)));
     if (f.id_traco && f.id_traco.size) linhas = linhas.filter(l => l.id_traco && f.id_traco.has(l.id_traco));
     if (f.dimensao.size) linhas = linhas.filter(l => f.dimensao.has(l.dimensao));
@@ -1024,7 +1116,9 @@
       // operação, então não tem o problema de id_bateria poder repetir.
       const operacoes = (f.id_bateria_traco && f.id_bateria_traco.size && f.op_navegacao)
         ? operacoesDoTraco.filter(op => op.id_operacao === f.op_navegacao)
-        : operacoesDoTraco;
+        : (f.id_bateria.size
+          ? operacoesDoTraco.filter(op => f.id_bateria.has(op.id_bateria))
+          : operacoesDoTraco);
 
       if (!operacoes.length) return ''; // este traço não pertence à bateria filtrada
 
@@ -1060,7 +1154,10 @@
         if (v === '—') return '—';
         return (typeof v === 'number' || !isNaN(parseFloat(v))) ? LW.formatDuration(parseFloat(v) / 60) : v;
       })()}</td>
-        <td>${(op.obs !== undefined ? op.obs : l.obs) || '—'}</td>
+        <td>${(() => {
+        const obs = op.obs !== undefined ? op.obs : l.obs;
+        return obs ? LW.escaparHtml(obs) : '—';
+      })()}</td>
       </tr>
       <tr class="relatorio-detalhe-row" id="detalhe-${rowId}" style="display:none">
         <td colspan="17">${_construirDetalheRelatorio(l, mapaAjustesPorTraco.get(l.id_traco))}</td>

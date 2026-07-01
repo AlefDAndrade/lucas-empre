@@ -498,6 +498,32 @@ const server = http.createServer((req, res) => {
   const deviceId = queryParams.get('deviceId') || '';
   const modoTeste = queryParams.get('modoTeste') === 'true';
 
+  // ─── Limite de tamanho de corpo (POST) ─────────────────────────────────
+  // Nenhuma rota abaixo tinha limite nenhum — cada uma só acumula
+  // `req.on('data', chunk => body += chunk)` até o 'end', sem nenhum teto.
+  // Um POST com um corpo gigante (intencional ou não) ficaria inteiro em
+  // memória, sem nenhuma defesa. 50MB é generoso o bastante pro Backup
+  // Geral/Restaurar Geral (a rota que de longe manda o maior payload —
+  // projeto inteiro em JSON), mas ainda assim finito. Não substitui a
+  // leitura de cada rota — só corta a conexão mais cedo se ela passar do
+  // limite, antes de o corpo inteiro acumular em memória.
+  const MAX_BODY_BYTES = 50 * 1024 * 1024;
+  if (req.method === 'POST') {
+    let _bytesRecebidos = 0;
+    let _corpoAbortado = false;
+    req.on('data', (chunk) => {
+      _bytesRecebidos += chunk.length;
+      if (!_corpoAbortado && _bytesRecebidos > MAX_BODY_BYTES) {
+        _corpoAbortado = true;
+        try {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, erro: 'Corpo da requisição excede o limite permitido (50MB).' }));
+        } catch (_) { /* resposta pode já ter sido enviada por outra checagem — ignora */ }
+        req.destroy();
+      }
+    });
+  }
+
   // ── NOVO: Verificar senha admin no servidor ────────────────────────────────
   // POST /verificar-senha  { senha: "texto plano" }
   // Retorna { ok: true } se correta, { ok: false } se incorreta.
@@ -884,6 +910,18 @@ const server = http.createServer((req, res) => {
   // edicoes_operacao — base pra futuro controle de eficiência de
   // preenchimento das operações ───────────────────────────────────────────
   if (req.method === 'POST' && urlPath === '/editar-operacao') {
+    // Antes, a trava de "só Administrador" era só visual (tela) — qualquer
+    // um que soubesse a URL podia editar uma operação sem senha nenhuma
+    // (ver README, "Limitações conhecidas"). Agora exige a MESMA sessão
+    // emitida por POST /verificar-senha (ver lib/sessao.js) — como o
+    // perfil Administrador sempre pede senha no login (README, "Perfis de
+    // usuário"), a sessão já existe nesse ponto pra quem entrou como
+    // Administrador; não é fricção nova pro fluxo normal.
+    if (!sessao.requestTemSessaoValida(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: 'Sessão de administrador necessária ou expirada. Volte ao login e entre novamente como Administrador.' }));
+      return;
+    }
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
@@ -963,6 +1001,12 @@ const server = http.createServer((req, res) => {
   // Auditoria em relatorio_edicoes.json (mesmo padrão de
   // historico_edicoes.json, indexado por id_traco).
   if (req.method === 'POST' && urlPath === '/editar-traco-relatorio') {
+    // Mesma checagem aplicada a /editar-operacao, acima — ver comentário lá.
+    if (!sessao.requestTemSessaoValida(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: 'Sessão de administrador necessária ou expirada. Volte ao login e entre novamente como Administrador.' }));
+      return;
+    }
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
@@ -2149,9 +2193,22 @@ const server = http.createServer((req, res) => {
   const ext = path.extname(filePath);
   if (!MIME[ext] && !ext) filePath += '.html';
 
-  fs.readFile(filePath, (err, data) => {
+  // ─── Path traversal ─────────────────────────────────────────────────────
+  // path.join() acima NÃO impede que urlPath contenha "..", "%2e%2e" (já
+  // decodificado), ou um caminho absoluto — ex: GET /../server.js ou
+  // GET /../../private/security.json escapariam de DIR (public/) e
+  // exporiam qualquer arquivo do disco que o processo Node consiga ler.
+  // Resolve o caminho final e recusa qualquer um que não fique estritamente
+  // dentro de DIR (mesma técnica já usada em caminhoSeguroDentroDoProjeto(),
+  // acima, pra Restauração Geral).
+  const caminhoResolvido = path.resolve(filePath);
+  if (caminhoResolvido !== DIR && !caminhoResolvido.startsWith(DIR + path.sep)) {
+    res.writeHead(403); res.end('Forbidden'); return;
+  }
+
+  fs.readFile(caminhoResolvido, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'text/plain' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(caminhoResolvido)] || 'text/plain' });
     res.end(data);
   });
 

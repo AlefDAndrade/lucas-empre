@@ -1766,7 +1766,7 @@
             ${renderCampoInsumo(t, i, 'flow_insumo', 'Flow (mm)', '1', 0, 'mm', t._reaproveitado)}
             <div class="form-group traco-obs-field">
               <label class="form-label">Observações</label>
-                <input class="form-input" type="text" value="${t.obs}"
+                <input class="form-input" type="text" value="${LW.escaparHtml(t.obs || '')}"
                 oninput="LWOp.updateTraco(${i},\'obs\',this.value)" placeholder="Ajustes, correções, falhas...">
             </div>
           </div>

@@ -1606,4 +1606,8 @@ window.LW = {
 
   // Confirmação customizada (substitui confirm() nativo)
   mostrarConfirmacao,
+
+  // Escape de HTML — usar sempre que texto livre (digitado pelo usuário)
+  // for inserido via innerHTML, pra evitar XSS armazenado.
+  escaparHtml: _escaparHtml,
 };
