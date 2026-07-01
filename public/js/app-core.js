@@ -1883,9 +1883,23 @@
       LW.atualizarDispositivosAutorizados(novaLista);
     }
 
-    function cfgRenderAutorizados() {
+    async function cfgRenderAutorizados() {
       const meuId = LW.getDeviceId();
       const lista = LW.DISPOSITIVOS_AUTORIZADOS;
+
+      // Dono atual da operação em andamento (se houver uma rodando agora) —
+      // usado só pra marcar, na lista de autorizados, qual deles está com o
+      // controle nesse momento. Falha de rede aqui não deve travar a tela
+      // de Configurações; nesse caso, simplesmente ninguém é marcado.
+      let donoDeviceId = null;
+      try {
+        const operacaoAtual = await LW.getOperacaoAndamento();
+        if (operacaoAtual && operacaoAtual.status && operacaoAtual.status !== 'idle') {
+          donoDeviceId = operacaoAtual.donoDeviceId || null;
+        }
+      } catch (_) {
+        // sem conexão ou erro ao consultar — segue sem indicar dono
+      }
 
       // Status de "este computador" — feedback imediato de se quem está
       // olhando essa tela agora consegue (ou não) controlar a operação.
@@ -1908,6 +1922,7 @@
       <span style="font-size:.85rem;font-weight:700;color:var(--text);min-width:120px">${d.nome ? _escaparHtmlLocal(d.nome) : '(sem nome)'}</span>
       <span style="font-family:var(--font-mono);font-size:.75rem;color:var(--text-2)">${_escaparHtmlLocal(d.deviceId)}</span>
       ${d.deviceId === meuId ? '<span style="font-size:.7rem;color:var(--green)">← este computador</span>' : ''}
+      ${d.deviceId === donoDeviceId ? `<span class="badge badge-green" style="font-size:.7rem;cursor:pointer;text-decoration:underline" onclick="cfgCancelarOperacaoDono('${_escaparHtmlLocal(d.deviceId)}')" title="Clique para cancelar a operação em andamento">🟢 Operando agora${d.nome ? '' : ' — ' + _escaparHtmlLocal(d.deviceId)}</span>` : ''}
       <button onclick="cfgRemoverAutorizado('${_escaparHtmlLocal(d.deviceId)}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
     </div>
   `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum dispositivo autorizado ainda.</span>';
@@ -1918,7 +1933,41 @@
       if (inputDeviceId && !inputDeviceId.value) inputDeviceId.value = meuId;
     }
 
-    // Escape simples — esta tela não tem acesso a uma função de escape já
+    /**
+     * Clique no badge "🟢 Operando agora" (Configurações → Autorizados):
+     * cancela a operação em andamento — equivalente ao "🗑️ Limpar Tudo" de
+     * Registrar Operação, só que disparado daqui, pelo Administrador, sem
+     * precisar estar com aquela tela aberta. Nada do que foi preenchido na
+     * operação é salvo; ela simplesmente é descartada.
+     *
+     * Dupla confirmação, de propósito: primeiro a pergunta "tem certeza?"
+     * (LW.mostrarConfirmacao, mesmo padrão usado em todo o resto do app),
+     * depois a senha do Administrador (AdminAuth.abrirModal — mesmo modal
+     * usado no login, sempre pede a senha de novo, mesmo já autenticado).
+     * Só depois das duas a operação é de fato cancelada.
+     */
+    async function cfgCancelarOperacaoDono(deviceId) {
+      const dispositivo = LW.DISPOSITIVOS_AUTORIZADOS.find(d => d.deviceId === deviceId);
+      const identificacao = dispositivo?.nome || deviceId;
+
+      const confirmou = await LW.mostrarConfirmacao(
+        `A operação em andamento foi iniciada por "${identificacao}". Cancelar agora descarta tudo o que já foi preenchido nela — turno, traços, horários — sem salvar nada.`,
+        { titulo: 'Cancelar a operação em andamento?', textoConfirmar: 'Cancelar Operação', tipo: 'perigo', icon: '🛑' }
+      );
+      if (!confirmou) return;
+
+      if (typeof AdminAuth === 'undefined') {
+        LW.mostrarAlerta('Não foi possível confirmar a senha de administrador nesta tela.', { tipo: 'erro' });
+        return;
+      }
+
+      AdminAuth.abrirModal(function onSuccess() {
+        LW.enviarOperacaoAndamento(null, { imediato: true, forcar: true });
+        LW.mostrarAlerta('Operação cancelada.', { tipo: 'sucesso' });
+        cfgRenderAutorizados();
+      });
+    }
+
     // existente no escopo global, então replica a mesma lógica usada em
     // data.js (_escaparHtml) só pra estes dois campos de texto livre.
     function _escaparHtmlLocal(texto) {
@@ -2536,4 +2585,3 @@
         btn.textContent = textoOriginal;
       }
     }
-
