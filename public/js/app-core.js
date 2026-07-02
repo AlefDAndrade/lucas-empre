@@ -1951,7 +1951,7 @@
       const identificacao = dispositivo?.nome || deviceId;
 
       const confirmou = await LW.mostrarConfirmacao(
-        `A operação em andamento foi iniciada por "${identificacao}". Cancelar agora descarta tudo o que já foi preenchido nela — turno, traços, horários — sem salvar nada.`,
+        `A operação em andamento foi iniciada por "${identificacao}". Cancelar agora descarta tudo o que já foi preenchido nela — turno, traços, horários — sem salvar nada. A operação ficará liberada para qualquer dispositivo autorizado iniciar uma nova.`,
         { titulo: 'Cancelar a operação em andamento?', textoConfirmar: 'Cancelar Operação', tipo: 'perigo', icon: '🛑' }
       );
       if (!confirmou) return;
@@ -1961,10 +1961,25 @@
         return;
       }
 
-      AdminAuth.abrirModal(function onSuccess() {
-        LW.enviarOperacaoAndamento(null, { imediato: true, forcar: true });
-        LW.mostrarAlerta('Operação cancelada.', { tipo: 'sucesso' });
-        cfgRenderAutorizados();
+      AdminAuth.abrirModal(async function onSuccess() {
+        try {
+          const res = await fetch('/admin/resetar-operacao', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // corpo vazio — a sessão já está no cookie (HttpOnly, SameSite=Strict),
+            // o servidor lê direto do request sem precisar de nada no body
+            body: JSON.stringify({}),
+          });
+          const json = await res.json().catch(() => null);
+          if (!res.ok) {
+            LW.mostrarAlerta(json?.erro || 'Não foi possível cancelar a operação. Tente novamente.', { tipo: 'erro' });
+            return;
+          }
+          LW.mostrarAlerta('Operação cancelada. A operação está liberada para ser iniciada por qualquer dispositivo autorizado.', { tipo: 'sucesso' });
+          cfgRenderAutorizados();
+        } catch (_) {
+          LW.mostrarAlerta('Erro de conexão ao cancelar a operação. Verifique a rede e tente novamente.', { tipo: 'erro' });
+        }
       });
     }
 

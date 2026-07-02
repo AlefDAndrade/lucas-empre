@@ -1508,6 +1508,36 @@ const server = http.createServer((req, res) => {
   // do arquivo). "dados" é sempre o objeto inteiro do estado atual, ou
   // null — quando a operação termina, é cancelada/resetada, ou ainda não
   // foi iniciada (ver regra equivalente em persist(), no operacao.js).
+  if (req.method === 'POST' && urlPath === '/admin/resetar-operacao') {
+    // Rota exclusiva para o Administrador cancelar/resetar a operação em
+    // andamento pela tela de Configurações → Autorizados, sem depender do
+    // deviceId de quem está clicando ser um dispositivo autorizado.
+    // Diferença em relação a POST /salvar-operacao-andamento com forcar=true:
+    // - Aquela rota exige que o deviceId da requisição esteja na lista de
+    //   autorizados (ver dispositivoAutorizado(), linha 1515 acima), então
+    //   falha quando o Administrador está em um computador não autorizado.
+    // - Esta rota ignora a lista de autorizados e exige apenas uma SESSÃO
+    //   válida do Administrador (lib/sessao.js), criada em /verificar-senha.
+    // Produz exatamente o mesmo efeito: null no disco + broadcast para todos
+    // os clientes WebSocket conectados, que atualizam a tela em tempo real.
+    if (!sessao.requestTemSessaoValida(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: 'Sessão de Administrador necessária. Faça login como Administrador antes de cancelar a operação.' }));
+      return;
+    }
+    try {
+      salvarOperacaoAndamentoNoDisco(null);
+      broadcastOperacaoAndamento(null, null);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    }
+    return;
+  }
+
+
   if (req.method === 'POST' && urlPath === '/salvar-operacao-andamento') {
     let body = '';
     req.on('data', chunk => body += chunk);
