@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setor de Qualidade — Avaliação de Baterias</title>
+  <!-- Reutiliza variáveis e componentes base do Lightwall -->
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- CSS específico desta tela -->
+  <link rel="stylesheet" href="css/setor-qualidade.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+<div class="sq-container">
+
+  <!-- ── TOPBAR ──────────────────────────────────────────── -->
+  <div class="sq-topbar">
+    <div class="sq-brand"><div class="sq-bar"></div>Avaliação de Baterias</div>
+    <nav class="sq-nav">
+      <button class="sq-nav-btn active" id="sq-nav-list"      onclick="SQ.navigateTo('list')">📋 Em Andamento</button>
+      <button class="sq-nav-btn"        id="sq-nav-dashboard" onclick="SQ.navigateTo('dashboard')">📊 Dashboard</button>
+      <button class="sq-nav-btn"        id="sq-nav-history"   onclick="SQ.navigateTo('history')">📋 Registros</button>
+    </nav>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       TELA 1: EM ANDAMENTO
+  ══════════════════════════════════════════════════════════ -->
+  <div class="sq-section active" id="sq-list">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-folder-open"></i> Avaliações em aberto</span>
+      <button class="btn btn-primary btn-sm" onclick="SQ.startNew()"><i class="fas fa-plus-circle"></i> Nova Avaliação</button>
+    </div>
+    <div id="sq-draft-list">
+      <div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.<br>Clique em "Nova Avaliação" para começar.</div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       TELA 2: DASHBOARD
+  ══════════════════════════════════════════════════════════ -->
+  <div class="sq-section" id="sq-dashboard">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-chart-pie"></i> Visão Executiva</span>
+      <button class="btn btn-danger btn-sm" id="sq-btn-pdf" onclick="SQ.exportDashboardPDF()"><i class="fas fa-file-pdf"></i> Exportar PDF</button>
+    </div>
+
+    <!-- Filtros -->
+    <div class="sq-filters">
+      <div class="form-group">
+        <label class="form-label">Data Inicial</label>
+        <input class="form-input" type="date" id="sq-dash-start" style="width:150px;">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Data Final</label>
+        <input class="form-input" type="date" id="sq-dash-end" style="width:150px;">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Bateria</label>
+        <select class="form-input form-select" id="sq-dash-bat" style="width:140px;">
+          <option value="">Todas</option>
+          <option value="B1">B1</option><option value="B2">B2</option><option value="B3">B3</option>
+          <option value="B4">B4</option><option value="B5-7.5">B5-7,5cm</option><option value="B6-12">B6-12cm</option>
+          <option value="B7">B7</option><option value="B8">B8</option><option value="B9">B9</option>
+          <option value="B10">B10</option><option value="B11">B11</option><option value="B12">B12</option><option value="B13">B13</option>
+        </select>
+      </div>
+      <button class="btn btn-outline-accent btn-sm" onclick="SQ.renderDashboard()"><i class="fas fa-sync-alt"></i> Aplicar</button>
+    </div>
+
+    <!-- Espelho visual -->
+    <div class="sq-mirror-wrapper">
+      <div class="sq-mirror-header">
+        <div class="sq-mirror-title"><i class="fas fa-cube" style="color:var(--blue);"></i> Espelho Visual da Avaliação</div>
+        <div class="sq-mirror-info">
+          <span><strong>Bateria:</strong> <span id="sq-mirror-battery">---</span></span>
+          <span><strong>Turno:</strong>   <span id="sq-mirror-turno">---</span></span>
+          <span><strong>Desmoldagem:</strong> <span id="sq-mirror-desmoldagem">---</span></span>
+        </div>
+        <div class="sq-mirror-nav">
+          <button id="sq-mirror-prev" onclick="SQ.prevMirror()"><i class="fas fa-chevron-left"></i></button>
+          <span id="sq-mirror-counter" style="font-size:.78rem;color:var(--text-3);">0 / 0</span>
+          <button id="sq-mirror-next" onclick="SQ.nextMirror()"><i class="fas fa-chevron-right"></i></button>
+        </div>
+      </div>
+      <div id="sq-mirror-container">
+        <div class="sq-empty" style="padding:20px;"><i class="fas fa-inbox"></i>Nenhuma avaliação.</div>
+      </div>
+      <div class="sq-mirror-legend">
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-verde);width:10px;height:10px;border-radius:50%;display:inline-block;"></span>Aprovado</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-vermelho);width:10px;height:10px;border-radius:50%;display:inline-block;"></span>Reprovado</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-azul);width:10px;height:10px;border-radius:50%;display:inline-block;"></span>2ª linha</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-amarelo);width:12px;height:3px;border-radius:2px;display:inline-block;"></span>3T</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-laranja);width:12px;height:3px;border-radius:2px;display:inline-block;"></span>1T</div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="sq-kpi-grid" id="sq-kpi-grid"></div>
+
+    <!-- Gráficos -->
+    <div class="sq-charts-grid">
+      <div class="sq-chart-box"><h4>🏷️ Painéis por Tipo</h4><canvas id="sq-chart-tipo"></canvas></div>
+      <div class="sq-chart-box"><h4>📈 Evolução da Produção</h4><canvas id="sq-chart-production"></canvas></div>
+      <div class="sq-chart-box"><h4>📊 Distribuição das Classificações</h4><canvas id="sq-chart-quality"></canvas></div>
+      <div class="sq-chart-box"><h4>🎯 Defeitos por Posição</h4><div id="sq-chart-posicao" style="min-height:200px;"></div></div>
+      <div class="sq-chart-box"><h4>🏭 Baterias com Mais Refugo</h4><canvas id="sq-chart-bat-refugo"></canvas></div>
+      <div class="sq-chart-box"><h4>🔴 Taxa de Refugo por Tipo (%)</h4><canvas id="sq-chart-rejections"></canvas></div>
+      <div class="sq-chart-box"><h4>⏳ Tempo de Pega × Refugo</h4><canvas id="sq-chart-tempo-pega"></canvas></div>
+      <div class="sq-chart-box"><h4>✅ Aprovação vs Reprovação por Bateria</h4><canvas id="sq-chart-approval-bat"></canvas></div>
+    </div>
+
+    <!-- Resumo -->
+    <div class="sq-summary-box">
+      <h4><i class="fas fa-file-alt"></i> Resumo &amp; Insights</h4>
+      <p id="sq-dash-summary">Nenhum dado disponível.</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       TELA 3: FORMULÁRIO DE AVALIAÇÃO
+  ══════════════════════════════════════════════════════════ -->
+  <div class="sq-section" id="sq-form">
+    <!-- Ações do formulário -->
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:16px;">
+      <button class="btn btn-ghost btn-sm sq-hide-view"  id="sq-btn-save"     onclick="SQ.saveDraft()"><i class="fas fa-save"></i> Salvar</button>
+      <button class="btn btn-success btn-sm sq-hide-view" id="sq-btn-register" onclick="SQ.registerEvaluation()"><i class="fas fa-check-circle"></i> Registrar</button>
+      <button class="btn btn-ghost btn-sm sq-show-view"  id="sq-btn-back"     onclick="SQ.goBack()"><i class="fas fa-arrow-left"></i> Voltar</button>
+    </div>
+
+    <div style="position:relative;">
+      <div id="sq-view-overlay" class="sq-view-overlay" style="display:none;"></div>
+      <!-- campo técnico oculto -->
+      <select id="sq-thickness" style="display:none;">
+        <option value="11">7,5cm (11)</option>
+        <option value="10" selected>9cm (10)</option>
+        <option value="8">12cm (8)</option>
+      </select>
+
+      <!-- Cabeçalho do registro -->
+      <div class="sq-header-grid">
+        <div class="form-group">
+          <label class="form-label">ID da Bateria</label>
+          <select class="form-input form-select" id="sq-batteryId" onchange="SQ.autoSetThickness()">
+            <option value="B1">B1</option><option value="B2">B2</option><option value="B3">B3</option>
+            <option value="B4">B4</option><option value="B5-7.5">B5-7,5cm</option><option value="B6-12">B6-12cm</option>
+            <option value="B7">B7</option><option value="B8">B8</option><option value="B9">B9</option>
+            <option value="B10">B10</option><option value="B11">B11</option><option value="B12">B12</option><option value="B13">B13</option>
+          </select>
+        </div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">Tipo de Montagem</label>
+          <select class="form-input form-select" id="sq-mountType" onchange="SQ.changeMountType()">
+            <option value="">Selecionar…</option>
+            <option value="SP+2P">SP + 2P</option><option value="SP">SP</option>
+            <option value="2P">2P</option><option value="3T">3T</option>
+            <option value="1T">1T</option><option value="Personalizada">Personalizada</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sequência do Dia</label>
+          <select class="form-input form-select" id="sq-dailySeq">
+            <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+            <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+            <option>11</option><option>12</option><option>13</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Turno</label>
+          <select class="form-input form-select" id="sq-turno">
+            <option value="1° TURNO">1° Turno</option>
+            <option value="2° TURNO">2° Turno</option>
+            <option value="3° TURNO">3° Turno</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Temperatura</label>
+          <input class="form-input" type="text" id="sq-temp" placeholder="38°C" onblur="SQ.formatTemperature(this)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data/Hora Montagem</label>
+          <input class="form-input" type="datetime-local" step="60" id="sq-dtMontagem">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data/Hora Enchimento</label>
+          <input class="form-input" type="datetime-local" step="60" id="sq-dtEnchimento" oninput="SQ.calculateCureTime()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data/Hora Desmoldagem</label>
+          <input class="form-input" type="datetime-local" step="60" id="sq-dtDesmoldagem" oninput="SQ.calculateCureTime()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tempo de Pega</label>
+          <input class="form-input" type="text" id="sq-cure-time" readonly placeholder="--">
+        </div>
+      </div>
+
+      <!-- Ferramentas de marcação -->
+      <div class="sq-tools">
+        <span class="sq-tools-label"><i class="fas fa-palette"></i> Cor</span>
+        <button class="sq-btn-color verde active"    onclick="SQ.selectColor(this,'verde')"></button>
+        <button class="sq-btn-color vermelho"        onclick="SQ.selectColor(this,'vermelho')"></button>
+        <button class="sq-btn-color azul"            onclick="SQ.selectColor(this,'azul')"></button>
+        <button class="sq-btn-color amarelo"         onclick="SQ.selectColor(this,'amarelo')"></button>
+        <button class="sq-btn-color laranja"         onclick="SQ.selectColor(this,'laranja')"></button>
+        <div class="sq-tools-sep"></div>
+        <span class="sq-tools-label"><i class="fas fa-shapes"></i> Forma</span>
+        <button class="sq-btn-shape circle active"   onclick="SQ.selectShape(this,'circle')"><span class="sq-shape-circle"></span></button>
+        <button class="sq-btn-shape dash"            onclick="SQ.selectShape(this,'dash')"><span class="sq-shape-dash"></span></button>
+        <div class="sq-tools-sep"></div>
+        <button class="btn btn-ghost btn-sm"         onclick="SQ.undoLastAction()"><i class="fas fa-undo-alt"></i> Desfazer</button>
+        <button class="btn btn-danger btn-sm"        onclick="SQ.clearAllMarks()"><i class="fas fa-trash-alt"></i> Limpar</button>
+      </div>
+
+      <!-- Pallets -->
+      <div class="sq-stacks">
+        <!-- Pallet 1 -->
+        <div class="sq-pallet-col">
+          <div class="sq-pallet-header">
+            <span class="sq-pallet-label">PALLET 1</span>
+            <div class="sq-pallet-actions">
+              <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack1')">⚡ Todas</button>
+              <button class="sq-btn-dropdown"   onclick="SQ.toggleDropdown(this,'stack1')">🎨</button>
+              <div class="sq-color-dropdown" id="sq-dd-stack1">
+                <button class="sq-dropdown-color verde"    onclick="SQ.applyColorToPallet('stack1','verde')"></button>
+                <button class="sq-dropdown-color vermelho" onclick="SQ.applyColorToPallet('stack1','vermelho')"></button>
+                <button class="sq-dropdown-color azul"     onclick="SQ.applyColorToPallet('stack1','azul')"></button>
+                <button class="sq-dropdown-color amarelo"  onclick="SQ.applyColorToPallet('stack1','amarelo')"></button>
+                <button class="sq-dropdown-color laranja"  onclick="SQ.applyColorToPallet('stack1','laranja')"></button>
+              </div>
+            </div>
+          </div>
+          <div class="sq-slab-stack" id="stack1"></div>
+        </div>
+        <!-- Pallet 2 -->
+        <div class="sq-pallet-col">
+          <div class="sq-pallet-header">
+            <span class="sq-pallet-label">PALLET 2</span>
+            <div class="sq-pallet-actions">
+              <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack2')">⚡ Todas</button>
+              <button class="sq-btn-dropdown"   onclick="SQ.toggleDropdown(this,'stack2')">🎨</button>
+              <div class="sq-color-dropdown" id="sq-dd-stack2">
+                <button class="sq-dropdown-color verde"    onclick="SQ.applyColorToPallet('stack2','verde')"></button>
+                <button class="sq-dropdown-color vermelho" onclick="SQ.applyColorToPallet('stack2','vermelho')"></button>
+                <button class="sq-dropdown-color azul"     onclick="SQ.applyColorToPallet('stack2','azul')"></button>
+                <button class="sq-dropdown-color amarelo"  onclick="SQ.applyColorToPallet('stack2','amarelo')"></button>
+                <button class="sq-dropdown-color laranja"  onclick="SQ.applyColorToPallet('stack2','laranja')"></button>
+              </div>
+            </div>
+          </div>
+          <div class="sq-slab-stack" id="stack2"></div>
+        </div>
+        <!-- Pallet 3 -->
+        <div class="sq-pallet-col">
+          <div class="sq-pallet-header">
+            <span class="sq-pallet-label">PALLET 3</span>
+            <div class="sq-pallet-actions">
+              <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack3')">⚡ Todas</button>
+              <button class="sq-btn-dropdown"   onclick="SQ.toggleDropdown(this,'stack3')">🎨</button>
+              <div class="sq-color-dropdown" id="sq-dd-stack3">
+                <button class="sq-dropdown-color verde"    onclick="SQ.applyColorToPallet('stack3','verde')"></button>
+                <button class="sq-dropdown-color vermelho" onclick="SQ.applyColorToPallet('stack3','vermelho')"></button>
+                <button class="sq-dropdown-color azul"     onclick="SQ.applyColorToPallet('stack3','azul')"></button>
+                <button class="sq-dropdown-color amarelo"  onclick="SQ.applyColorToPallet('stack3','amarelo')"></button>
+                <button class="sq-dropdown-color laranja"  onclick="SQ.applyColorToPallet('stack3','laranja')"></button>
+              </div>
+            </div>
+          </div>
+          <div class="sq-slab-stack" id="stack3"></div>
+        </div>
+        <!-- Pallet 4 -->
+        <div class="sq-pallet-col">
+          <div class="sq-pallet-header">
+            <span class="sq-pallet-label">PALLET 4</span>
+            <div class="sq-pallet-actions">
+              <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack4')">⚡ Todas</button>
+              <button class="sq-btn-dropdown"   onclick="SQ.toggleDropdown(this,'stack4')">🎨</button>
+              <div class="sq-color-dropdown" id="sq-dd-stack4">
+                <button class="sq-dropdown-color verde"    onclick="SQ.applyColorToPallet('stack4','verde')"></button>
+                <button class="sq-dropdown-color vermelho" onclick="SQ.applyColorToPallet('stack4','vermelho')"></button>
+                <button class="sq-dropdown-color azul"     onclick="SQ.applyColorToPallet('stack4','azul')"></button>
+                <button class="sq-dropdown-color amarelo"  onclick="SQ.applyColorToPallet('stack4','amarelo')"></button>
+                <button class="sq-dropdown-color laranja"  onclick="SQ.applyColorToPallet('stack4','laranja')"></button>
+              </div>
+            </div>
+          </div>
+          <div class="sq-slab-stack" id="stack4"></div>
+        </div>
+      </div>
+
+      <!-- Legenda -->
+      <div class="sq-legend">
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-verde);width:10px;height:10px;border-radius:50%;display:inline-block;border:1px solid var(--border);"></span> Aprovado</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-vermelho);width:10px;height:10px;border-radius:50%;display:inline-block;border:1px solid var(--border);"></span> Reprovado</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-azul);width:10px;height:10px;border-radius:50%;display:inline-block;border:1px solid var(--border);"></span> 2ª linha</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-amarelo);width:14px;height:3px;border-radius:2px;display:inline-block;"></span> painel 3T</div>
+        <div class="sq-legend-item"><span style="background:var(--sq-cor-laranja);width:14px;height:3px;border-radius:2px;display:inline-block;"></span> painel 1T</div>
+      </div>
+
+      <!-- Medição -->
+      <div class="sq-medicao-title-wrap"><span class="sq-medicao-title"><i class="fas fa-ruler-combined"></i> MEDIÇÃO</span></div>
+      <div class="sq-pallet-info-grid">
+        <!-- Pallet 1 -->
+        <div class="sq-info-col">
+          <div class="sq-info-col-header">Pallet 1</div>
+          <div class="sq-info-row"><span class="sq-info-key">Comprimento</span><span class="sq-info-val" id="sq-p1-comprimento">3m</span><span class="sq-info-edit" data-pallet="1" data-field="comprimento" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Largura</span><span class="sq-info-val" id="sq-p1-largura">61cm</span><span class="sq-info-edit" data-pallet="1" data-field="largura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Linearidade</span><span class="sq-info-val" id="sq-p1-linearidade">ok</span><span class="sq-info-edit" data-pallet="1" data-field="linearidade" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Espessura</span><span class="sq-info-val" id="sq-p1-espessura">9 cm</span><span class="sq-info-edit" data-pallet="1" data-field="espessura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Esquadro</span><span class="sq-info-val" id="sq-p1-esquadro">ok</span><span class="sq-info-edit" data-pallet="1" data-field="esquadro" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+        </div>
+        <!-- Pallet 2 -->
+        <div class="sq-info-col">
+          <div class="sq-info-col-header">Pallet 2</div>
+          <div class="sq-info-row"><span class="sq-info-key">Comprimento</span><span class="sq-info-val" id="sq-p2-comprimento">3m</span><span class="sq-info-edit" data-pallet="2" data-field="comprimento" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Largura</span><span class="sq-info-val" id="sq-p2-largura">61cm</span><span class="sq-info-edit" data-pallet="2" data-field="largura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Linearidade</span><span class="sq-info-val" id="sq-p2-linearidade">ok</span><span class="sq-info-edit" data-pallet="2" data-field="linearidade" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Espessura</span><span class="sq-info-val" id="sq-p2-espessura">9 cm</span><span class="sq-info-edit" data-pallet="2" data-field="espessura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Esquadro</span><span class="sq-info-val" id="sq-p2-esquadro">ok</span><span class="sq-info-edit" data-pallet="2" data-field="esquadro" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+        </div>
+        <!-- Pallet 3 -->
+        <div class="sq-info-col">
+          <div class="sq-info-col-header">Pallet 3</div>
+          <div class="sq-info-row"><span class="sq-info-key">Comprimento</span><span class="sq-info-val" id="sq-p3-comprimento">3m</span><span class="sq-info-edit" data-pallet="3" data-field="comprimento" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Largura</span><span class="sq-info-val" id="sq-p3-largura">61cm</span><span class="sq-info-edit" data-pallet="3" data-field="largura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Linearidade</span><span class="sq-info-val" id="sq-p3-linearidade">ok</span><span class="sq-info-edit" data-pallet="3" data-field="linearidade" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Espessura</span><span class="sq-info-val" id="sq-p3-espessura">9 cm</span><span class="sq-info-edit" data-pallet="3" data-field="espessura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Esquadro</span><span class="sq-info-val" id="sq-p3-esquadro">ok</span><span class="sq-info-edit" data-pallet="3" data-field="esquadro" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+        </div>
+        <!-- Pallet 4 -->
+        <div class="sq-info-col">
+          <div class="sq-info-col-header">Pallet 4</div>
+          <div class="sq-info-row"><span class="sq-info-key">Comprimento</span><span class="sq-info-val" id="sq-p4-comprimento">3m</span><span class="sq-info-edit" data-pallet="4" data-field="comprimento" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Largura</span><span class="sq-info-val" id="sq-p4-largura">61cm</span><span class="sq-info-edit" data-pallet="4" data-field="largura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Linearidade</span><span class="sq-info-val" id="sq-p4-linearidade">ok</span><span class="sq-info-edit" data-pallet="4" data-field="linearidade" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Espessura</span><span class="sq-info-val" id="sq-p4-espessura">9 cm</span><span class="sq-info-edit" data-pallet="4" data-field="espessura" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+          <div class="sq-info-row"><span class="sq-info-key">Esquadro</span><span class="sq-info-val" id="sq-p4-esquadro">ok</span><span class="sq-info-edit" data-pallet="4" data-field="esquadro" onclick="SQ.editField(this)"><i class="fas fa-pen"></i></span></div>
+        </div>
+      </div>
+
+      <!-- Observações -->
+      <div class="sq-obs-area">
+        <label class="sq-obs-label"><i class="fas fa-sticky-note"></i> Observações</label>
+        <textarea class="form-input form-textarea" id="sq-obs" rows="3" placeholder="Observações adicionais sobre a avaliação desta bateria…"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       TELA 4: HISTÓRICO
+  ══════════════════════════════════════════════════════════ -->
+  <div class="sq-section" id="sq-history">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-database"></i> Base de Registros</span>
+      <span style="font-size:.75rem;color:var(--text-3);" id="sq-hist-count">0 registros</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);">
+      <div class="form-group">
+        <label class="form-label">Buscar Bateria</label>
+        <input class="form-input" type="text" id="sq-hist-search" placeholder="Ex: B3…" oninput="SQ.renderHistory()" style="width:160px;">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Turno</label>
+        <select class="form-input form-select" id="sq-hist-turno" onchange="SQ.renderHistory()" style="width:140px;">
+          <option value="">Todos</option>
+          <option value="1° TURNO">1° Turno</option>
+          <option value="2° TURNO">2° Turno</option>
+          <option value="3° TURNO">3° Turno</option>
+        </select>
+      </div>
+    </div>
+    <div id="sq-hist-list">
+      <div class="sq-empty" id="sq-hist-empty"><i class="fas fa-database"></i>Nenhum registro ainda.</div>
+      <div class="table-wrap" id="sq-hist-table-wrap" style="display:none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Data/Hora</th><th>Bateria</th>
+              <th style="background:var(--sq-tipo-sp);color:#fff;">P1</th>
+              <th style="background:var(--sq-tipo-2p);color:#fff;">P2</th>
+              <th style="background:var(--sq-tipo-3t);color:#fff;">P3</th>
+              <th style="background:var(--sq-tipo-1t);color:#fff;">P4</th>
+              <th>Turno</th><th>Temp.</th><th>Placas</th><th>Classificações</th>
+              <th style="text-align:center;">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="sq-hist-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       MODAL GENÉRICO
+  ══════════════════════════════════════════════════════════ -->
+  <div class="sq-modal-pallet-overlay" id="sq-modal" style="z-index:99998;">
+    <div class="sq-modal-pallet-box" style="max-width:400px;">
+      <div class="sq-modal-pallet-header">
+        <h2 id="sq-modal-title">Título</h2>
+        <p id="sq-modal-msg" style="font-size:.82rem;color:var(--text-3);margin-top:4px;white-space:pre-line;"></p>
+      </div>
+      <input class="form-input" type="text" id="sq-modal-input" style="display:none;" placeholder="Digite aqui…">
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:12px;border-top:1px solid var(--border);">
+        <button class="btn btn-ghost btn-sm"   id="sq-modal-cancel" style="display:none;">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="sq-modal-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       MODAL CONFIGURAÇÃO PERSONALIZADA DE PALLET
+  ══════════════════════════════════════════════════════════ -->
+  <div class="sq-modal-pallet-overlay" id="sq-modal-pallet">
+    <div class="sq-modal-pallet-box">
+      <div class="sq-modal-pallet-header">
+        <h2><i class="fas fa-wrench" style="color:var(--blue);"></i> Configuração Personalizada</h2>
+        <p>Selecione um tipo e clique nas placas para aplicar individualmente.</p>
+      </div>
+      <div class="sq-modal-tipo-actions">
+        <button class="sq-btn-tipo sp" onclick="SQ.setModalTipo('SP')">SP</button>
+        <button class="sq-btn-tipo p2" onclick="SQ.setModalTipo('2P')">2P</button>
+        <button class="sq-btn-tipo t3" onclick="SQ.setModalTipo('3T')">3T</button>
+        <button class="sq-btn-tipo t1" onclick="SQ.setModalTipo('1T')">1T</button>
+        <button class="btn btn-danger btn-sm" onclick="SQ.clearModalPlates()"><i class="fas fa-trash-alt"></i> Limpar</button>
+      </div>
+      <div id="sq-modal-slabs-grid" class="sq-modal-slabs-grid"></div>
+      <div class="sq-modal-pallet-footer">
+        <button class="btn btn-ghost btn-sm"   onclick="SQ.closePalletModal()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="SQ.confirmPalletModal()">Salvar e Aplicar</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .sq-container -->
+<script src="js/setor-qualidade.js"></script>
+<script>window.addEventListener('DOMContentLoaded', () => SQ.init());</script>
+</body>
+</html>

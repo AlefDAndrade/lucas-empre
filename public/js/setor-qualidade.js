@@ -1,0 +1,928 @@
+// ============================================================
+//  SETOR DE QUALIDADE — Avaliação de Baterias
+//  Dados salvos em localStorage com prefixo "sq_" para não
+//  colidir com o Lightwall.
+// ============================================================
+'use strict';
+
+(function () {
+
+  /* ── Prefixo localStorage ─────────────────────────────── */
+  const LS = {
+    get: k => { try { return JSON.parse(localStorage.getItem('sq_' + k)); } catch (e) { return null; } },
+    set: (k, v) => localStorage.setItem('sq_' + k, JSON.stringify(v)),
+    del: k => localStorage.removeItem('sq_' + k),
+    keys: prefix => {
+      const out = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sq_' + prefix)) out.push(k);
+      }
+      return out;
+    },
+  };
+
+  /* ── Estado global ────────────────────────────────────── */
+  let selectedColor  = 'verde';
+  let selectedShape  = 'circle';
+  let slabState      = {};
+  let actionHistory  = [];
+  let currentDraftId = null;
+  let viewMode       = false;
+  let viewSource     = 'list';
+  let palletTypes    = ['', '', '', ''];
+  let slabConfig     = {};
+  let modalTipoSel   = 'SP';
+  let tempSlabConfig = {};
+  let dashboardEvals = [];
+  let mirrorIndex    = 0;
+
+  /* Referências Chart.js */
+  let charts = {};
+
+  /* ── Classificação de marcas ──────────────────────────── */
+  function classifyMarks(marks) {
+    const circles = marks.filter(m => m.shape === 'circle');
+    const dashes  = marks.filter(m => m.shape === 'dash');
+    const cor     = arr => arr.length ? arr[0].color : null;
+    const ok      = c => c === 'verde' || c === 'azul';
+    if (circles.length && dashes.length) {
+      const cc = cor(circles), dc = cor(dashes);
+      if (ok(cc) && dc === 'amarelo') return '3T aprovado';
+      if (cc === 'vermelho' && dc === 'amarelo') return '3T reprovado';
+      if (ok(cc) && dc === 'laranja')  return '1T aprovado';
+      if (cc === 'vermelho' && dc === 'laranja')  return '1T reprovado';
+      return 'Múltiplas';
+    }
+    if (circles.length) { const c = cor(circles); return ok(c) ? '2P aprovado' : c === 'vermelho' ? '2P reprovado' : 'Outros'; }
+    if (dashes.length)  { const c = cor(dashes);  return ok(c) ? 'SP aprovado'  : c === 'vermelho' ? 'SP reprovado'  : 'Outros'; }
+    return 'Sem marcação';
+  }
+  function getClassifiedInfo(marks) {
+    const s = classifyMarks(marks);
+    if (['Sem marcação', 'Múltiplas', 'Outros'].includes(s))
+      return { tipoObtido: s, resultado: s.toLowerCase().replace(' ', '_') };
+    const [tipo, resultado] = s.split(' ');
+    return { tipoObtido: tipo, resultado };
+  }
+
+  /* ── Tipo esperado de uma placa ───────────────────────── */
+  function getExpectedType(id) {
+    if (slabConfig[id]) return slabConfig[id];
+    const idx = ['stack1','stack2','stack3','stack4'].indexOf(id.split('-')[0]);
+    return idx === -1 ? '' : palletTypes[idx] || '';
+  }
+
+  /* ── Tipo de montagem → dropdown ─────────────────────── */
+  function updateMountTypeDropdown() {
+    const s = document.getElementById('sq-mountType');
+    if (Object.keys(slabConfig).length) { s.value = 'Personalizada'; return; }
+    if (palletTypes[0]==='SP'&&palletTypes[1]==='SP'&&palletTypes[2]==='2P'&&palletTypes[3]==='2P') { s.value='SP+2P'; return; }
+    const uniq = [...new Set(palletTypes.filter(Boolean))];
+    s.value = uniq.length === 1 && !palletTypes.some(v => !v) ? uniq[0] : '';
+  }
+
+  function changeMountType() {
+    const val = document.getElementById('sq-mountType').value;
+    if (val === 'Personalizada') { openPalletModal(); return; }
+    slabConfig = {};
+    palletTypes = val === 'SP+2P' ? ['SP','SP','2P','2P'] :
+                  ['SP','2P','3T','1T'].includes(val) ? [val,val,val,val] :
+                  ['','','',''];
+    renderStacks();
+    validateAllSlabs();
+  }
+
+  /* ── Validação de consistência ────────────────────────── */
+  function validateAllSlabs() {
+    document.querySelectorAll('.sq-slab.invalid').forEach(el => el.classList.remove('invalid'));
+    let hasError = false, msgs = [];
+    ['stack1','stack2','stack3','stack4'].forEach(sid => {
+      const stack = document.getElementById(sid);
+      if (!stack) return;
+      stack.querySelectorAll('.sq-slab').forEach(slab => {
+        const id  = slab.dataset.id;
+        const exp = getExpectedType(id);
+        if (!exp) return;
+        const cls = classifyMarks(slabState[id] || []);
+        if (cls === 'Sem marcação') return;
+        if (!cls.includes(exp)) {
+          slab.classList.add('invalid');
+          hasError = true;
+          msgs.push(`Placa ${id} (esperado: ${exp})`);
+        }
+      });
+    });
+    return { hasError, msgs };
+  }
+
+  /* ── Render das pilhas de placas ──────────────────────── */
+  function renderStacks() {
+    const n = parseInt(document.getElementById('sq-thickness').value);
+    ['stack1','stack2','stack3','stack4'].forEach((sid, idx) => {
+      const stack = document.getElementById(sid);
+      stack.innerHTML = '';
+      for (let i = 1; i <= n; i++) {
+        const slab = document.createElement('div');
+        slab.className = 'sq-slab';
+        const id = `${sid}-${i}`;
+        slab.dataset.id = id;
+
+        const num = document.createElement('span');
+        num.className = 'sq-slab-number';
+        num.textContent = i;
+        slab.appendChild(num);
+
+        const tp = document.createElement('span');
+        tp.className = 'sq-slab-type';
+        const exp = getExpectedType(id);
+        if (exp) {
+          tp.textContent = exp;
+          const classMap = { SP:'sp','2P':'p2','3T':'t3','1T':'t1' };
+          if (classMap[exp]) tp.classList.add(classMap[exp]);
+        }
+        slab.appendChild(tp);
+
+        const mc = document.createElement('div');
+        mc.className = 'sq-slab-marks';
+        slab.appendChild(mc);
+
+        if (slabState[id]) renderMarks(slab, slabState[id]);
+        slab.addEventListener('click', () => toggleMark(slab));
+        stack.appendChild(slab);
+      }
+    });
+    validateAllSlabs();
+  }
+
+  function renderMarks(slabEl, marks) {
+    const c = slabEl.querySelector('.sq-slab-marks');
+    c.innerHTML = '';
+    const root = getComputedStyle(document.documentElement);
+    marks.forEach(m => {
+      const el = document.createElement('span');
+      el.className = m.shape === 'dash' ? 'sq-mark-dash' : 'sq-mark-circle';
+      const varMap = { verde:'--sq-cor-verde', vermelho:'--sq-cor-vermelho', azul:'--sq-cor-azul', amarelo:'--sq-cor-amarelo', laranja:'--sq-cor-laranja' };
+      el.style.backgroundColor = root.getPropertyValue(varMap[m.color] || '--sq-cor-verde').trim();
+      c.appendChild(el);
+    });
+  }
+
+  function toggleMark(el) {
+    if (viewMode) return;
+    pushState();
+    const id = el.dataset.id;
+    if (!slabState[id]) slabState[id] = [];
+    const idx = slabState[id].findIndex(m => m.color === selectedColor && m.shape === selectedShape);
+    if (idx !== -1) slabState[id].splice(idx, 1);
+    else slabState[id].push({ color: selectedColor, shape: selectedShape });
+    renderMarks(el, slabState[id]);
+    validateAllSlabs();
+  }
+
+  /* ── Seleção de cor / forma ───────────────────────────── */
+  function selectColor(btn, color) {
+    if (viewMode) return;
+    document.querySelectorAll('.sq-btn-color').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedColor = color;
+  }
+  function selectShape(btn, shape) {
+    if (viewMode) return;
+    document.querySelectorAll('.sq-btn-shape').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedShape = shape;
+  }
+
+  /* ── Ações em lote (pallet inteiro) ──────────────────── */
+  function applyMarksToPallet(stackId, color, shape) {
+    if (viewMode) return;
+    pushState();
+    document.getElementById(stackId).querySelectorAll('.sq-slab').forEach(slab => {
+      const id = slab.dataset.id;
+      if (!slabState[id]) slabState[id] = [];
+      if (!slabState[id].find(m => m.color === color && m.shape === shape))
+        slabState[id].push({ color, shape });
+      renderMarks(slab, slabState[id]);
+    });
+    validateAllSlabs();
+  }
+  function selectAllPallet(sid) { applyMarksToPallet(sid, selectedColor, selectedShape); }
+  function applyColorToPallet(sid, color) { closeAllDropdowns(); applyMarksToPallet(sid, color, selectedShape); }
+
+  /* ── Dropdowns de cor por pallet ──────────────────────── */
+  function toggleDropdown(btn, sid) {
+    if (viewMode) return;
+    const menu = document.getElementById(`sq-dd-${sid}`);
+    const open = menu.classList.contains('open');
+    closeAllDropdowns();
+    if (!open) menu.classList.add('open');
+    event.stopPropagation();
+  }
+  function closeAllDropdowns() {
+    document.querySelectorAll('.sq-color-dropdown').forEach(el => el.classList.remove('open'));
+  }
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.sq-pallet-header')) closeAllDropdowns();
+  });
+
+  /* ── Histórico de ações (desfazer) ───────────────────── */
+  function pushState() {
+    actionHistory.push(JSON.parse(JSON.stringify(slabState)));
+    if (actionHistory.length > 30) actionHistory.shift();
+  }
+
+  /* ── Modal de configuração personalizada de pallet ────── */
+  function openPalletModal() {
+    tempSlabConfig = { ...slabConfig };
+    const n   = parseInt(document.getElementById('sq-thickness').value);
+    const box = document.getElementById('sq-modal-slabs-grid');
+    box.innerHTML = '';
+    ['stack1','stack2','stack3','stack4'].forEach((sid, idx) => {
+      const col   = document.createElement('div');
+      col.className = 'sq-modal-pallet-col';
+      const lbl  = document.createElement('div');
+      lbl.className = 'sq-modal-col-label';
+      lbl.textContent = `PALLET ${idx + 1}`;
+      col.appendChild(lbl);
+      for (let i = 1; i <= n; i++) {
+        const slab = document.createElement('div');
+        slab.className = 'sq-modal-slab';
+        const id = `${sid}-${i}`;
+        slab.dataset.id = id;
+        const num = document.createElement('span'); num.className = 'sq-m-num'; num.textContent = i; slab.appendChild(num);
+        const tp  = document.createElement('span'); tp.className  = 'sq-m-tp';
+        const val = tempSlabConfig[id] || '';
+        if (val) { tp.textContent = val; const cm = { SP:'sp','2P':'p2','3T':'t3','1T':'t1' }; if (cm[val]) tp.classList.add(cm[val]); }
+        slab.appendChild(tp);
+        slab.addEventListener('click', function () {
+          const key = this.dataset.id, tpEl = this.querySelector('.sq-m-tp');
+          if (tempSlabConfig[key] === modalTipoSel) {
+            delete tempSlabConfig[key]; tpEl.textContent = ''; tpEl.className = 'sq-m-tp'; this.classList.remove('sel');
+          } else {
+            tempSlabConfig[key] = modalTipoSel; tpEl.textContent = modalTipoSel;
+            const cm = { SP:'sp','2P':'p2','3T':'t3','1T':'t1' };
+            tpEl.className = `sq-m-tp ${cm[modalTipoSel] || ''}`; this.classList.add('sel');
+          }
+        });
+        col.appendChild(slab);
+      }
+      box.appendChild(col);
+    });
+    document.getElementById('sq-modal-pallet').classList.add('open');
+  }
+  function closePalletModal() { document.getElementById('sq-modal-pallet').classList.remove('open'); }
+  function setModalTipo(type) {
+    modalTipoSel = type;
+    const cm = { SP:'sp','2P':'p2','3T':'t3','1T':'t1' };
+    document.querySelectorAll('.sq-btn-tipo').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.sq-btn-tipo.${cm[type]}`).classList.add('active');
+  }
+  function clearModalPlates() {
+    tempSlabConfig = {};
+    document.querySelectorAll('.sq-modal-slab .sq-m-tp').forEach(el => { el.textContent = ''; el.className = 'sq-m-tp'; });
+    document.querySelectorAll('.sq-modal-slab').forEach(el => el.classList.remove('sel'));
+  }
+  function confirmPalletModal() {
+    slabConfig = { ...tempSlabConfig };
+    palletTypes = ['','','',''];
+    updateMountTypeDropdown();
+    renderStacks();
+    validateAllSlabs();
+    closePalletModal();
+  }
+
+  /* ── Navegação interna ────────────────────────────────── */
+  function navigateTo(section) {
+    if (viewMode && section !== 'form') exitViewMode();
+    document.querySelectorAll('.sq-section').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.sq-nav-btn').forEach(el => el.classList.remove('active'));
+    const sec = document.getElementById('sq-' + section);
+    const nav = document.getElementById('sq-nav-' + section);
+    if (sec) sec.classList.add('active');
+    if (nav) nav.classList.add('active');
+    if (section === 'list')      renderDrafts();
+    if (section === 'history')   renderHistory();
+    if (section === 'dashboard') renderDashboard();
+  }
+  function goBack() { if (viewMode) exitViewMode(); navigateTo(viewSource); }
+  function startNew() {
+    if (viewMode) exitViewMode();
+    clearForm();
+    currentDraftId = null;
+    navigateTo('form');
+    autoSetThickness();
+    setEditable(true);
+  }
+
+  /* ── Dados (avaliacoes / paineis) ─────────────────────── */
+  function getData() {
+    return { avaliacoes: LS.get('avaliacoes') || [], paineis: LS.get('paineis') || [] };
+  }
+  function getDrafts() {
+    return LS.keys('draft_').map(k => {
+      try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; }
+    }).filter(Boolean);
+  }
+
+  /* ── Render lista de rascunhos ────────────────────────── */
+  function renderDrafts() {
+    const el = document.getElementById('sq-draft-list');
+    const drafts = getDrafts();
+    el.innerHTML = '';
+    if (!drafts.length) {
+      el.innerHTML = `<div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.<br>Clique em "Iniciar Nova Avaliação" para começar.</div>`;
+      return;
+    }
+    drafts.sort((a, b) => b.lastModified - a.lastModified).forEach(d => {
+      const card = document.createElement('div');
+      card.className = 'sq-list-card';
+      const total = (d.slabsPerPallet || 10) * 4;
+      const date  = new Date(d.lastModified).toLocaleString('pt-BR');
+      card.innerHTML = `
+        <div class="sq-list-card-info">
+          <span class="sq-id">Bateria ${d.batteryId || 'N/I'}</span>
+          <span class="sq-meta">${date} · ${total} painéis</span>
+        </div>
+        <div class="sq-list-card-actions">
+          <button class="btn btn-ghost btn-sm" onclick="SQ.viewDraft('${d.id}')">👁️ Ver</button>
+          <button class="btn btn-primary btn-sm" onclick="SQ.loadDraft('${d.id}')"><i class="fas fa-play"></i> Continuar</button>
+          <button class="btn btn-danger btn-sm" onclick="SQ.deleteDraft('${d.id}')"><i class="fas fa-times"></i></button>
+        </div>`;
+      el.appendChild(card);
+    });
+  }
+
+  /* ── Salvar rascunho ──────────────────────────────────── */
+  function saveDraft() {
+    if (viewMode) return;
+    const id   = currentDraftId || Date.now().toString();
+    const data = {
+      id, lastModified: Date.now(),
+      batteryId:    document.getElementById('sq-batteryId').value,
+      palletTypes, slabConfig,
+      dailySeq:     document.getElementById('sq-dailySeq').value,
+      turno:        document.getElementById('sq-turno').value,
+      tempInput:    document.getElementById('sq-temp').value,
+      dtMontagem:   document.getElementById('sq-dtMontagem').value,
+      dtEnchimento: document.getElementById('sq-dtEnchimento').value,
+      dtDesmoldagem:document.getElementById('sq-dtDesmoldagem').value,
+      observations: document.getElementById('sq-obs').value,
+      slabsPerPallet: parseInt(document.getElementById('sq-thickness').value),
+      slabState,
+      palletInfos: {}
+    };
+    for (let p = 1; p <= 4; p++) {
+      data.palletInfos[p] = {};
+      ['comprimento','largura','linearidade','espessura','esquadro'].forEach(f => {
+        const el = document.getElementById(`sq-p${p}-${f}`);
+        data.palletInfos[p][f] = el ? el.innerText : '';
+      });
+    }
+    localStorage.setItem(`sq_draft_${id}`, JSON.stringify(data));
+    currentDraftId = id;
+    showAlert('Salvo', 'Avaliação salva com sucesso!');
+    navigateTo('list');
+  }
+
+  /* ── Carregar rascunho ────────────────────────────────── */
+  function loadDraft(id) {
+    if (viewMode) exitViewMode();
+    const raw = localStorage.getItem(`sq_draft_${id}`);
+    if (!raw) { showAlert('Erro', 'Rascunho não encontrado.'); return; }
+    const d = JSON.parse(raw);
+    applyFormData(d);
+    currentDraftId = d.id;
+    navigateTo('form');
+    autoSetThickness();
+    calculateCureTime();
+    setEditable(true);
+    validateAllSlabs();
+  }
+
+  function deleteDraft(id) {
+    if (!confirm('Remover este rascunho?')) return;
+    LS.del('draft_' + id);
+    renderDrafts();
+  }
+
+  /* ── Registrar avaliação definitiva ───────────────────── */
+  function registerEvaluation() {
+    if (viewMode) return;
+    if (!document.getElementById('sq-batteryId').value) { showAlert('Erro','Selecione o ID da Bateria.'); return; }
+    showConfirm('Registrar','Ao registrar, a avaliação vai para o histórico. Continuar?', () => {
+      const evId = 'ev_' + Date.now();
+      const evalObj = {
+        id: evId, schemaVersion: 2,
+        batteryId: document.getElementById('sq-batteryId').value,
+        montagem: { pallet1: palletTypes[0], pallet2: palletTypes[1], pallet3: palletTypes[2], pallet4: palletTypes[3] },
+        turno:    document.getElementById('sq-turno').value,
+        tempInput: parseFloat(document.getElementById('sq-temp').value) || 0,
+        dtMontagem:    toISO(document.getElementById('sq-dtMontagem').value),
+        dtEnchimento:  toISO(document.getElementById('sq-dtEnchimento').value),
+        dtDesmoldagem: toISO(document.getElementById('sq-dtDesmoldagem').value),
+        registeredAt: new Date().toISOString(),
+        totalSlabs: parseInt(document.getElementById('sq-thickness').value) * 4,
+        observations: document.getElementById('sq-obs').value,
+      };
+      const panels = Object.entries(slabState).map(([id, marks]) => {
+        const parts = id.split('-');
+        const info  = getClassifiedInfo(marks);
+        return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, marcas: marks };
+      });
+      const d = getData();
+      d.avaliacoes.push(evalObj);
+      d.paineis.push(...panels);
+      LS.set('avaliacoes', d.avaliacoes);
+      LS.set('paineis', d.paineis);
+      if (currentDraftId) LS.del('draft_' + currentDraftId);
+      clearForm();
+      currentDraftId = null;
+      showAlert('Concluído', 'Avaliação registrada com sucesso!');
+      navigateTo('list');
+    });
+  }
+
+  /* ── Visualizar rascunho (modo somente leitura) ───────── */
+  function viewDraft(id) {
+    const raw = localStorage.getItem(`sq_draft_${id}`);
+    if (!raw) { showAlert('Erro','Não encontrado.'); return; }
+    const d = JSON.parse(raw);
+    currentDraftId = d.id;
+    applyFormData(d);
+    autoSetThickness();
+    calculateCureTime();
+    viewSource = 'list';
+    setEditable(false);
+    viewMode = true;
+    navigateTo('form');
+  }
+
+  function viewHistoryRecord(evId) {
+    const d    = getData();
+    const item = d.avaliacoes.find(e => e.id === evId);
+    if (!item) { showAlert('Erro','Não encontrado.'); return; }
+    viewSource = 'history';
+    palletTypes = [item.montagem.pallet1, item.montagem.pallet2, item.montagem.pallet3, item.montagem.pallet4];
+    slabConfig  = {};
+    updateMountTypeDropdown();
+    document.getElementById('sq-batteryId').value   = item.batteryId || 'B1';
+    document.getElementById('sq-turno').value        = item.turno    || '';
+    document.getElementById('sq-temp').value         = item.tempInput || '';
+    document.getElementById('sq-dtMontagem').value   = fmtDTL(item.dtMontagem);
+    document.getElementById('sq-dtEnchimento').value = fmtDTL(item.dtEnchimento);
+    document.getElementById('sq-dtDesmoldagem').value= fmtDTL(item.dtDesmoldagem);
+    document.getElementById('sq-obs').value          = item.observations || '';
+    refreshPalletInfos();
+    const ns = {};
+    d.paineis.filter(p => p.avaliacaoId === evId).forEach(p => { ns[`stack${p.pallet}-${p.posicao}`] = p.marcas; });
+    slabState     = ns;
+    actionHistory = [];
+    document.getElementById('sq-thickness').value = item.totalSlabs / 4;
+    autoSetThickness();
+    calculateCureTime();
+    setEditable(false);
+    viewMode = true;
+    navigateTo('form');
+  }
+
+  function exitViewMode()  { viewMode = false; setEditable(true); }
+
+  function setEditable(editable) {
+    document.getElementById('sq-view-overlay').style.display = editable ? 'none' : 'block';
+    document.querySelectorAll('.sq-hide-view').forEach(el => el.classList.toggle('is-view', !editable));
+    document.querySelectorAll('.sq-show-view').forEach(el => el.classList.toggle('is-view', !editable));
+    document.querySelectorAll('#sq-form input, #sq-form select, #sq-form textarea').forEach(el => {
+      if (el.id === 'sq-cure-time' || el.id === 'sq-thickness') return;
+      el.disabled = !editable;
+    });
+    viewMode = !editable;
+  }
+
+  /* ── Render histórico ─────────────────────────────────── */
+  function renderHistory() {
+    const d       = getData();
+    const search  = (document.getElementById('sq-hist-search').value || '').toLowerCase();
+    const turno   = document.getElementById('sq-hist-turno').value;
+    const filtered = d.avaliacoes.filter(item =>
+      (item.batteryId||'').toLowerCase().includes(search) &&
+      (!turno || item.turno === turno)
+    ).sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
+
+    document.getElementById('sq-hist-count').textContent = `${filtered.length} registros`;
+    const wrap  = document.getElementById('sq-hist-table-wrap');
+    const empty = document.getElementById('sq-hist-empty');
+    const body  = document.getElementById('sq-hist-tbody');
+    if (!filtered.length) { wrap.style.display='none'; empty.style.display='block'; return; }
+    wrap.style.display='block'; empty.style.display='none'; body.innerHTML='';
+
+    filtered.forEach(item => {
+      const panels = d.paineis.filter(p => p.avaliacaoId === item.id);
+      const counts = {};
+      panels.forEach(p => { const k = `${p.tipoObtido} ${p.resultado}`; counts[k] = (counts[k]||0) + 1; });
+      const summary = Object.entries(counts).map(([k,n]) => `${k}: ${n}`).join(', ') || '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${new Date(item.registeredAt).toLocaleString('pt-BR')}</td>
+        <td><strong>${item.batteryId||'N/I'}</strong></td>
+        <td style="color:#66bb6a;font-weight:700;">${item.montagem.pallet1||'—'}</td>
+        <td style="color:#42a5f5;font-weight:700;">${item.montagem.pallet2||'—'}</td>
+        <td style="color:#ab47bc;font-weight:700;">${item.montagem.pallet3||'—'}</td>
+        <td style="color:#ffa726;font-weight:700;">${item.montagem.pallet4||'—'}</td>
+        <td>${item.turno||'—'}</td>
+        <td>${item.tempInput?item.tempInput+'°C':'—'}</td>
+        <td>${item.totalSlabs||'—'}</td>
+        <td style="font-size:.72rem;max-width:150px;white-space:normal;word-break:break-word;">${summary}</td>
+        <td style="text-align:center;">
+          <button class="btn btn-ghost btn-sm" onclick="SQ.viewHistoryRecord('${item.id}')">👁️</button>
+        </td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  /* ── Espelho visual ───────────────────────────────────── */
+  function getSlabCount(bid) { return bid==='B5-7.5'?11:bid==='B6-12'?8:10; }
+
+  function getMirrorMark(panel) {
+    if (!panel?.marcas?.length)
+      return `<span class="sq-mini-mark" style="background:var(--sq-placa-borda);width:10px;height:2px;border-radius:2px;display:inline-block;"></span>`;
+    return panel.marcas.map(m => {
+      const w = m.shape==='dash' ? '12px' : '6px', h = m.shape==='dash' ? '2px' : '6px';
+      const r = m.shape==='circle' ? '50%' : '2px';
+      const varMap = { verde:'--sq-cor-verde', vermelho:'--sq-cor-vermelho', azul:'--sq-cor-azul', amarelo:'--sq-cor-amarelo', laranja:'--sq-cor-laranja' };
+      return `<span class="sq-mini-mark" style="background:var(${varMap[m.color]||'--sq-cor-verde'});width:${w};height:${h};border-radius:${r};margin:0 1px;display:inline-block;"></span>`;
+    }).join('');
+  }
+
+  function renderMirror(index) {
+    const container = document.getElementById('sq-mirror-container');
+    const counter   = document.getElementById('sq-mirror-counter');
+    if (!dashboardEvals.length) {
+      container.innerHTML = `<div class="sq-empty" style="padding:20px;"><i class="fas fa-inbox"></i>Nenhuma avaliação.</div>`;
+      ['sq-mirror-battery','sq-mirror-turno','sq-mirror-desmoldagem'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='---'; });
+      document.getElementById('sq-mirror-prev').disabled = true;
+      document.getElementById('sq-mirror-next').disabled = true;
+      counter.textContent = '0 / 0';
+      return;
+    }
+    const item   = dashboardEvals[index];
+    const d      = getData();
+    const panels = d.paineis.filter(p => p.avaliacaoId === item.id);
+    document.getElementById('sq-mirror-battery').textContent     = item.batteryId||'N/I';
+    document.getElementById('sq-mirror-turno').textContent       = item.turno||'—';
+    document.getElementById('sq-mirror-desmoldagem').textContent = item.dtDesmoldagem ? new Date(item.dtDesmoldagem).toLocaleString('pt-BR') : '—';
+    counter.textContent = `${index+1} / ${dashboardEvals.length}`;
+    document.getElementById('sq-mirror-prev').disabled = index === 0;
+    document.getElementById('sq-mirror-next').disabled = index === dashboardEvals.length - 1;
+
+    const n = getSlabCount(item.batteryId);
+    const cm = { SP:'sp','2P':'p2','3T':'t3','1T':'t1' };
+    let html = '<div class="sq-mini-stacks">';
+    for (let p = 1; p <= 4; p++) {
+      html += `<div class="sq-mini-pallet"><div class="sq-mini-pallet-header">P${p}</div>`;
+      for (let i = 1; i <= n; i++) {
+        const panel = panels.find(pa => pa.pallet===p && pa.posicao===i);
+        const tipo  = panel?.tipoEsperado || '';
+        html += `<div class="sq-mini-slab"><span class="sq-mini-slab-number">${i}</span><div class="sq-mini-slab-marks">${getMirrorMark(panel)}</div>${tipo?`<span class="sq-mini-slab-type ${cm[tipo]||''}">${tipo}</span>`:''}</div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  function prevMirror() { if (mirrorIndex > 0) { mirrorIndex--; renderMirror(mirrorIndex); } }
+  function nextMirror() { if (mirrorIndex < dashboardEvals.length - 1) { mirrorIndex++; renderMirror(mirrorIndex); } }
+
+  /* ── Dashboard ────────────────────────────────────────── */
+  function renderDashboard() {
+    const d    = getData();
+    const sd   = document.getElementById('sq-dash-start').value;
+    const ed   = document.getElementById('sq-dash-end').value;
+    const bf   = document.getElementById('sq-dash-bat').value;
+
+    const fe = d.avaliacoes.filter(item => {
+      const dt = new Date(item.registeredAt);
+      return (!sd || dt >= new Date(sd)) &&
+             (!ed || dt <= new Date(ed + 'T23:59:59')) &&
+             (!bf || item.batteryId === bf);
+    });
+    dashboardEvals = fe; mirrorIndex = 0; renderMirror(0);
+
+    const ids = fe.map(e => e.id);
+    const fp  = d.paineis.filter(p => ids.includes(p.avaliacaoId));
+    const apr = fp.filter(p => p.resultado==='aprovado').length;
+    const rep = fp.filter(p => p.resultado==='reprovado').length;
+    const tt  = apr + rep;
+    const ar  = tt ? ((apr/tt)*100).toFixed(1) : 0;
+    const rr  = tt ? ((rep/tt)*100).toFixed(1) : 0;
+
+    document.getElementById('sq-kpi-grid').innerHTML = `
+      <div class="kpi-card"><div class="kpi-label">Total Registros</div><div class="kpi-value" style="font-size:1.8rem;">${fe.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Painéis Avaliados</div><div class="kpi-value green" style="font-size:1.8rem;">${fp.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Taxa de Aprovação</div><div class="kpi-value accent" style="font-size:1.8rem;">${ar}%</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Taxa de Reprovação</div><div class="kpi-value red" style="font-size:1.8rem;">${rr}%</div></div>`;
+
+    /* Evolução diária */
+    const dp = {};
+    fe.forEach(e => { const dk = new Date(e.dtMontagem||e.registeredAt).toISOString().slice(0,10); dp[dk]=(dp[dk]||0)+d.paineis.filter(p=>p.avaliacaoId===e.id).length; });
+    const pl = Object.keys(dp).sort(), pv = pl.map(k => dp[k]);
+
+    destroyChart('production');
+    charts.production = new Chart(document.getElementById('sq-chart-production').getContext('2d'), {
+      type: 'line',
+      data: { labels: pl.length ? pl : ['Sem dados'], datasets: [{ label:'Painéis', data: pl.length?pv:[0], borderColor:'var(--blue)', backgroundColor:'rgba(59,130,246,0.1)', fill:true, tension:0.4, pointRadius:4 }] },
+      options: baseChartOptions({ legend: false }),
+    });
+
+    /* Distribuição das classificações */
+    const cc = {}; fp.forEach(p => { const k=`${p.tipoObtido} ${p.resultado}`; cc[k]=(cc[k]||0)+1; });
+    const ql = Object.keys(cc), qv = Object.values(cc);
+    const cmap = { 'SP aprovado':'#4d8dff','SP reprovado':'#ff6b6b','2P aprovado':'#a78bfa','2P reprovado':'#d45d79','3T aprovado':'#f1c40f','3T reprovado':'#f39c12','1T aprovado':'#2ed3a3','1T reprovado':'#d35400' };
+    destroyChart('quality');
+    charts.quality = new Chart(document.getElementById('sq-chart-quality').getContext('2d'), {
+      type: 'doughnut',
+      data: { labels: ql.length?ql:['Sem dados'], datasets: [{ data:ql.length?qv:[1], backgroundColor:ql.length?ql.map(l=>cmap[l]||'var(--border-2)'):['var(--border-2)'], borderWidth:0 }] },
+      options: { ...baseChartOptions(), plugins: { legend:{ position:'bottom', labels:{ color:'var(--text-3)', boxWidth:12, padding:8 } }, datalabels:{display:false} } },
+    });
+
+    /* Taxa de refugo por tipo */
+    const tt2={SP:0,'2P':0,'3T':0,'1T':0}, tr2={SP:0,'2P':0,'3T':0,'1T':0};
+    fp.forEach(p => { if (p.tipoEsperado && tt2[p.tipoEsperado]!==undefined) { tt2[p.tipoEsperado]++; if(p.resultado==='reprovado') tr2[p.tipoEsperado]++; } });
+    const vtl = Object.keys(tt2).filter(k=>tt2[k]>0);
+    destroyChart('rejections');
+    charts.rejections = new Chart(document.getElementById('sq-chart-rejections').getContext('2d'), {
+      type: 'bar', indexAxis: 'y',
+      data: { labels: vtl.length?vtl:['Nenhum'], datasets: [{ label:'Refugo%', data:vtl.length?vtl.map(k=>((tr2[k]/tt2[k])*100).toFixed(1)):[0], backgroundColor:'var(--red)', borderRadius:4 }] },
+      options: { ...baseChartOptions({ legend:false }), plugins:{ ...baseChartOptions({legend:false}).plugins, datalabels:{ color:'var(--text-2)', anchor:'end', align:'end', font:{weight:'bold'}, formatter:v=>v+'%' } }, scales:{ x:{ticks:{color:'var(--text-3)'},beginAtZero:true,max:100}, y:{ticks:{color:'var(--text-3)'}} } },
+    });
+
+    /* Total por tipo */
+    const tc={SP:0,'2P':0,'3T':0,'1T':0}; fp.forEach(p=>{if(p.tipoEsperado&&tc[p.tipoEsperado]!==undefined)tc[p.tipoEsperado]++;});
+    destroyChart('tipoPlacas');
+    charts.tipoPlacas = new Chart(document.getElementById('sq-chart-tipo').getContext('2d'), {
+      type: 'bar',
+      data: { labels:Object.keys(tc), datasets:[{ data:Object.values(tc), backgroundColor:['var(--blue)','var(--sq-purple)','var(--sq-yellow)','var(--sq-orange)'], borderRadius:4 }] },
+      options: baseChartOptions({ legend:false }),
+    });
+
+    /* Defeitos por posição */
+    const bec={};fe.forEach(e=>{bec[e.batteryId]=(bec[e.batteryId]||0)+1;});
+    const dm={};
+    fp.forEach(p=>{if(p.resultado==='reprovado'){const ev=fe.find(e=>e.id===p.avaliacaoId);if(ev){const k=`${ev.batteryId}|P${p.pallet}|Pos${p.posicao}`;if(!dm[k])dm[k]={batteryId:ev.batteryId,pallet:p.pallet,posicao:p.posicao,d:0};dm[k].d++;}}});
+    const rnk=Object.values(dm).map(r=>({...r,N:bec[r.batteryId]||0,taxa:bec[r.batteryId]?(r.d/bec[r.batteryId])*100:0})).filter(r=>r.d>=3&&r.taxa>=30).sort((a,b)=>b.taxa-a.taxa||b.d-a.d).slice(0,10);
+    const pc = document.getElementById('sq-chart-posicao');
+    pc.innerHTML = rnk.length ? '<div style="display:flex;flex-direction:column;gap:8px;">' + rnk.map(r=>{
+      const cor = r.taxa>=40?'var(--red)':r.taxa>=20?'var(--accent)':'var(--green)';
+      return `<div style="background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;display:flex;justify-content:space-between;align-items:center;font-size:.8rem;">
+        <span><strong>${r.batteryId}</strong> · P${r.pallet} · Pos ${r.posicao}</span>
+        <span style="font-family:var(--font-mono);color:${cor};font-weight:700;">${r.taxa.toFixed(0)}% <span style="color:var(--text-3);font-weight:400;">(${r.d}/${r.N})</span></span></div>`;
+    }).join('') + '</div>' : '<div style="color:var(--text-3);text-align:center;padding:20px;font-size:.82rem;">Nenhum ponto de recorrência significativo (D≥3 e taxa≥30%).</div>';
+
+    /* Baterias com mais refugo */
+    const br={};fe.forEach(e=>{const n=d.paineis.filter(p=>p.avaliacaoId===e.id&&p.resultado==='reprovado').length;if(n)br[e.batteryId]=(br[e.batteryId]||0)+n;});
+    const sb=Object.keys(br).sort((a,b)=>br[b]-br[a]).slice(0,10);
+    destroyChart('batRefugo');
+    charts.batRefugo = new Chart(document.getElementById('sq-chart-bat-refugo').getContext('2d'), {
+      type:'bar', indexAxis:'y',
+      data:{ labels:sb.length?sb:['Nenhuma'], datasets:[{ label:'Refugo', data:sb.length?sb.map(k=>br[k]):[0], backgroundColor:'var(--sq-orange)', borderRadius:4 }] },
+      options: baseChartOptions({ legend:false }),
+    });
+
+    /* Scatter: tempo de pega × refugo */
+    const sc=[],sl=[];
+    fe.forEach(e=>{if(e.dtEnchimento&&e.dtDesmoldagem){const diff=new Date(e.dtDesmoldagem)-new Date(e.dtEnchimento);if(diff>0){const h=diff/3600000,refs=d.paineis.filter(p=>p.avaliacaoId===e.id&&p.resultado==='reprovado').length;sc.push({x:h,y:refs});sl.push(`Bat:${e.batteryId}|${h.toFixed(1)}h|${refs} refugos`);}}});
+    let trd=[];
+    if(sc.length>1){const n=sc.length,sx=sc.reduce((a,b)=>a+b.x,0),sy=sc.reduce((a,b)=>a+b.y,0),sxy=sc.reduce((a,b)=>a+b.x*b.y,0),sx2=sc.reduce((a,b)=>a+b.x*b.x,0),den=n*sx2-sx*sx,m=(n*sxy-sx*sy)/den,b=(sy-m*sx)/n,maxX=Math.max(...sc.map(d=>d.x)),minX=Math.min(...sc.map(d=>d.x));trd=[{x:minX,y:m*minX+b},{x:maxX,y:m*maxX+b}];}
+    destroyChart('tempoPega');
+    charts.tempoPega = new Chart(document.getElementById('sq-chart-tempo-pega').getContext('2d'), {
+      type:'scatter',
+      data:{datasets:[{label:'Avaliações',data:sc,backgroundColor:'var(--blue)',pointRadius:6},...(trd.length?[{label:'Tendência',data:trd,type:'line',borderColor:'var(--red)',borderWidth:2,pointRadius:0,fill:false}]:[])]},
+      options:{...baseChartOptions(),plugins:{...baseChartOptions().plugins,tooltip:{callbacks:{label:ctx=>ctx.dataset.label==='Tendência'?'Tendência':sl[ctx.dataIndex]||''}},datalabels:{display:false}},scales:{x:{type:'linear',title:{display:true,text:'Tempo de Pega (h)',color:'var(--text-3)'},ticks:{color:'var(--text-3)'}},y:{title:{display:true,text:'Refugo',color:'var(--text-3)'},ticks:{color:'var(--text-3)'},beginAtZero:true}}},
+    });
+
+    /* Aprovação vs reprovação por bateria */
+    const bd={};fe.forEach(e=>{if(!bd[e.batteryId])bd[e.batteryId]={a:0,r:0};d.paineis.filter(p=>p.avaliacaoId===e.id).forEach(p=>{if(p.resultado==='aprovado')bd[e.batteryId].a++;else if(p.resultado==='reprovado')bd[e.batteryId].r++;});});
+    const bl=Object.keys(bd);
+    destroyChart('approvalBat');
+    charts.approvalBat = new Chart(document.getElementById('sq-chart-approval-bat').getContext('2d'), {
+      type:'bar',
+      data:{labels:bl.length?bl:['Sem dados'],datasets:[{label:'Aprovados',data:bl.length?bl.map(k=>bd[k].a):[0],backgroundColor:'var(--green)',borderRadius:2},{label:'Reprovados',data:bl.length?bl.map(k=>bd[k].r):[0],backgroundColor:'var(--red)',borderRadius:2}]},
+      options: baseChartOptions(),
+    });
+
+    /* Resumo */
+    let summ=`Avaliados <b>${fp.length}</b> painéis em <b>${fe.length}</b> registros. `;
+    if(rnk.length){const rx=rnk[0];summ+=`Maior recorrência: <b>${rx.batteryId} · Pallet ${rx.pallet} · Posição ${rx.posicao}</b> (${rx.d}/${rx.N}, ${rx.taxa.toFixed(0)}%).`;}
+    else if(fe.length) summ+='Nenhum ponto de recorrência significativo detectado.';
+    else summ='Nenhum dado disponível para o período.';
+    document.getElementById('sq-dash-summary').innerHTML = summ;
+  }
+
+  function baseChartOptions(opts={}) {
+    return {
+      preserveDrawingBuffer: true,
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: 'var(--text-3)' }, ...( opts.legend === false ? { display: false } : {} ) },
+        datalabels: { color: 'var(--text-3)', anchor:'end', align:'end', font:{ weight:'bold' } },
+      },
+      scales: {
+        x: { ticks: { color: 'var(--text-3)' } },
+        y: { ticks: { color: 'var(--text-3)' }, beginAtZero: true },
+      },
+    };
+  }
+  function destroyChart(key) { if (charts[key]) { charts[key].destroy(); delete charts[key]; } }
+
+  /* ── Exportar PDF ─────────────────────────────────────── */
+  async function exportDashboardPDF() {
+    const btn = document.getElementById('sq-btn-pdf');
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando…'; btn.disabled = true;
+    try {
+      const canvas = await html2canvas(document.getElementById('sq-dashboard'), { scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false, scrollX:0, scrollY:-window.scrollY });
+      const { jsPDF } = window.jspdf;
+      const w = 297, h = Math.ceil((canvas.height * w) / canvas.width);
+      const pdf = new jsPDF({ orientation:'landscape', unit:'mm', format:[w,h] });
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, w, h);
+      pdf.save(`avaliacao_baterias_${new Date().toISOString().replace(/[-:T.]/g,'').slice(0,14)}.pdf`);
+    } catch (err) { console.error(err); showAlert('Erro','Falha ao gerar PDF.'); }
+    finally { btn.innerHTML = '<i class="fas fa-file-pdf"></i> Exportar PDF'; btn.disabled = false; }
+  }
+
+  /* ── Utilitários do formulário ────────────────────────── */
+  function toISO(val) { return val ? new Date(val).toISOString() : null; }
+  function fmtDTL(iso) { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toISOString().slice(0,16); }
+
+  function applyFormData(d) {
+    document.getElementById('sq-batteryId').value    = d.batteryId || 'B1';
+    palletTypes = d.palletTypes  || ['','','',''];
+    slabConfig  = d.slabConfig   || {};
+    updateMountTypeDropdown();
+    document.getElementById('sq-dailySeq').value     = d.dailySeq  || '1';
+    document.getElementById('sq-turno').value        = d.turno     || '1° TURNO';
+    document.getElementById('sq-temp').value         = d.tempInput || '';
+    document.getElementById('sq-dtMontagem').value   = fmtDTL(d.dtMontagem);
+    document.getElementById('sq-dtEnchimento').value = fmtDTL(d.dtEnchimento);
+    document.getElementById('sq-dtDesmoldagem').value= fmtDTL(d.dtDesmoldagem);
+    document.getElementById('sq-obs').value          = d.observations || '';
+    if (d.palletInfos) {
+      for (let p = 1; p <= 4; p++) {
+        if (!d.palletInfos[p]) continue;
+        ['comprimento','largura','linearidade','espessura','esquadro'].forEach(f => {
+          const el = document.getElementById(`sq-p${p}-${f}`);
+          if (el) el.innerText = d.palletInfos[p][f] || defaultPalletInfo(f);
+        });
+      }
+    }
+    document.getElementById('sq-thickness').value = d.slabsPerPallet || 10;
+    slabState     = d.slabState || {};
+    actionHistory = [];
+  }
+
+  function defaultPalletInfo(field) {
+    const bid = document.getElementById('sq-batteryId')?.value || '';
+    if (field === 'comprimento') return '3m';
+    if (field === 'largura')     return '61cm';
+    if (field === 'espessura')   return bid==='B5-7.5'?'7,5 cm':bid==='B6-12'?'12 cm':'9 cm';
+    return 'ok';
+  }
+
+  function clearForm() {
+    slabState = {}; actionHistory = []; palletTypes = ['','','','']; slabConfig = {};
+    document.querySelectorAll('.sq-slab-marks').forEach(c => { c.innerHTML = ''; });
+    document.getElementById('sq-batteryId').value    = 'B1';
+    document.getElementById('sq-dailySeq').value     = '1';
+    document.getElementById('sq-turno').value        = '1° TURNO';
+    document.getElementById('sq-temp').value         = '';
+    document.getElementById('sq-dtMontagem').value   = '';
+    document.getElementById('sq-dtEnchimento').value = '';
+    document.getElementById('sq-dtDesmoldagem').value= '';
+    document.getElementById('sq-obs').value          = '';
+    updateMountTypeDropdown();
+    refreshPalletInfos();
+    autoSetThickness();
+    calculateCureTime();
+    setEditable(true);
+    validateAllSlabs();
+  }
+
+  function formatTemperature(input) {
+    const v = input.value.trim();
+    if (!v || v.includes('°C')) return;
+    const n = parseFloat(v);
+    if (!isNaN(n)) input.value = n + '°C';
+  }
+
+  function calculateCureTime() {
+    const s   = document.getElementById('sq-dtEnchimento').value;
+    const e   = document.getElementById('sq-dtDesmoldagem').value;
+    const out = document.getElementById('sq-cure-time');
+    if (!s || !e) { out.value = ''; return; }
+    const diff = new Date(e) - new Date(s);
+    if (diff > 0) { const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000); out.value = `${h}h ${m}min`; }
+    else out.value = diff === 0 ? '0h 0min' : 'Data inválida';
+  }
+
+  function autoSetThickness() {
+    const id  = document.getElementById('sq-batteryId').value;
+    const sel = document.getElementById('sq-thickness');
+    sel.value = id==='B5-7.5' ? '11' : id==='B6-12' ? '8' : '10';
+    actionHistory = [];
+    renderStacks();
+    refreshPalletInfos();
+    validateAllSlabs();
+  }
+
+  function refreshPalletInfos() {
+    const bid = document.getElementById('sq-batteryId').value;
+    const esp = bid==='B5-7.5'?'7,5 cm':bid==='B6-12'?'12 cm':'9 cm';
+    for (let p = 1; p <= 4; p++) {
+      const set = (f, v) => { const el = document.getElementById(`sq-p${p}-${f}`); if (el) el.innerText = v; };
+      set('comprimento','3m'); set('largura','61cm'); set('linearidade','ok');
+      set('espessura', esp);   set('esquadro','ok');
+    }
+  }
+
+  function editField(btn) {
+    if (viewMode) return;
+    const pid = btn.dataset.pallet, fk = btn.dataset.field;
+    const el  = document.getElementById(`sq-p${pid}-${fk}`);
+    const labels = { comprimento:'Comprimento', largura:'Largura', linearidade:'Linearidade', espessura:'Espessura', esquadro:'Esquadro' };
+    showPrompt(`Editar ${labels[fk]}`, `Novo valor para ${labels[fk]} do Pallet ${pid}:`, el.innerText, v => {
+      if (v !== null && v.trim()) el.innerText = v;
+    });
+  }
+
+  function clearAllMarks() {
+    if (viewMode) return;
+    showConfirm('Limpar', 'Apagar todas as marcações?', () => {
+      pushState();
+      slabState = {};
+      document.querySelectorAll('.sq-slab-marks').forEach(c => { c.innerHTML = ''; });
+      validateAllSlabs();
+    });
+  }
+
+  function undoLastAction() {
+    if (viewMode) return;
+    if (actionHistory.length) { slabState = actionHistory.pop(); renderStacks(); validateAllSlabs(); }
+    else showAlert('Desfazer', 'Nada para desfazer.');
+  }
+
+  /* ── Modal genérico (usa o modal do Lightwall se disponível) */
+  function showAlert(title, msg) {
+    if (typeof LW !== 'undefined' && LW.mostrarAlerta) { LW.mostrarAlerta(msg, { titulo: title }); return; }
+    _modal(title, msg, 'alert');
+  }
+  function showConfirm(title, msg, cb) {
+    if (typeof LW !== 'undefined' && LW.mostrarConfirmacao) {
+      LW.mostrarConfirmacao(msg, { titulo: title, textoConfirmar: 'Confirmar' }).then(ok => { if (ok) cb(); });
+      return;
+    }
+    _modal(title, msg, 'confirm', cb);
+  }
+  function showPrompt(title, msg, def, cb) { _modal(title, msg, 'prompt', cb, def); }
+
+  function _modal(title, msg, type, cb, def) {
+    const ov  = document.getElementById('sq-modal');
+    const tEl = document.getElementById('sq-modal-title');
+    const mEl = document.getElementById('sq-modal-msg');
+    const iEl = document.getElementById('sq-modal-input');
+    const okBtn  = document.getElementById('sq-modal-ok');
+    const canBtn = document.getElementById('sq-modal-cancel');
+    tEl.textContent = title; mEl.textContent = msg;
+    iEl.style.display  = type === 'prompt'  ? 'block' : 'none';
+    canBtn.style.display = type !== 'alert' ? 'inline-flex' : 'none';
+    okBtn.textContent  = type === 'alert' ? 'OK' : 'Confirmar';
+    if (type === 'prompt') { iEl.value = def || ''; setTimeout(() => iEl.focus(), 60); }
+    const close = () => ov.classList.remove('open');
+    okBtn.onclick = () => { close(); if (cb) cb(type === 'prompt' ? iEl.value : true); };
+    canBtn.onclick = () => { close(); if (type === 'prompt') cb(null); };
+    ov.classList.add('open');
+  }
+
+  /* ── API pública ──────────────────────────────────────── */
+  window.SQ = {
+    navigateTo, goBack, startNew,
+    saveDraft, loadDraft, deleteDraft, viewDraft,
+    registerEvaluation, viewHistoryRecord,
+    renderDashboard, renderHistory,
+    prevMirror, nextMirror,
+    exportDashboardPDF,
+    selectColor, selectShape,
+    selectAllPallet, applyColorToPallet,
+    toggleDropdown,
+    undoLastAction, clearAllMarks,
+    formatTemperature, calculateCureTime, autoSetThickness,
+    editField,
+    changeMountType,
+    openPalletModal, closePalletModal, setModalTipo,
+    clearModalPlates, confirmPalletModal,
+    init() {
+      navigateTo('list');
+      autoSetThickness();
+    },
+  };
+
+})();
