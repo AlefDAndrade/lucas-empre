@@ -58,15 +58,6 @@
     });
   }
 
-  // ── Cálculo de semana ISO ─────────────────────────────────
-  function semanaISO(ds) {
-    const d = new Date(ds);
-    d.setHours(0,0,0,0);
-    d.setDate(d.getDate() + 4 - (d.getDay()||7));
-    const y = new Date(d.getFullYear(),0,1);
-    return Math.ceil((((d-y)/86400000)+1)/7);
-  }
-
   // ── Motor principal de KPIs ───────────────────────────────
   function calcularKPIs(dados) {
     const n = dados.length;
@@ -220,7 +211,7 @@
       insights.push({
         tipo: 'danger',
         icon: '🔴',
-        texto: `A bateria <strong>${b.bat}</strong> tem ${mult}× mais atrasos que a média (${b.pctAtraso.toFixed(0)}% vs ${mediaAtraso.toFixed(0)}% geral).`
+        texto: `A bateria <strong>${LW.escaparHtml(b.bat)}</strong> tem ${mult}× mais atrasos que a média (${b.pctAtraso.toFixed(0)}% vs ${mediaAtraso.toFixed(0)}% geral).`
       });
     });
 
@@ -230,7 +221,7 @@
       insights.push({
         tipo: top.pct > 40 ? 'danger' : 'warning',
         icon: '⚠️',
-        texto: `O motivo <strong>${top.motivo}</strong> representa <strong>${top.pct.toFixed(0)}%</strong> de todos os atrasos (${top.qtd} ocorrências).`
+        texto: `O motivo <strong>${LW.escaparHtml(top.motivo)}</strong> representa <strong>${top.pct.toFixed(0)}%</strong> de todos os atrasos (${top.qtd} ocorrências).`
       });
     }
 
@@ -254,7 +245,7 @@
       insights.push({
         tipo: 'warning',
         icon: '⚡',
-        texto: `Bateria <strong>${b.bat}</strong> apresenta tendência de piora — atrasos crescendo nas operações mais recentes.`
+        texto: `Bateria <strong>${LW.escaparHtml(b.bat)}</strong> apresenta tendência de piora — atrasos crescendo nas operações mais recentes.`
       });
     });
 
@@ -293,7 +284,7 @@
         insights.push({
           tipo: 'info',
           icon: '🔩',
-          texto: `Montagem <strong>${worst.m}</strong> tem ${worst.pct.toFixed(0)}% de atrasos vs ${best.pct.toFixed(0)}% em <strong>${best.m}</strong> — diferença expressiva.`
+          texto: `Montagem <strong>${LW.escaparHtml(worst.m)}</strong> tem ${worst.pct.toFixed(0)}% de atrasos vs ${best.pct.toFixed(0)}% em <strong>${LW.escaparHtml(best.m)}</strong> — diferença expressiva.`
         });
       }
     }
@@ -309,7 +300,7 @@
       insights.push({
         tipo: 'info',
         icon: '📐',
-        texto: `Painéis de <strong>${td.d}</strong> têm o maior tempo médio de ciclo: <strong>${td.tm.toFixed(0)} min</strong> por operação.`
+        texto: `Painéis de <strong>${LW.escaparHtml(td.d)}</strong> têm o maior tempo médio de ciclo: <strong>${td.tm.toFixed(0)} min</strong> por operação.`
       });
     }
 
@@ -318,7 +309,7 @@
       insights.push({
         tipo: 'success',
         icon: '🥇',
-        texto: `<strong>${melhorBateria.bat}</strong> é a bateria mais eficiente do período (${melhorBateria.eficiencia.toFixed(0)}% eficiência, ${melhorBateria.pctAtraso.toFixed(0)}% atrasos).`
+        texto: `<strong>${LW.escaparHtml(melhorBateria.bat)}</strong> é a bateria mais eficiente do período (${melhorBateria.eficiencia.toFixed(0)}% eficiência, ${melhorBateria.pctAtraso.toFixed(0)}% atrasos).`
       });
     }
 
@@ -493,30 +484,35 @@
       return `
         <div style="margin-bottom:12px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <span style="font-size:.82rem;color:${C.text};font-weight:600">${item.label}</span>
+            <span style="font-size:.82rem;color:${C.text};font-weight:600">${LW.escaparHtml(item.label)}</span>
             <span style="font-size:.82rem;color:${barColor};font-family:'JetBrains Mono',monospace;font-weight:700">${item.display}</span>
           </div>
           <div style="background:${C.bg3};border-radius:4px;height:8px;overflow:hidden">
             <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width .6s cubic-bezier(.4,0,.2,1)"></div>
           </div>
-          ${item.sub ? `<div style="font-size:.74rem;color:${C.text3};margin-top:2px">${item.sub}</div>` : ''}
+          ${item.sub ? `<div style="font-size:.74rem;color:${C.text3};margin-top:2px">${LW.escaparHtml(item.sub)}</div>` : ''}
         </div>`;
     }).join('');
   }
 
   // ── Renderização principal ─────────────────────────────────
   async function render() {
-    // Busca os dados do historico.json se ainda não estiverem carregados
-    if (!LW.historico) {
-      try {
-        const res = await fetch('db/historico.json');
-        if (res.ok) LW.historico = await res.json();
-      } catch (err) {
-        console.error("Erro ao carregar historico.json:", err);
-      }
+    // Busca historico.json sempre fresco — diferente de uma versão anterior
+    // deste código, que guardava o resultado em LW.historico e nunca
+    // buscava de novo na mesma sessão (mesmo trocando os filtros de data ou
+    // saindo/voltando pra esta tela). Isso fazia a página continuar
+    // mostrando dados desatualizados depois de qualquer operação registrada
+    // ou editada após a primeira visita. Todas as outras telas (Registro de
+    // Baterias, Relatório de Injeção, CEP) já buscavam fresco a cada visita
+    // — este módulo só foi alinhado ao mesmo padrão.
+    let dados = [];
+    try {
+      const res = await fetch('db/historico.json');
+      if (res.ok) dados = await res.json();
+    } catch (err) {
+      console.error("Erro ao carregar historico.json:", err);
     }
 
-    const dados = LW.historico || [];
     if (!dados.length) {
       document.getElementById('ao-loading').style.display = 'block';
       return;
@@ -637,7 +633,7 @@
             return `
               <tr style="border-bottom:1px solid ${C.border};${isFirst?'background:rgba(16,185,129,.04)':''}${isLast?'background:rgba(239,68,68,.04)':''}">
                 <td style="padding:10px 10px;font-weight:700;color:${C.text}">
-                  ${isFirst ? '🥇 ' : isLast ? '⚠️ ' : ''}${b.bat}
+                  ${isFirst ? '🥇 ' : isLast ? '⚠️ ' : ''}${LW.escaparHtml(b.bat)}
                 </td>
                 <td style="text-align:center;padding:10px;color:${C.text2};font-family:'JetBrains Mono',monospace">${b.ops}</td>
                 <td style="text-align:center;padding:10px;color:${C.text2};font-family:'JetBrains Mono',monospace">${fmtMin(b.tempoMedio)}</td>
@@ -741,7 +737,7 @@
           border-radius:20px;padding:5px 14px;margin:4px;
         ">
           <span style="font-size:.75rem">⚠️</span>
-          <span style="font-weight:700;color:${C.red};font-size:.84rem">${b.bat}</span>
+          <span style="font-weight:700;color:${C.red};font-size:.84rem">${LW.escaparHtml(b.bat)}</span>
           <span style="color:${C.text3};font-size:.78rem">${b.pctAtraso.toFixed(0)}% atrasos</span>
         </div>`).join('');
     }
@@ -773,7 +769,7 @@
       return `
         <div style="margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-            <span style="font-weight:700;color:${C.text};font-size:.85rem">${d}</span>
+            <span style="font-weight:700;color:${C.text};font-size:.85rem">${LW.escaparHtml(d)}</span>
             <span style="color:${dimCols[i%dimCols.length]};font-family:'JetBrains Mono',monospace;font-size:.82rem;font-weight:700">${fmt(v.m2,0)} m²</span>
           </div>
           <div style="background:${C.bg3};border-radius:4px;height:10px;overflow:hidden;margin-bottom:3px">
@@ -792,16 +788,18 @@
     // Ativa o estado de carregamento visual
     document.getElementById('ao-loading').style.display = 'block';
 
-    // Tenta carregar os dados iniciais para preencher os filtros de data
-    if (!LW.historico) {
-      try {
-        const res = await fetch('db/historico.json');
-        if (res.ok) LW.historico = await res.json();
-      } catch (e) {}
-    }
+    // Busca só pra pré-preencher os filtros de data com o intervalo real
+    // dos dados (1º registro → mais recente) — render(), chamado no final,
+    // busca os dados de novo (sempre fresco, ver comentário lá); não dá pra
+    // reaproveitar esta busca porque render() já filtra pelo que for
+    // digitado nos campos de data, que ainda não existe neste ponto.
+    let all = [];
+    try {
+      const res = await fetch('db/historico.json');
+      if (res.ok) all = await res.json();
+    } catch (e) { /* render(), abaixo, trata a falha de novo e mostra o estado vazio */ }
 
     // Prefill datas
-    const all = LW.historico || [];
     if (all.length) {
       const dates = all.map(r=>r.data).filter(Boolean).sort();
       const ini = document.getElementById('ao-data-inicio');
