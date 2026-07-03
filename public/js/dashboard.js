@@ -171,7 +171,7 @@
 
   // Calcula { inicio, fim } do intervalo padrão: hoje e 30 dias atrás,
   // sempre em Brasília (ver nowBrasilia(), data.js) — mesmo fuso usado em
-  // todo o resto do sistema, pra não desalinhar com "Hoje" (aplicarFiltroHoje).
+  // todo o resto do sistema, pra não desalinhar com "Hoje" (aplicarFiltroRapido).
   function _intervaloPadrao30Dias() {
     const fim = nowBrasilia();
     const inicio = new Date(fim);
@@ -193,8 +193,80 @@
     apenas_com_ajuste: false, // filtro rápido: mostra só traços que tiveram algum reajuste de receita
   };
 
+  // ---- Estado de ordenação (clique no cabeçalho — ver _ligarOrdenacaoTabela) ----
+  // col=null = ordem padrão de cada tabela (mais recente primeiro), já
+  // existente antes desta função existir. dir alterna a cada clique na
+  // MESMA coluna; clicar numa coluna DIFERENTE sempre começa em 'asc'.
+  const _ordenacaoRegistro  = { col: null, dir: 'asc' };
+  const _ordenacaoRelatorio = { col: null, dir: 'asc' };
+
   // Data de corte: produções anteriores a esta data não possuem vínculo de traço
   const TRACO_CUTOFF_DATE = '2026-06-05';
+
+  // ---- Ordenação por clique no cabeçalho (Registro de Baterias e
+  // Relatório de Injeção) ----
+  //
+  // Reaproveita o próprio <th data-col="..."> como gatilho — nenhum botão
+  // novo, nenhuma UI extra: clica no texto do cabeçalho, ordena por
+  // aquela coluna; clica de novo, inverte (asc -> desc -> asc...); clica
+  // em outra coluna, troca e recomeça em 'asc'. Um clique só liga isso
+  // (delegação de evento no <thead>, ver _ligarOrdenacaoTabela) — funciona
+  // até pras colunas de tipo de placa injetadas dinamicamente
+  // (paineis_3p, m2_3p, ...), que não existem no HTML na hora que a
+  // página carrega.
+  function _alternarOrdenacao(estado, col, renderFn) {
+    if (estado.col === col) {
+      estado.dir = estado.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      estado.col = col;
+      estado.dir = 'asc';
+    }
+    renderFn();
+  }
+
+  // Liga o clique UMA VEZ por thead (delegação — sobrevive a qualquer
+  // coluna nova injetada depois, ver _garantirColunasDinamicasTipo) e
+  // atualiza a setinha (▲/▼) no cabeçalho ativo a cada render — chamada
+  // no fim de renderRegistro()/renderRelatorio().
+  function _ligarOrdenacaoTabela(theadId, estado, renderFn) {
+    const thead = document.getElementById(theadId);
+    if (!thead || thead._ordenacaoLigada) return;
+    thead._ordenacaoLigada = true;
+    thead.addEventListener('click', (e) => {
+      const th = e.target.closest('th[data-col]');
+      if (!th) return;
+      _alternarOrdenacao(estado, th.getAttribute('data-col'), renderFn);
+    });
+  }
+
+  function _atualizarSetaOrdenacao(theadId, estado) {
+    const thead = document.getElementById(theadId);
+    if (!thead) return;
+    thead.querySelectorAll('th[data-col]').forEach(th => {
+      th.classList.add('th-ordenavel');
+      const col = th.getAttribute('data-col');
+      // Remove qualquer seta anterior (texto original do <th> preservado
+      // no atributo, pra nunca ir acumulando "▲▲▲" a cada render).
+      const textoBase = th.dataset.labelBase || (th.dataset.labelBase = th.textContent);
+      th.textContent = textoBase + (col === estado.col ? (estado.dir === 'asc' ? ' ▲' : ' ▼') : '');
+    });
+  }
+
+  // Comparador genérico: número com número, texto com texto (localeCompare
+  // com numeric:true — "B10" vem depois de "B2", não antes). '—'/vazio
+  // sempre vai pro fim, em qualquer direção — não faz sentido "vazio" ser
+  // o "maior" quando desce e o "menor" quando sobe.
+  function _compararOrdenacao(va, vb, dir) {
+    const vazioA = va === '' || va === null || va === undefined || va === '—';
+    const vazioB = vb === '' || vb === null || vb === undefined || vb === '—';
+    if (vazioA && vazioB) return 0;
+    if (vazioA) return 1;
+    if (vazioB) return -1;
+    let cmp;
+    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb), 'pt-BR', { numeric: true, sensitivity: 'base' });
+    return dir === 'asc' ? cmp : -cmp;
+  }
 
   // ---- Extrai valores únicos não-vazios de uma lista de objetos ----
   function _unicos(lista, campo) {
@@ -378,7 +450,7 @@
         ${c.label}
         <button onclick="removerFiltro('${containerId}','${c.key}','${c.val}')"
           style="background:none;border:none;cursor:pointer;color:${color};font-size:.8rem;padding:0;line-height:1;opacity:.7"
-          title="Remover">✕</button>
+          data-tooltip="Remover">✕</button>
       </span>`;
     }).join('');
   }
@@ -409,24 +481,33 @@
     rebuildFn();
   };
 
-  // Filtro rápido "Hoje" — preenche início e fim do período com a data de
-  // hoje (Brasília) e aplica na hora, sem precisar abrir o calendário duas
-  // vezes. Mesmo containerId usado por limparTodosFiltros, acima — reusa o
-  // mesmo mapeamento pra _filtrosRegistro/_filtrosRelatorio e prefixo de
-  // id (reg-/rel-). Só mexe nas datas — os demais filtros já aplicados
-  // (turno, bateria, etc.) continuam valendo, igual a digitar a data à mão.
-  window.aplicarFiltroHoje = function (containerId) {
+  // Filtro rápido de período — select com "Hoje" e "Todos" (era um botão
+  // só de "Hoje"). Mesmo containerId usado por limparTodosFiltros, acima —
+  // reusa o mesmo mapeamento pra _filtrosRegistro/_filtrosRelatorio e
+  // prefixo de id (reg-/rel-). Só mexe nas datas — os demais filtros já
+  // aplicados (turno, bateria, etc.) continuam valendo, igual a digitar a
+  // data à mão.
+  // - "hoje": preenche início e fim do período com a data de hoje (Brasília).
+  // - "todos": limpa início e fim — data_inicio/data_fim null já significam
+  //   "sem filtro de data" pro resto do código (ver renderRegistro/renderRelatorio).
+  window.aplicarFiltroRapido = function (containerId, valor) {
     const filtrosObj = containerId === 'filtros-registro' ? _filtrosRegistro : _filtrosRelatorio;
     const prefix = containerId === 'filtros-registro' ? 'reg' : 'rel';
-    const hoje = todayBrasilia();
-
-    filtrosObj.data_inicio = hoje;
-    filtrosObj.data_fim = hoje;
-
     const ini = document.getElementById(`${prefix}-data-inicio`);
     const fim = document.getElementById(`${prefix}-data-fim`);
-    if (ini) ini.value = hoje;
-    if (fim) fim.value = hoje;
+
+    if (valor === 'hoje') {
+      const hoje = todayBrasilia();
+      filtrosObj.data_inicio = hoje;
+      filtrosObj.data_fim = hoje;
+      if (ini) ini.value = hoje;
+      if (fim) fim.value = hoje;
+    } else {
+      filtrosObj.data_inicio = null;
+      filtrosObj.data_fim = null;
+      if (ini) ini.value = '';
+      if (fim) fim.value = '';
+    }
 
     const renderFn = containerId === 'filtros-registro' ? renderRegistro : renderRelatorio;
     renderFn();
@@ -495,7 +576,15 @@
     if (f.tipo_montagem.size) data = data.filter(b => f.tipo_montagem.has(b.tipo_montagem));
     if (f.atraso.size) data = data.filter(b => f.atraso.has(b.houve_atraso));
 
-    data = [...data].sort((a, b) => b.data.localeCompare(a.data) || (b.inicio || '').localeCompare(a.inicio || ''));
+    if (_ordenacaoRegistro.col) {
+      data = [...data].sort((a, b) => _compararOrdenacao(
+        _valorOrdenacaoRegistro(a, _ordenacaoRegistro.col),
+        _valorOrdenacaoRegistro(b, _ordenacaoRegistro.col),
+        _ordenacaoRegistro.dir
+      ));
+    } else {
+      data = [...data].sort((a, b) => b.data.localeCompare(a.data) || (b.inicio || '').localeCompare(a.inicio || ''));
+    }
 
     // Antes de montar as linhas, garante que colunas de tipos extras (ex: 3p) existam no thead
     _garantirColunasDinamicasTipo(data);
@@ -508,6 +597,9 @@
     document.getElementById('reg-count').textContent = data.length + ' registros';
 
     const colspanTotal = COLUNAS_REGISTRO.length;
+
+    _ligarOrdenacaoTabela('registro-thead', _ordenacaoRegistro, renderRegistro);
+    _atualizarSetaOrdenacao('registro-thead', _ordenacaoRegistro);
 
     if (!data.length) {
       tbody.innerHTML = `<tr><td colspan="${colspanTotal}" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
@@ -538,7 +630,7 @@
         ? 'Clique para editar esta operação'
         : 'Clique para ver os traços desta bateria no Relatório de Injeção';
       return `
-      <tr style="cursor:pointer" title="${tituloLinha}"
+      <tr style="cursor:pointer" data-tooltip="${tituloLinha}"
         onclick="LWDash.onClickLinhaRegistro(window._lwRegistroMapTemp[${idx}])">
         <td data-col="data" class="mono">${b.data ? b.data.split('-').reverse().join('/') : '—'}</td>
         <td data-col="turno"><span class="badge badge-gray">${b.turno || '—'}</span></td>
@@ -551,10 +643,10 @@
         <td data-col="duracao" class="mono">${LW.formatDuration(b.tempo_min)}</td>
         <td data-col="tracos">${b.qtd_tracos || 0}</td>
         <td data-col="atraso">${b.houve_atraso === 'SIM'
-          ? `<span class="badge badge-red" title="${b.motivo_atraso ? LW.escaparHtml(b.motivo_atraso) : ''}">⚠ SIM</span>`
+          ? `<span class="badge badge-red" ${b.motivo_atraso ? `data-tooltip="${LW.escaparHtml(b.motivo_atraso)}"` : ''}>⚠ SIM</span>`
           : '<span class="badge badge-green">✓ NÃO</span>'}</td>
         <td data-col="motivo_atraso">${b.motivo_atraso ? LW.escaparHtml(b.motivo_atraso) : '—'}</td>
-        <td data-col="montagem"><span class="badge" style="background:${corMont.bg};color:${corTextoMont};border:1px solid ${corMont.borda}" ${tituloMontagem ? `title="${tituloMontagem}"` : ''}>${b.tipo_montagem || '—'}</span></td>
+        <td data-col="montagem"><span class="badge" style="background:${corMont.bg};color:${corTextoMont};border:1px solid ${corMont.borda}" ${tituloMontagem ? `data-tooltip="${tituloMontagem}"` : ''}>${b.tipo_montagem || '—'}</span></td>
         <td data-col="paineis_2p">${b.paineis_2p || 0}</td>
         <td data-col="paineis_sp">${b.paineis_sp || 0}</td>
         ${tdsExtrasPaineis}
@@ -607,6 +699,39 @@
   // Cópia mutável: ganha entradas extras quando tipos de placa novos (3p, 4p, ...)
   // aparecem nos dados. Mantida em ordem de inserção.
   let COLUNAS_REGISTRO = [...COLUNAS_REGISTRO_BASE];
+
+  // Valor comparável de uma operação pra uma coluna (ver
+  // _alternarOrdenacao/_compararOrdenacao) — cobre tanto as colunas fixas
+  // quanto as dinâmicas de tipo de placa (paineis_3p, m2_3p, ...).
+  function _valorOrdenacaoRegistro(b, col) {
+    switch (col) {
+      case 'data':             return b.data || '';
+      case 'turno':            return b.turno || '';
+      case 'dimensao':         return b.dimensao || '';
+      case 'capacidade':       return Number(b.capacidade) || 0;
+      case 'id_bateria':       return b.id_bateria || '';
+      case 'inicio':           return b.inicio || '';
+      case 'fim':              return b.fim || '';
+      case 'desemplaque':      return b.desemplaque || LW.calcularDesemplaque(b.fim) || '';
+      case 'duracao':          return Number(b.tempo_min) || 0;
+      case 'tracos':           return Number(b.qtd_tracos) || 0;
+      case 'atraso':           return b.houve_atraso || '';
+      case 'motivo_atraso':    return b.motivo_atraso || '';
+      case 'montagem':         return b.tipo_montagem || '';
+      case 'paineis_2p':       return Number(b.paineis_2p) || 0;
+      case 'paineis_sp':       return Number(b.paineis_sp) || 0;
+      case 'm2_2p':            return Number(b.m2_2p) || 0;
+      case 'm2_sp':            return Number(b.m2_sp) || 0;
+      case 'paineis_2psp':     return Number(b.total_paineis) || 0;
+      case 'm2_2psp':          return Number(b.m2_total) || 0;
+      case 'bercos_reais':     return Number(b.bercos_reais) || 0;
+      case 'placas_cimenticia':return Number(b.placas_cimenticia) || 0;
+      default:
+        if (col.startsWith('paineis_')) return Number((b.paineis_por_tipo || {})[col.replace('paineis_', '')]) || 0;
+        if (col.startsWith('m2_'))      return Number((b.m2_por_tipo || {})[col.replace('m2_', '')]) || 0;
+        return '';
+    }
+  }
 
   // Tipos conhecidos de fábrica (já cobertos pelas colunas fixas do HTML)
   const TIPOS_PLACA_NATIVOS = new Set(['2p', 'sp']);
@@ -852,6 +977,37 @@
     return val;
   }
 
+  // Valor comparável de um traço pra uma coluna do Relatório de Injeção
+  // (ver _alternarOrdenacao/_compararOrdenacao). id_bateria/berco_inicio/
+  // berco_fim são por USO (um traço reaproveitado tem mais de um) — usa
+  // sempre o PRIMEIRO uso como valor de ordenação da linha (mesmo
+  // critério que o próprio agrupamento visual já usa: a ordem de
+  // `l.ultilizado.operacao`).
+  function _valorOrdenacaoRelatorio(l, col) {
+    const primeiroUso = (l.ultilizado?.operacao && l.ultilizado.operacao[0]) || {};
+    switch (col) {
+      case 'data':          return l.data || '';
+      case 'id_bateria':    return primeiroUso.id_bateria || '';
+      case 'num_traco':     return Number(l.num_traco) || 0;
+      case 'berco_inicio':  return primeiroUso.berco_inicio || '';
+      case 'berco_fim':     return primeiroUso.berco_finalizacao || '';
+      case 'densidade_eps': return Number(l.densidade_eps) || 0;
+      case 'expansao':      return l.expansao || '';
+      case 'silo':          return l.silo || '';
+      case 'obs':           return primeiroUso.obs !== undefined ? (primeiroUso.obs || '') : (l.obs || '');
+      default: {
+        // densidade, flow, cimento_real, agua_real, eps_real,
+        // superplast_real, incorporador_real, tempo_batida — todos vêm
+        // de _valRel, o MESMO cálculo que a célula da tabela usa pra
+        // exibir (com ajustes já aplicados), pra ordenar pelo valor que
+        // a pessoa está vendo, não pelo original bruto.
+        const v = _valRel(l[col], col);
+        return v === '—' ? '' : (typeof v === 'number' ? v : (parseFloat(v) || 0));
+      }
+    }
+  }
+
+
   function _onDataRelatorio(e) {
     _filtrosRelatorio[e.target.id === 'rel-data-inicio' ? 'data_inicio' : 'data_fim'] = e.target.value || null;
     renderRelatorio();
@@ -927,22 +1083,22 @@
       const num = parseFloat(a);
       if (def.resultado) {
         const ehFinal = i === ajustes.length - 1;
-        return `<span class="badge ${ehFinal ? 'badge-blue' : 'badge-gray'}" title="${ehFinal ? 'Leitura final' : 'Leitura intermediária'}">${_fmtValorDetalhe(def, num)}</span>`;
+        return `<span class="badge ${ehFinal ? 'badge-blue' : 'badge-gray'}" data-tooltip="${ehFinal ? 'Leitura final' : 'Leitura intermediária'}">${_fmtValorDetalhe(def, num)}</span>`;
       }
       const sinal = num >= 0 ? '+' : '';
       const textoExibido = def.formatador ? `${sinal}${_fmtValorDetalhe(def, num)}` : `${sinal}${_fmtNumDetalhe(num)}${def.unidade}`;
-      return `<span class="badge ${num >= 0 ? 'badge-green' : 'badge-red'}" title="Reajuste aplicado">${textoExibido}</span>`;
+      return `<span class="badge ${num >= 0 ? 'badge-green' : 'badge-red'}" data-tooltip="Reajuste aplicado">${textoExibido}</span>`;
     }).join('<span class="relatorio-ajuste-seta">→</span>');
 
     return `
       <div class="relatorio-ajuste-item">
         <div class="relatorio-ajuste-label">${def.label}</div>
         <div class="relatorio-ajuste-valores">
-          <span class="relatorio-ajuste-original" title="Valor planejado (receita original)">${_fmtValorDetalhe(def, original)}</span>
+          <span class="relatorio-ajuste-original" data-tooltip="Valor planejado (receita original)">${_fmtValorDetalhe(def, original)}</span>
           <span class="relatorio-ajuste-seta">→</span>
           ${chips}
           <span class="relatorio-ajuste-seta">→</span>
-          <span class="relatorio-ajuste-final" title="Valor final aplicado na injeção">${_fmtValorDetalhe(def, final)}</span>
+          <span class="relatorio-ajuste-final" data-tooltip="Valor final aplicado na injeção">${_fmtValorDetalhe(def, final)}</span>
         </div>
       </div>`;
   }
@@ -1081,20 +1237,29 @@
     if (f.apenas_com_ajuste) linhas = linhas.filter(l => _tracoTemAjuste(l));
     document.getElementById('rel-count').textContent = linhas.length + ' registros';
 
+    _ligarOrdenacaoTabela('relatorio-thead', _ordenacaoRelatorio, renderRelatorio);
+    _atualizarSetaOrdenacao('relatorio-thead', _ordenacaoRelatorio);
+
     if (!linhas.length) {
       tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-3);padding:30px">Nenhum registro encontrado</td></tr>`;
       return;
     }
 
-    const sorted = [...linhas].sort((a, b) => {
-      // Ordena por data decrescente
-      if (b.data !== a.data) return b.data.localeCompare(a.data);
+    const sorted = _ordenacaoRelatorio.col
+      ? [...linhas].sort((a, b) => _compararOrdenacao(
+          _valorOrdenacaoRelatorio(a, _ordenacaoRelatorio.col),
+          _valorOrdenacaoRelatorio(b, _ordenacaoRelatorio.col),
+          _ordenacaoRelatorio.dir
+        ))
+      : [...linhas].sort((a, b) => {
+        // Ordena por data decrescente
+        if (b.data !== a.data) return b.data.localeCompare(a.data);
 
-      // Dentro do mesmo dia, por nº do traço decrescente (5, 4, 3, 2, 1) —
-      // antes era pela ordem de chegada (id_operacao), que ficava
-      // bagunçada quando vários traços eram registrados de uma vez só.
-      return (Number(b.num_traco) || 0) - (Number(a.num_traco) || 0);
-    });
+        // Dentro do mesmo dia, por nº do traço decrescente (5, 4, 3, 2, 1) —
+        // antes era pela ordem de chegada (id_operacao), que ficava
+        // bagunçada quando vários traços eram registrados de uma vez só.
+        return (Number(b.num_traco) || 0) - (Number(a.num_traco) || 0);
+      });
     window._lwRelatorioMapTemp = {};
     tbody.innerHTML = sorted.map((l, lIdx) => {
       // Um traço pode ter sido reaproveitado em mais de uma bateria — cada uso
@@ -1132,10 +1297,10 @@
 
         return `
       <tr${idx > 0 ? ' class="linha-traco-reaproveitado linha-relatorio-clicavel"' : ' class="linha-relatorio-clicavel"'}
-        data-traco-row-id="${rowId}" title="${tituloLinha}"
+        data-traco-row-id="${rowId}" data-tooltip="${tituloLinha}"
         onclick="LWDash.onClickLinhaRelatorio('${rowId}')">
         <td class="mono"><span class="relatorio-expand-icon" id="icone-${rowId}">${_modoEdicaoRelatorio ? '✏️' : '▸'}</span>${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
-        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" title="Traço reaproveitado nesta bateria">♻</span>' : ''}</td>
+        <td>${op.id_bateria || '—'}${idx > 0 ? ' <span class="badge badge-gray" data-tooltip="Traço reaproveitado nesta bateria">♻</span>' : ''}</td>
         <td>${l.num_traco || '—'}</td>
         <td class="mono">${op.berco_inicio || '—'}</td>
         <td class="mono">${op.berco_finalizacao || '—'}</td>
