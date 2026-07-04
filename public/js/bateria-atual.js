@@ -144,8 +144,7 @@
         <strong>Bateria ${dados.id_bateria || '—'}</strong> — ${dados.tipo_montagem || '—'}
         ${dados.bercos_reais ? ` — ${dados.bercos_reais} berços` : ''}
       </div>`;
-    const dica = `<div class="ba-dica">🖱️ Clique num indicador (● ou •) para marcar que aquele lado do berço baixou ou vazou. Clique de novo para desfazer — os 2 lados são independentes.</div>`;
-
+    const dica = `<div class="ba-dica">🖱️ Clique num indicador (•) para marcar que aquele lado do berço baixou ou vazou</div>`;
     // Fileira única: 1 2 3 4 5 6 7 8 ... (ver .ba-grid no CSS — flex row
     // que DIVIDE a largura disponível igualmente entre os berços, ficando
     // mais fina ou mais grossa conforme a quantidade, sem gerar scroll —
@@ -166,7 +165,7 @@
             data-tooltip="${_tituloDot(dirMarcado, 'direita')}">•</span>
           <span class="ba-numero">B${numero}${algumMarcado ? ' ⚠️' : ''}</span>
           <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}" data-berco="${berco}" data-lado="esquerda"
-            data-tooltip="${_tituloDot(esqMarcado, 'esquerda')}">●</span>
+            data-tooltip="${_tituloDot(esqMarcado, 'esquerda')}">•</span>
         </div>`;
     }).join('')}</div>`;
 

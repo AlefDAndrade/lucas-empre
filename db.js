@@ -287,6 +287,36 @@ db.exec(`
     bercos        TEXT NOT NULL,  -- JSON: [{berco, ordem, estado_esquerda, estado_direita}, ...]
     atualizado_em TEXT NOT NULL
   );
+
+  -- ============================================================
+  --  Avaliações de Qualidade — resultado final de cada avaliação feita
+  --  no Setor de Qualidade (public/setor-qualidade-app.html). Antes
+  --  disso, tanto a avaliação quanto os painéis (~40 por avaliação, 4
+  --  pallets × 10 placas) viviam só no localStorage do navegador — sem
+  --  backup, sem sincronizar entre dispositivos, e sumindo se alguém
+  --  limpasse os dados do navegador.
+  --
+  --  1 linha por avaliação (mesmo espírito de bercos_visuais, acima):
+  --  os campos usados pra filtrar/ordenar (bateria, turno, data do
+  --  registro, operação vinculada) viram coluna própria; o resto —
+  --  inclusive a lista inteira de painéis — vai dentro da coluna "dados"
+  --  em JSON. Rascunhos (avaliações ainda não registradas) CONTINUAM só
+  --  no localStorage — só a avaliação já registrada (definitiva) entra
+  --  aqui, mesmo princípio de "operação em andamento" (local, efêmero)
+  --  vs. "operações" (SQL, definitivo) já usado no resto do sistema.
+  --
+  --  id_operacao é a bateria de Registro de Operação vinculada (pode ser
+  --  NULL — avaliação avulsa, sem vínculo).
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS avaliacoes_qualidade (
+    id            TEXT PRIMARY KEY,
+    id_operacao   TEXT REFERENCES operacoes(id),
+    id_bateria    TEXT,
+    turno         TEXT,
+    registrado_em TEXT NOT NULL,
+    dados         TEXT NOT NULL  -- JSON: avaliação inteira, incluindo a lista de painéis
+  );
+  CREATE INDEX IF NOT EXISTS idx_avaliacoes_qualidade_operacao ON avaliacoes_qualidade(id_operacao);
 `);
 
 // ------------------------------------------------------------
@@ -575,6 +605,46 @@ module.exports.operacaoParaRow = operacaoParaRow;
 module.exports.rowParaOperacao = rowParaOperacao;
 module.exports.SQL_INSERIR_OPERACAO = SQL_INSERIR_OPERACAO;
 module.exports.criarBercosVisuaisIniciais = criarBercosVisuaisIniciais;
+
+/**
+ * Grava uma avaliação de qualidade JÁ REGISTRADA (definitiva, não
+ * rascunho) — 1 linha, com a avaliação inteira (painéis inclusos) em
+ * JSON na coluna "dados". Chamada por POST /registrar-avaliacao-qualidade
+ * (server.js). INSERT OR REPLACE: se o id já existir (reenvio depois de
+ * uma falha de rede, por exemplo), sobrescreve em vez de duplicar ou
+ * rejeitar — idempotente, mesmo espírito das outras rotas de baixa
+ * fricção do sistema.
+ * @param {object} avaliacao - objeto inteiro vindo do front (evalObj + paineis)
+ */
+const SQL_SALVAR_AVALIACAO_QUALIDADE = `
+  INSERT OR REPLACE INTO avaliacoes_qualidade (id, id_operacao, id_bateria, turno, registrado_em, dados)
+  VALUES (@id, @id_operacao, @id_bateria, @turno, @registrado_em, @dados)
+`;
+function salvarAvaliacaoQualidade(avaliacao) {
+  db.prepare(SQL_SALVAR_AVALIACAO_QUALIDADE).run({
+    id: avaliacao.id,
+    id_operacao: avaliacao.linkedOperacaoId || null,
+    id_bateria: avaliacao.batteryId || null,
+    turno: avaliacao.turno || null,
+    registrado_em: avaliacao.registeredAt || new Date().toISOString(),
+    dados: JSON.stringify(avaliacao),
+  });
+}
+
+/**
+ * Lista todas as avaliações de qualidade já registradas, mais recentes
+ * primeiro — cada item já vem desserializado (JSON.parse de "dados"),
+ * pronto pro front usar direto, painéis inclusos. Usado por GET
+ * /avaliacoes-qualidade (Dashboard e Registros do Setor de Qualidade).
+ */
+function listarAvaliacoesQualidade() {
+  const rows = db.prepare(
+    'SELECT dados FROM avaliacoes_qualidade ORDER BY registrado_em DESC'
+  ).all();
+  return rows.map(r => JSON.parse(r.dados));
+}
+module.exports.salvarAvaliacaoQualidade = salvarAvaliacaoQualidade;
+module.exports.listarAvaliacoesQualidade = listarAvaliacoesQualidade;
 
 // ============================================================
 //  Migração automática (Fase 2): historico.json -> tabela operacoes

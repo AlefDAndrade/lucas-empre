@@ -43,22 +43,26 @@
   <div class="sq-topbar">
     <div class="sq-brand"><div class="sq-bar"></div>Avaliação de Baterias</div>
     <nav class="sq-nav">
-      <button class="sq-nav-btn active" id="sq-nav-list"      onclick="SQ.navigateTo('list')">📋 Em Andamento</button>
-      <button class="sq-nav-btn"        id="sq-nav-dashboard" onclick="SQ.navigateTo('dashboard')">📊 Dashboard</button>
-      <button class="sq-nav-btn"        id="sq-nav-history"   onclick="SQ.navigateTo('history')">📋 Registros</button>
+      <button class="sq-nav-btn"        id="sq-nav-list"       onclick="SQ.navigateTo('list')">📋 Em Andamento</button>
+      <button class="sq-nav-btn active" id="sq-nav-form"       onclick="SQ.startNew()">🧪 Avaliação</button>
+      <button class="sq-nav-btn"        id="sq-nav-dashboard"  onclick="SQ.navigateTo('dashboard')">📊 Dashboard</button>
+      <button class="sq-nav-btn"        id="sq-nav-history"    onclick="SQ.navigateTo('history')">📋 Registros</button>
     </nav>
   </div>
 
   <!-- ══════════════════════════════════════════════════════
-       TELA 1: EM ANDAMENTO
+       TELA 1: EM ANDAMENTO — só as avaliações já iniciadas (salvas como
+       rascunho). A fila de baterias PENDENTES (ainda nem iniciadas) não
+       mora mais aqui — ela vive na aba "🧪 Avaliação" (ver #sq-form,
+       mais abaixo), junto com o formulário que ela alimenta.
   ══════════════════════════════════════════════════════════ -->
-  <div class="sq-section active" id="sq-list">
+  <div class="sq-section" id="sq-list">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-folder-open"></i> Avaliações em aberto</span>
-      <button class="btn btn-primary btn-sm" onclick="SQ.startNew()"><i class="fas fa-plus-circle"></i> Nova Avaliação</button>
+      <button class="btn btn-primary btn-sm" onclick="SQ.startNew()"><i class="fas fa-plus-circle"></i> Avaliação</button>
     </div>
     <div id="sq-draft-list">
-      <div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.<br>Clique em "Nova Avaliação" para começar.</div>
+      <div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.<br>Clique em "🧪 Avaliação" para começar.</div>
     </div>
   </div>
 
@@ -146,12 +150,42 @@
   <!-- ══════════════════════════════════════════════════════
        TELA 3: FORMULÁRIO DE AVALIAÇÃO
   ══════════════════════════════════════════════════════════ -->
-  <div class="sq-section" id="sq-form">
+  <div class="sq-section active" id="sq-form">
     <!-- Ações do formulário -->
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:16px;">
       <button class="btn btn-ghost btn-sm sq-hide-view"  id="sq-btn-save"     onclick="SQ.saveDraft()"><i class="fas fa-save"></i> Salvar</button>
       <button class="btn btn-success btn-sm sq-hide-view" id="sq-btn-register" onclick="SQ.registerEvaluation()"><i class="fas fa-check-circle"></i> Registrar</button>
       <button class="btn btn-ghost btn-sm sq-show-view"  id="sq-btn-back"     onclick="SQ.goBack()"><i class="fas fa-arrow-left"></i> Voltar</button>
+    </div>
+
+    <!-- Fila de baterias pendentes, ordenada por previsão de desemplaque
+         (a mais antiga = 1ª = a que já pode/deve ser desemplacada e
+         avaliada primeiro) — ACIMA do "Cabeçalho do registro", logo
+         abaixo. Só as 3 primeiras posições viram cartão; da 4ª em diante
+         fica num <select> (ver sq-fila-outras-wrap), pra não lotar a
+         tela quando a fila for grande. Clicar em qualquer cartão (ou
+         escolher no select + Iniciar) preenche o formulário inteiro com
+         os dados daquela bateria (ver SQ.iniciarAvaliacaoDaFila /
+         SQ.iniciarAvaliacaoDoSelect, js/setor-qualidade.js). Atualizada
+         sempre que uma avaliação é salva ou registrada — a 2ª sobe pra
+         1ª, a 3ª pra 2ª, a 1ª do select vira 3ª, e assim por diante,
+         automaticamente (é só a ordem de chegada na fila, não algo
+         guardado por item). Escondida em modo só-leitura (ver
+         .sq-hide-view — mesma classe usada nos botões Salvar/Registrar),
+         já que faz sentido pra iniciar uma avaliação nova, não pra
+         quem só está revendo uma já registrada. -->
+    <div class="sq-fila-pendentes sq-hide-view" id="sq-fila-panel">
+      <div class="sq-fila-pendentes-titulo"><i class="fas fa-list-ol"></i> Ordem de Previsão de Desemplaque</div>
+
+      <!-- 4ª posição em diante — só aparece se houver mais de 3 na fila -->
+      <div class="sq-fila-outras" id="sq-fila-outras-wrap" style="display:none;">
+        <select class="form-input form-select" id="sq-fila-select"></select>
+        <button class="btn btn-primary btn-sm" onclick="SQ.iniciarAvaliacaoDoSelect()"><i class="fas fa-play"></i> Iniciar</button>
+      </div>
+
+      <div id="sq-fila-list">
+        <span class="sq-fila-pendentes-vazio"><i class="fas fa-spinner fa-spin"></i> Carregando…</span>
+      </div>
     </div>
 
     <div style="position:relative;">
@@ -409,33 +443,6 @@
           </thead>
           <tbody id="sq-hist-tbody"></tbody>
         </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════════════
-       MODAL FILA DE BATERIAS NÃO AVALIADAS
-       Aberto por "Nova Avaliação" (ver SQ.startNew/abrirFilaNaoAvaliadas,
-       js/setor-qualidade.js) — lista as operações de Registro de Baterias
-       ainda sem avaliação (GET /operacoes-nao-avaliadas, server.js).
-  ══════════════════════════════════════════════════════════ -->
-  <div class="sq-modal-pallet-overlay" id="sq-modal-fila">
-    <div class="sq-modal-pallet-box" style="max-width:460px;">
-      <div class="sq-modal-pallet-header">
-        <h2><i class="fas fa-list-ol" style="color:var(--blue);"></i> Baterias Pendentes de Avaliação</h2>
-        <p>Selecione a bateria que vai avaliar agora.</p>
-      </div>
-      <div class="form-group" id="sq-fila-select-wrap">
-        <label class="form-label">Bateria · Tipo de Montagem · Fim da Operação</label>
-        <select class="form-input form-select" id="sq-fila-select"></select>
-      </div>
-      <div id="sq-fila-vazio" class="sq-empty" style="display:none;">
-        <i class="fas fa-check-circle"></i>Nenhuma bateria pendente de avaliação no momento.
-      </div>
-      <div class="sq-modal-pallet-footer">
-        <button class="btn btn-ghost btn-sm" onclick="SQ.fecharFilaNaoAvaliadas()">Cancelar</button>
-        <button class="btn btn-ghost btn-sm" onclick="SQ.iniciarAvaliacaoAvulsa()" title="Iniciar sem vincular a nenhuma operação registrada">Avaliação avulsa</button>
-        <button class="btn btn-primary btn-sm" id="sq-fila-btn-iniciar" onclick="SQ.iniciarAvaliacaoDaFila()"><i class="fas fa-play"></i> Iniciar</button>
       </div>
     </div>
   </div>

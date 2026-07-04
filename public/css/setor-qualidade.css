@@ -55,6 +55,129 @@ body {
 
 .sq-container { max-width: 1280px; width: 100%; }
 
+/* ── Fila de baterias pendentes de avaliação — vive dentro da aba
+     "🧪 Avaliação" (#sq-form), logo ACIMA do "Cabeçalho do registro" (ver
+     setor-qualidade-app.html / setor-qualidade.js,
+     carregarFilaNaoAvaliadas). Ordenada por previsão de desemplaque: a
+     1ª posição (mais urgente) vem em destaque, numa linha própria com
+     todos os detalhes; as demais vêm compactas, numa fileira que quebra
+     linha conforme precisar. ── */
+.sq-fila-pendentes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-card);
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: 18px;
+  box-shadow: var(--sq-shadow);
+}
+.sq-fila-pendentes-titulo {
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-3);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sq-fila-pendentes-vazio { font-size: .78rem; color: var(--text-3); }
+
+/* 4ª posição em diante — só aparece se a fila tiver mais de 3 baterias
+   pendentes; sem cartão próprio, só um <select> + "Iniciar" mesmo. */
+.sq-fila-outras {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.sq-fila-outras select { flex: 1; }
+
+/* 3ª e 2ª posições — lado a lado, compactas, ACIMA da 1ª (ver
+   .sq-fila-item-principal, abaixo). */
+.sq-fila-secundarias {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+.sq-fila-secundarias .sq-fila-item { flex: 1 1 160px; }
+
+/* Cada bateria pendente é um <button> — clicar em qualquer parte do item
+   já inicia a avaliação (ver iniciarAvaliacaoDaFila, setor-qualidade.js);
+   reset dos estilos padrão de botão do navegador (fonte, cor, borda,
+   etc.). IMPORTANTE: `font: inherit` reseta fonte/tamanho/peso, mas NÃO
+   cor — <button> tem cor de texto própria por padrão do navegador (não
+   herda `color` da página como um <div>/<span> normal herdaria), então
+   sem o `color` explícito abaixo o texto de dentro (inclusive o ID da
+   bateria, o dado mais importante do cartão) saía preto sobre fundo
+   escuro — quase invisível. */
+.sq-fila-item {
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 10px 4px 8px;
+  transition: border-color .15s ease, background .15s ease;
+}
+.sq-fila-item:hover { border-color: var(--accent); background: var(--bg-3, var(--bg-2)); }
+.sq-fila-item-info { display: flex; flex-direction: column; line-height: 1.25; text-align: left; }
+.sq-fila-item-info strong { color: var(--text); font-size: .8rem; }
+.sq-fila-item-info span { color: var(--text-3); font-size: .68rem; }
+
+/* Item vinculado à avaliação em edição AGORA (ver linkedOperacaoId,
+   setor-qualidade.js) — destaque verde bem visível, pra identificar de
+   relance qual bateria está sendo avaliada, mesmo com várias pendentes
+   na fila ao mesmo tempo. */
+.sq-fila-item-ativa {
+  border-color: var(--green);
+  background: rgba(16, 185, 129, .12);
+  box-shadow: 0 0 0 1px var(--green);
+}
+.sq-fila-item-ativa .sq-fila-ordinal { color: var(--green); }
+.sq-fila-item-principal.sq-fila-item-ativa::after {
+  content: '✓ Em avaliação';
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--green);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.sq-fila-item-ativa.sq-fila-item-principal i.fa-play { display: none; }
+
+/* 1ª posição — a próxima a ser avaliada — ocupa a linha inteira sozinha,
+   ABAIXO da 3ª/2ª (ver .sq-fila-secundarias, acima), com mais destaque e
+   informação (data, hora do fim, tipo por extenso) do que as demais
+   posições da fila. */
+.sq-fila-item-principal {
+  width: 100%;
+  padding: 10px 16px;
+  border-color: var(--accent);
+  gap: 12px;
+}
+.sq-fila-item-principal .sq-fila-item-info strong { font-size: .92rem; }
+.sq-fila-item-principal .sq-fila-item-info span { font-size: .74rem; }
+.sq-fila-item-principal i.fa-play { color: var(--accent); margin-left: auto; }
+
+/* Número da posição na fila (1ª, 2ª, 3ª...) — vem da ORDEM da lista, não
+   é guardado em lugar nenhum: ao recarregar a fila depois de uma
+   avaliação ser registrada, quem era 2ª passa a ser 1ª automaticamente. */
+.sq-fila-ordinal {
+  font-weight: 800;
+  font-size: .74rem;
+  color: var(--accent);
+  min-width: 20px;
+  text-align: center;
+}
+.sq-fila-item-principal .sq-fila-ordinal { font-size: .95rem; }
+
 /* ── Topbar ───────────────────────────────────────────────── */
 .sq-topbar {
   display: flex;
@@ -532,6 +655,11 @@ body {
 .sq-hide-view.is-view { display: none !important; }
 .sq-show-view { display: none; }
 .sq-show-view.is-view { display: inline-flex !important; }
+/* .sq-fila-pendentes usa .sq-hide-view só pra herdar a lógica de
+   esconder em modo só-leitura (ver setEditable, setor-qualidade.js) —
+   mas é um painel full-width, não um botão inline; precisa do próprio
+   "flex" em vez do "inline-flex" que .sq-hide-view assume por padrão. */
+.sq-fila-pendentes.sq-hide-view { display: flex; }
 
 /* ── Responsivo ───────────────────────────────────────────── */
 @media (max-width: 1024px) {

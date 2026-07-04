@@ -815,9 +815,12 @@ h4 {
   position: sticky;
   top: 0;
   z-index: 10;
-  /* Garante que o cabeçalho fique sobre as linhas */
-  background-color: #1e2229;
-  /* Use a cor de fundo exata da sua tabela para não ficar transparente */
+  /* Garante que o cabeçalho fique sobre as linhas — var(--bg-card), não
+     mais uma cor fixa (#1e2229): aquele valor só bate com o tema escuro
+     padrão; no tema Claro (--bg-card:#fff) ou Lightwall (--bg-card:
+     #122236) o cabeçalho ficava sempre com aquele azul-marinho fixo,
+     destoando do resto da tabela (que already troca de cor com o tema). */
+  background-color: var(--bg-card);
   box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.4);
   /* Adiciona uma leve sombra para separar do conteúdo */
 }
@@ -2469,7 +2472,7 @@ td.mono {
    inteira no card, sem scroll. */
 .ba-grid {
   display: flex;
-  flex-direction: row;
+  flex-direction: row-reverse; /* berço 1 à direita, berço N à esquerda */
   flex-wrap: nowrap;
   gap: 4px;
 }

@@ -1143,6 +1143,48 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── REGISTRAR AVALIAÇÃO DE QUALIDADE (Setor de Qualidade): grava a
+  // avaliação DEFINITIVA (não rascunho — rascunhos continuam só no
+  // localStorage do navegador, ver setor-qualidade.js) — 1 linha em
+  // avaliacoes_qualidade, painéis inclusos como JSON (ver
+  // db.salvarAvaliacaoQualidade). Sem exigir sessão de admin nem
+  // dispositivo autorizado, de propósito — mesmo nível de fricção baixa
+  // de /marcar-berco-andamento e outras rotas internas do dia a dia.
+  if (req.method === 'POST' && urlPath === '/registrar-avaliacao-qualidade') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const avaliacao = JSON.parse(body);
+        if (!avaliacao || typeof avaliacao !== 'object' || !avaliacao.id) {
+          throw new Error('Avaliação inválida — falta o id.');
+        }
+        db.salvarAvaliacaoQualidade(avaliacao);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ── LISTAR AVALIAÇÕES DE QUALIDADE: alimenta o Dashboard e os
+  // Registros do Setor de Qualidade — cada item já vem com os painéis
+  // embutidos (ver db.listarAvaliacoesQualidade), mais recente primeiro.
+  if (req.method === 'GET' && urlPath === '/avaliacoes-qualidade') {
+    try {
+      const lista = db.listarAvaliacoesQualidade();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(lista));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    }
+    return;
+  }
+
   // ── EDITAR TRAÇO (Relatório de Injeção): corrige um traço já registrado
   // em relatorio_injecao.json (id_bateria/berços/obs do USO específico
   // clicado, dados de identificação do traço, e os 5 insumos + tempo de

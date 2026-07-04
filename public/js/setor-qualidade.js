@@ -38,7 +38,7 @@
   let mirrorIndex    = 0;
 
   // ── Fila de baterias não avaliadas (Registro de Baterias → Setor de
-  // Qualidade) — ver abrirFilaNaoAvaliadas()/_iniciarForm(), abaixo.
+  // Qualidade) — ver carregarFilaNaoAvaliadas()/_iniciarForm(), abaixo.
   let filaOperacoes    = [];  // última lista carregada de GET /operacoes-nao-avaliadas
   let linkedOperacaoId = null; // id_operacao da fila vinculado à avaliação em edição, ou null (avulsa)
 
@@ -374,17 +374,20 @@
     if (sec) sec.classList.add('active');
     if (nav) nav.classList.add('active');
     if (section === 'list')      renderDrafts();
-    if (section === 'history')   renderHistory();
-    if (section === 'dashboard') renderDashboard();
+    if (section === 'form')      carregarFilaNaoAvaliadas();
+    if (section === 'history')   { renderHistory(); carregarAvaliacoesQualidade().then(renderHistory); }
+    if (section === 'dashboard') { renderDashboard(); carregarAvaliacoesQualidade().then(renderDashboard); }
   }
   function goBack() { if (viewMode) exitViewMode(); navigateTo(viewSource); }
 
-  // "Nova Avaliação" agora abre a fila de baterias pendentes primeiro —
-  // quem realmente monta o formulário em branco é _iniciarForm(), chamada
-  // ou pela fila (iniciarAvaliacaoDaFila) ou pela avaliação avulsa
-  // (iniciarAvaliacaoAvulsa), abaixo.
+  // Aba "🧪 Avaliação" (topbar) chama isto direto — abre o formulário em
+  // branco (avaliação avulsa, sem vincular a nenhuma operação ainda) já
+  // COM a fila de baterias pendentes visível acima do cabeçalho do
+  // formulário (ver carregarFilaNaoAvaliadas, abaixo). Clicar num item da
+  // fila vincula e preenche; não precisa mais de um botão "Nova
+  // Avaliação" separado nem de nenhum passo intermediário.
   function startNew() {
-    abrirFilaNaoAvaliadas();
+    _iniciarForm(null);
   }
 
   function _iniciarForm(operacaoVinculada) {
@@ -515,68 +518,166 @@
     return novo;
   }
 
-  // ── Modal da fila ─────────────────────────────────────
-  function abrirFilaNaoAvaliadas() {
-    const overlay     = document.getElementById('sq-modal-fila');
-    const sel         = document.getElementById('sq-fila-select');
-    const wrapEl      = document.getElementById('sq-fila-select-wrap');
-    const vazioEl     = document.getElementById('sq-fila-vazio');
-    const btnIniciar  = document.getElementById('sq-fila-btn-iniciar');
+  // ── Painel da fila (dentro da aba "🧪 Avaliação", acima do
+  //    "Cabeçalho do registro" — ver setor-qualidade-app.html) ────────
+  // Ordem de PREVISÃO DE DESEMPLAQUE: como o desemplaque é sempre "fim da
+  // injeção + tempo fixo de cura" (mesmo intervalo pra todas), a operação
+  // com o "fim" mais antigo é sempre a que desemplaca (e por isso pode
+  // ser avaliada) primeiro — /operacoes-nao-avaliadas já devolve a lista
+  // nessa ordem (fim ASC, ver server.js), então a posição no array JÁ É
+  // a posição na fila: 1º item = 1ª, 2º item = 2ª, etc. Não precisa
+  // guardar essa posição em lugar nenhum — ao recarregar a fila (depois
+  // de registrar uma avaliação, por exemplo), quem era 2ª vira 1ª
+  // automaticamente, só por ter subido uma posição no array.
+  //
+  // Só as 3 primeiras posições viram cartão — da 4ª em diante fica num
+  // <select> (ver sq-fila-outras-wrap no HTML), pra não lotar a tela
+  // quando a fila for grande. Layout dos cartões, de cima pra baixo:
+  //   3ª  2ª      (lado a lado, compactas)
+  //      1ª       (linha própria, em destaque, com todos os detalhes)
+  // Clicar em QUALQUER cartão (ou escolher no select + "Iniciar")
+  // preenche o formulário inteiro (ver iniciarAvaliacaoDaFila /
+  // iniciarAvaliacaoDoSelect, abaixo).
+  function _filaOrdinal(posicao) { return posicao + 'ª'; }
+  function _filaData(iso) {
+    if (!iso) return '--';
+    return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  }
+  function _filaHora(iso) {
+    if (!iso) return '--';
+    return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+  function _filaTipoLabel(tipoMontagem) {
+    return tipoMontagem === 'PERSONALIZADA' ? 'Personalizada' : (tipoMontagem || '--');
+  }
+  // Destaca (classe .sq-fila-item-ativa) o item vinculado à avaliação
+  // que está sendo preenchida NESTE momento (linkedOperacaoId) — assim
+  // dá pra ver de relance qual bateria está em avaliação, mesmo com
+  // várias pendentes na fila.
+  function _filaClasseAtiva(op) {
+    return op.id === linkedOperacaoId ? ' sq-fila-item-ativa' : '';
+  }
+  function _filaCartaoCompacto(op, posicao) {
+    return `
+      <button type="button" class="sq-fila-item${_filaClasseAtiva(op)}" onclick="SQ.iniciarAvaliacaoDaFila('${op.id}')" title="Iniciar avaliação desta bateria">
+        <span class="sq-fila-ordinal">${_filaOrdinal(posicao)}</span>
+        <span class="sq-fila-item-info">
+          <strong>${op.id_bateria || 'N/I'}</strong>
+          <span>${_filaData(op.fim)} · ${_filaTipoLabel(op.tipo_montagem)}</span>
+        </span>
+      </button>`;
+  }
+  function _filaCartaoPrincipal(op, posicao) {
+    return `
+      <button type="button" class="sq-fila-item sq-fila-item-principal${_filaClasseAtiva(op)}" onclick="SQ.iniciarAvaliacaoDaFila('${op.id}')" title="Iniciar avaliação desta bateria">
+        <span class="sq-fila-ordinal">${_filaOrdinal(posicao)}</span>
+        <span class="sq-fila-item-info">
+          <strong>${op.id_bateria || 'N/I'}</strong>
+          <span>${_filaData(op.fim)} · ${_filaHora(op.fim)} (fim da operação) · Montagem: ${_filaTipoLabel(op.tipo_montagem)}</span>
+        </span>
+        <i class="fas fa-play"></i>
+      </button>`;
+  }
 
-    sel.innerHTML = '<option>Carregando…</option>';
-    wrapEl.style.display = '';
-    vazioEl.style.display = 'none';
-    btnIniciar.disabled = true;
-    overlay.classList.add('open');
+  function carregarFilaNaoAvaliadas() {
+    const listEl  = document.getElementById('sq-fila-list');
+    if (!listEl) return; // painel só existe na aba "Avaliação"
+    const outrasWrap = document.getElementById('sq-fila-outras-wrap');
+    const sel         = document.getElementById('sq-fila-select');
 
     fetch('/operacoes-nao-avaliadas')
       .then(r => r.json())
       .then(lista => {
-        filaOperacoes = Array.isArray(lista) ? lista : [];
+        // Quem já tem RASCUNHO salvo (mesmo ainda não registrado) sai da
+        // fila — já está "sendo avaliada", não faz sentido continuar
+        // aparecendo como pendente pra outra pessoa escolher de novo.
+        // Só a bateria vinculada à avaliação em edição AGORA (mesmo sem
+        // rascunho salvo ainda) fica visível — e destacada (ver
+        // _filaClasseAtiva) — pra quem a escolheu não perder a
+        // referência dela na fila.
+        const idsComRascunho = new Set(
+          getDrafts().map(d => d.linkedOperacaoId).filter(Boolean)
+        );
+        filaOperacoes = (Array.isArray(lista) ? lista : [])
+          .filter(op => op.id === linkedOperacaoId || !idsComRascunho.has(op.id));
+
         if (!filaOperacoes.length) {
-          wrapEl.style.display = 'none';
-          vazioEl.innerHTML = '<i class="fas fa-check-circle"></i>Nenhuma bateria pendente de avaliação no momento.';
-          vazioEl.style.display = '';
-          btnIniciar.disabled = true;
+          outrasWrap.style.display = 'none';
+          listEl.innerHTML = '<span class="sq-fila-pendentes-vazio"><i class="fas fa-check-circle"></i> Nenhuma bateria pendente de avaliação no momento.</span>';
           return;
         }
-        sel.innerHTML = filaOperacoes.map(op => {
-          const dt = op.fim
-            ? new Date(op.fim).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
-            : '--';
-          const tipo = op.tipo_montagem || '--';
-          return `<option value="${op.id}">${op.id_bateria || 'N/I'} · ${tipo} · ${dt}</option>`;
-        }).join('');
-        btnIniciar.disabled = false;
+
+        const [terceira, segunda, primeira] = [filaOperacoes[2], filaOperacoes[1], filaOperacoes[0]];
+        const outras = filaOperacoes.slice(3); // 4ª em diante
+
+        // 4ª em diante — só o select, sem cartão.
+        if (outras.length) {
+          sel.innerHTML = outras.map((op, i) => {
+            const posicao = i + 4;
+            const dt = op.fim ? `${_filaData(op.fim)} ${_filaHora(op.fim)}` : '--';
+            return `<option value="${op.id}">${_filaOrdinal(posicao)} · ${op.id_bateria || 'N/I'} · ${_filaTipoLabel(op.tipo_montagem)} · ${dt}</option>`;
+          }).join('');
+          outrasWrap.style.display = 'flex';
+        } else {
+          sel.innerHTML = '';
+          outrasWrap.style.display = 'none';
+        }
+
+        // Cartões: 3ª e 2ª lado a lado em cima, 1ª embaixo em destaque.
+        let html = '<div class="sq-fila-secundarias">';
+        if (terceira) html += _filaCartaoCompacto(terceira, 3);
+        if (segunda)  html += _filaCartaoCompacto(segunda, 2);
+        html += '</div>';
+        if (primeira) html += _filaCartaoPrincipal(primeira, 1);
+        listEl.innerHTML = html;
       })
       .catch(err => {
         console.error('Falha ao carregar fila de baterias não avaliadas:', err);
-        wrapEl.style.display = 'none';
-        vazioEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i>Não foi possível carregar a fila agora. Tente novamente ou use "Avaliação avulsa".';
-        vazioEl.style.display = '';
-        btnIniciar.disabled = true;
+        outrasWrap.style.display = 'none';
+        listEl.innerHTML = '<span class="sq-fila-pendentes-vazio"><i class="fas fa-exclamation-triangle"></i> Não foi possível carregar a fila agora.</span>';
       });
   }
 
-  function fecharFilaNaoAvaliadas() {
-    document.getElementById('sq-modal-fila').classList.remove('open');
-  }
-
-  function iniciarAvaliacaoDaFila() {
-    const sel = document.getElementById('sq-fila-select');
-    const op = filaOperacoes.find(o => o.id === sel.value);
-    fecharFilaNaoAvaliadas();
+  function iniciarAvaliacaoDaFila(idOperacao) {
+    const op = filaOperacoes.find(o => o.id === idOperacao);
     _iniciarForm(op || null);
   }
 
-  function iniciarAvaliacaoAvulsa() {
-    fecharFilaNaoAvaliadas();
-    _iniciarForm(null);
+  function iniciarAvaliacaoDoSelect() {
+    const sel = document.getElementById('sq-fila-select');
+    if (sel && sel.value) iniciarAvaliacaoDaFila(sel.value);
   }
 
-  /* ── Dados (avaliacoes / paineis) ─────────────────────── */
+  /* ── Dados (avaliacoes / paineis) — vêm do servidor (SQL), não mais do
+     localStorage. Rascunhos (getDrafts, abaixo) continuam locais — só a
+     avaliação já REGISTRADA (definitiva) mora no banco (ver
+     db.avaliacoes_qualidade / GET /avaliacoes-qualidade, server.js). ── */
+  let avaliacoesCache = { avaliacoes: [], paineis: [] };
+
+  // Busca todas as avaliações registradas no servidor e recompõe o
+  // formato { avaliacoes, paineis } que o resto do módulo já espera —
+  // "paineis" é achatado (flatMap) a partir da lista de painéis embutida
+  // em cada avaliação (ver server.js), mantendo o campo "avaliacaoId" em
+  // cada painel pra filtros tipo `paineis.filter(p => p.avaliacaoId === id)`
+  // continuarem funcionando sem precisar tocar em quem já usa getData().
+  function carregarAvaliacoesQualidade() {
+    return fetch('/avaliacoes-qualidade')
+      .then(r => r.json())
+      .then(lista => {
+        avaliacoesCache = {
+          avaliacoes: Array.isArray(lista) ? lista : [],
+          paineis: Array.isArray(lista) ? lista.flatMap(a => Array.isArray(a.paineis) ? a.paineis : []) : [],
+        };
+        return avaliacoesCache;
+      })
+      .catch(err => {
+        console.error('Falha ao carregar avaliações de qualidade do servidor:', err);
+        return avaliacoesCache; // mantém o que já tinha em cache
+      });
+  }
+
   function getData() {
-    return { avaliacoes: LS.get('avaliacoes') || [], paineis: LS.get('paineis') || [] };
+    return avaliacoesCache;
   }
   function getDrafts() {
     return LS.keys('draft_').map(k => {
@@ -643,6 +744,7 @@
     currentDraftId = id;
     showAlert('Salvo', 'Avaliação salva com sucesso!');
     navigateTo('list');
+    carregarFilaNaoAvaliadas();
   }
 
   /* ── Carregar rascunho ────────────────────────────────── */
@@ -686,37 +788,61 @@
         totalSlabs: parseInt(document.getElementById('sq-thickness').value) * 4,
         observations: document.getElementById('sq-obs').value,
       };
-      const panels = Object.entries(slabState).map(([id, marks]) => {
+      // Painéis embutidos na própria avaliação — 1 linha no banco pra
+      // avaliação inteira (ver db.salvarAvaliacaoQualidade, db.js),
+      // "avaliacaoId" mantido em cada painel só por compatibilidade com
+      // quem já filtra por ele (ver getData()/carregarAvaliacoesQualidade).
+      evalObj.paineis = Object.entries(slabState).map(([id, marks]) => {
         const parts = id.split('-');
         const info  = getClassifiedInfo(marks);
         return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, marcas: marks };
       });
-      const d = getData();
-      d.avaliacoes.push(evalObj);
-      d.paineis.push(...panels);
-      LS.set('avaliacoes', d.avaliacoes);
-      LS.set('paineis', d.paineis);
-      if (currentDraftId) LS.del('draft_' + currentDraftId);
 
-      // Captura ANTES do clearForm() (abaixo zera linkedOperacaoId) — a
-      // avaliação já está salva localmente nas linhas acima independente
-      // do resultado desta chamada; se ela falhar (rede fora etc.), só
-      // loga no console — a bateria continua na fila e dá pra marcar
-      // depois, o vínculo em si não se perde (já foi salvo em
-      // evalObj.linkedOperacaoId, no histórico local).
       const opIdParaMarcar = linkedOperacaoId;
-      clearForm();
-      currentDraftId = null;
-      showAlert('Concluído', 'Avaliação registrada com sucesso!');
-      navigateTo('list');
+      const btnRegistrar = document.getElementById('sq-btn-register');
+      if (btnRegistrar) btnRegistrar.disabled = true;
 
-      if (opIdParaMarcar) {
-        fetch('/marcar-operacao-avaliada', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: opIdParaMarcar }),
-        }).catch(err => console.error('Não consegui marcar a operação como avaliada:', err));
-      }
+      fetch('/registrar-avaliacao-qualidade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(evalObj),
+      })
+        .then(res => {
+          if (!res.ok) return res.json().catch(() => null).then(j => { throw new Error(j?.erro || 'O servidor recusou salvar a avaliação.'); });
+          return res.json();
+        })
+        .then(() => {
+          // Só limpa o formulário e sai da tela DEPOIS de confirmado no
+          // servidor — diferente do rascunho local antigo, não tem mais
+          // "salvo local, sincroniza depois": se a rede cair antes daqui,
+          // a pessoa continua na tela, com os dados intactos, e pode
+          // tentar "Registrar" de novo.
+          if (currentDraftId) LS.del('draft_' + currentDraftId);
+          clearForm();
+          currentDraftId = null;
+          showAlert('Concluído', 'Avaliação registrada com sucesso!');
+          navigateTo('list');
+          carregarAvaliacoesQualidade();
+
+          if (opIdParaMarcar) {
+            fetch('/marcar-operacao-avaliada', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: opIdParaMarcar }),
+            })
+              .then(() => carregarFilaNaoAvaliadas()) // sai da fila -> os demais sobem de posição
+              .catch(err => console.error('Não consegui marcar a operação como avaliada:', err));
+          } else {
+            carregarFilaNaoAvaliadas(); // avulsa: não muda a fila, mas mantém em dia mesmo assim
+          }
+        })
+        .catch(err => {
+          console.error('Falha ao registrar avaliação de qualidade:', err);
+          showAlert('Erro', 'Não consegui salvar a avaliação agora (' + err.message + '). Nada foi perdido — tente "Registrar" de novo.');
+        })
+        .finally(() => {
+          if (btnRegistrar) btnRegistrar.disabled = false;
+        });
     });
   }
 
@@ -859,7 +985,16 @@
       html += `<div class="sq-mini-pallet"><div class="sq-mini-pallet-header">P${p}</div>`;
       for (let i = 1; i <= n; i++) {
         const panel = panels.find(pa => pa.pallet===p && pa.posicao===i);
-        const tipo  = panel?.tipoEsperado || '';
+        // Placa sem marca individual (a imensa maioria — só quem tem
+        // defeito é marcado, ver classifyMarks/"Sem marcação") NÃO tinha
+        // "panel" correspondente, e o tipo (SP/2P/3T/1T) só vinha de lá —
+        // por isso o espelho inteiro aparecia sem cor nenhuma na prática
+        // (só os poucos painéis marcados apareciam, o resto ficava em
+        // branco). O tipo esperado da placa já é conhecido de qualquer
+        // forma pelo tipo de montagem do PALLET (item.montagem), então
+        // cai nisso quando não há painel — mantém a cor/identificação
+        // mesmo em placas sem nenhuma marca.
+        const tipo = panel?.tipoEsperado || item.montagem?.['pallet'+p] || '';
         html += `<div class="sq-mini-slab"><span class="sq-mini-slab-number">${i}</span><div class="sq-mini-slab-marks">${getMirrorMark(panel)}</div>${tipo?`<span class="sq-mini-slab-type ${cm[tipo]||''}">${tipo}</span>`:''}</div>`;
       }
       html += '</div>';
@@ -1184,8 +1319,7 @@
   /* ── API pública ──────────────────────────────────────── */
   window.SQ = {
     navigateTo, goBack, startNew,
-    abrirFilaNaoAvaliadas, fecharFilaNaoAvaliadas,
-    iniciarAvaliacaoDaFila, iniciarAvaliacaoAvulsa,
+    iniciarAvaliacaoDaFila, iniciarAvaliacaoDoSelect,
     saveDraft, loadDraft, deleteDraft, viewDraft,
     registerEvaluation, viewHistoryRecord,
     renderDashboard, renderHistory,
@@ -1202,8 +1336,8 @@
     clearModalPlates, confirmPalletModal,
     init() {
       _carregarOpcoesMontagem();
-      navigateTo('list');
-      autoSetThickness();
+      carregarAvaliacoesQualidade();
+      startNew();
     },
   };
 
