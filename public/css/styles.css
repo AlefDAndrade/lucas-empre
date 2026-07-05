@@ -2892,6 +2892,10 @@ td.mono {
   gap: 4px;
 }
 
+.table-header-oee th{
+  text-align: center;
+}
+
 /* Célula "em pé": indicador em cima, número no meio, indicador embaixo —
    só leitura quanto à cor por tipo de montagem (via style inline, ver
    _renderBateriaAtual) — não é clicável, não reage a hover/clique (só os
