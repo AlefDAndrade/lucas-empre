@@ -2888,6 +2888,7 @@ td.mono {
   display: flex;
   flex-direction: row-reverse; /* berço 1 à direita, berço N à esquerda */
   flex-wrap: nowrap;
+  justify-content: center; /* centraliza quando as células atingem max-width e não preenchem toda a largura disponível — sem isso, sobravam vazias do lado esquerdo (flex-start de um row-reverse empurra tudo pro lado direito) */
   gap: 4px;
 }
 
