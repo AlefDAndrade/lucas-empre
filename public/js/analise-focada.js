@@ -182,12 +182,19 @@
     if (!p) return '— Sem marcação';
     if (p.resultado === 'aprovado') return p.linha === '2ª' ? 'Aprovado / 2ª linha' : 'Aprovado / 1ª linha';
     if (p.resultado === 'reprovado') return 'Reprovado';
+    // Bateria excluída da fila do Setor de Qualidade antes de ser avaliada
+    // de verdade (ver SQ.excluirDaFila, setor-qualidade.js) — TODOS os
+    // painéis dela nascem com este resultado, tipoObtido sempre null.
+    // Sem este caso, caía no "— Sem marcação"/"—" abaixo, indistinguível
+    // de uma placa que nunca teve marca nenhuma numa avaliação normal.
+    if (p.resultado === 'nao_avaliado_no_sistema') return 'Não avaliado no sistema';
     return p.tipoObtido || '—'; // caso raro: 'Outros'/'Múltiplas' (ver classifyMarks, setor-qualidade.js)
   }
   function _corPainel(p) {
     if (!p) return 'var(--border-2)';
     if (p.resultado === 'aprovado') return p.linha === '2ª' ? 'var(--blue)' : 'var(--green)';
     if (p.resultado === 'reprovado') return 'var(--red)';
+    if (p.resultado === 'nao_avaliado_no_sistema') return 'var(--text-3)';
     return 'var(--text-3)';
   }
 
