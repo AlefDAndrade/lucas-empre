@@ -377,14 +377,47 @@
   }
 
   // ── Render: gráfico de barras (canvas) — OEE por turno-instância ────────
+
+  // Altura "lógica" (CSS) do gráfico — mesmo valor do atributo height="160"
+  // do <canvas id="oee-chart-turnos"> (index.html/page-oee.html).
+  const ALTURA_CHART_TURNOS_PX = 160;
+
+  /**
+   * Prepara o canvas pra desenho nítido em telas de alta resolução
+   * (devicePixelRatio > 1 — Retina, a maioria dos notebooks/celulares
+   * modernos): aumenta a resolução INTERNA do bitmap (canvas.width/height)
+   * proporcionalmente ao dpr, mas trava o tamanho VISÍVEL na página via
+   * canvas.style.width/height, em px CSS fixos.
+   *
+   * BUG CORRIGIDO: antes, canvas.style.width/height nunca eram fixados —
+   * como este canvas não tem nenhuma regra de CSS controlando seu tamanho,
+   * o próprio atributo width/height (interno, já multiplicado pelo dpr)
+   * também definia o tamanho exibido na tela. Pior: canvas.height = (canvas
+   * .height || 160) * dpr relia no valor ATUAL de canvas.height como base
+   * — que já vinha inflado pelo dpr da renderização anterior — então a
+   * cada re-render (filtro, resize, etc.) a altura (e a largura, pelo mesmo
+   * motivo com rect.width) dobrava de novo, sem limite. Resultado: o
+   * gráfico crescia a cada atualização, vazando pra fora do card, e as
+   * datas (desenhadas com coordenadas baseadas no tamanho lógico) ficavam
+   * cada vez mais desalinhadas com a caixa real na tela — daí o efeito de
+   * "torto". Agora a altura lógica é sempre a mesma constante fixa, e o
+   * tamanho visível fica travado por CSS, então getBoundingClientRect()
+   * sempre devolve a largura real do card — nunca um valor já inflado.
+   */
   function _px(canvas) {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = (canvas.height || 160) * dpr;
+    const wCss = rect.width;
+    const hCss = ALTURA_CHART_TURNOS_PX;
+
+    canvas.width = wCss * dpr;
+    canvas.height = hCss * dpr;
+    canvas.style.width = wCss + 'px';
+    canvas.style.height = hCss + 'px';
+
     ctx.scale(dpr, dpr);
-    return { ctx, w: rect.width, h: canvas.height / dpr };
+    return { ctx, w: wCss, h: hCss };
   }
 
   function _drawBarChart(id, labels, values, cor) {

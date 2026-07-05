@@ -587,7 +587,16 @@
       return;
     }
 
-    const th = (t, explicacao) => `<th style="padding:8px 12px;text-align:${isNaN(t[0]) ? 'left' : 'right'};font-size:.72rem;font-weight:600;color:var(--text-3);white-space:nowrap;border-bottom:1px solid var(--border)${explicacao ? ';border-bottom-style:dotted' : ''}"${explicacao ? ` data-tooltip="${LW.escaparHtml(explicacao)}"` : ''}>${t}</th>`;
+    // ANTES: alinhava com base em isNaN(t[0]) — o primeiro CARACTERE do
+    // texto do cabeçalho (ex: "N"[0]='N', "Média"[0]='M'). Como todo
+    // rótulo de cabeçalho começa com letra, isNaN(letra) é sempre `true`
+    // — ou seja, TODO cabeçalho saía alinhado à esquerda, inclusive os de
+    // coluna numérica (N, Média, Mediana, Desvio Padrão, CV %, Mín, Máx),
+    // enquanto os valores dessas colunas (td, abaixo) sempre foram
+    // alinhados à direita — cabeçalho e dado nunca bateam. Agora o
+    // alinhamento vem de um parâmetro explícito por coluna, igual ao que
+    // já era feito em td()/tdL() logo abaixo.
+    const th = (t, explicacao, numerico = true) => `<th style="padding:8px 12px;text-align:${numerico ? 'right' : 'left'};font-size:.72rem;font-weight:600;color:var(--text-3);white-space:nowrap;border-bottom:1px solid var(--border)${explicacao ? ';border-bottom-style:dotted' : ''}"${explicacao ? ` data-tooltip="${LW.escaparHtml(explicacao)}"` : ''}>${t}</th>`;
     const td = (v, color = '') => `<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:.78rem;color:${color || 'var(--text-2)'};white-space:nowrap">${v}</td>`;
     const tdL = (v) => `<td style="padding:8px 12px;font-size:.82rem;font-weight:600;color:var(--text)">${v}</td>`;
 
@@ -609,7 +618,7 @@
     el.innerHTML = `
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--bg-3)">
-          ${th('Insumo')}${th('N', 'Quantidade de traços com valor real registrado para este insumo no período')}${th('Média', 'Soma de todos os valores dividida pela quantidade (N) — o valor "típico" do insumo no período')}${th('Mediana', 'Valor do meio quando todos os registros são ordenados — menos sensível a valores extremos (outliers) do que a Média')}${th('Desvio Padrão', 'O quanto os valores variam em torno da Média, na mesma unidade do insumo — quanto maior, mais inconsistente a receita')}${th('CV %', 'Coeficiente de Variação = Desvio Padrão ÷ Média, em %. Compara a variabilidade entre insumos de unidades diferentes. Verde <15% (estável) · Amarelo 15-25% (atenção) · Vermelho >25% (instável)')}${th('Mín', 'Menor valor registrado no período')}${th('Máx', 'Maior valor registrado no período')}
+          ${th('Insumo', null, false)}${th('N', 'Quantidade de traços com valor real registrado para este insumo no período')}${th('Média', 'Soma de todos os valores dividida pela quantidade (N) — o valor "típico" do insumo no período')}${th('Mediana', 'Valor do meio quando todos os registros são ordenados — menos sensível a valores extremos (outliers) do que a Média')}${th('Desvio Padrão', 'O quanto os valores variam em torno da Média, na mesma unidade do insumo — quanto maior, mais inconsistente a receita')}${th('CV %', 'Coeficiente de Variação = Desvio Padrão ÷ Média, em %. Compara a variabilidade entre insumos de unidades diferentes. Verde <15% (estável) · Amarelo 15-25% (atenção) · Vermelho >25% (instável)')}${th('Mín', 'Menor valor registrado no período')}${th('Máx', 'Maior valor registrado no período')}
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>

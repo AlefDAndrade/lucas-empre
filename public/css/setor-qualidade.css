@@ -55,35 +55,86 @@ body {
 
 .sq-container { max-width: 1280px; width: 100%; }
 
-/* ── Fila de baterias pendentes de avaliação — vive dentro da aba
-     "🧪 Avaliação" (#sq-form), logo ACIMA do "Cabeçalho do registro" (ver
-     setor-qualidade-app.html / setor-qualidade.js,
-     carregarFilaNaoAvaliadas). Ordenada por previsão de desemplaque: a
-     1ª posição (mais urgente) vem em destaque, numa linha própria com
-     todos os detalhes; as demais vêm compactas, numa fileira que quebra
-     linha conforme precisar. ── */
-.sq-fila-pendentes {
+/* ── "Em Andamento" e Fila de baterias pendentes de avaliação — vivem
+     dentro da aba "🧪 Avaliação" (#sq-form), logo ACIMA do "Cabeçalho do
+     registro" (ver setor-qualidade-app.html / setor-qualidade.js,
+     renderDrafts / carregarFilaNaoAvaliadas). Os dois ficam RETRAÍDOS por
+     padrão — só um botão com a contagem — e abrem um popover ao clicar
+     (ver .open, abaixo, e SQ.toggleCollapsible no JS). ── */
+.sq-collapsible-row {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  background: var(--bg-card);
-  padding: 14px 18px;
-  border-radius: var(--radius-lg);
-  border-bottom: 2px solid var(--accent);
+  gap: 8px;
   margin-bottom: 18px;
-  box-shadow: var(--sq-shadow);
 }
-.sq-fila-pendentes-titulo {
-  font-size: .78rem;
+.sq-collapsible-row.sq-hide-view { display: flex; } /* .sq-hide-view por padrão é inline-flex — aqui precisa ser coluna */
+
+.sq-collapsible { position: relative; }
+
+.sq-collapsible-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 10px 16px;
+  font-size: .8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: var(--text-3);
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  box-shadow: var(--sq-shadow);
+  transition: background .15s ease, border-color .15s ease;
 }
+.sq-collapsible-btn:hover { background: var(--bg-2); border-color: var(--accent); }
+.sq-collapsible.open .sq-collapsible-btn { border-color: var(--accent); }
+
+.sq-collapsible-badge {
+  background: var(--bg-3);
+  color: var(--text-3);
+  font-size: .72rem;
+  font-weight: 800;
+  padding: 1px 9px;
+  border-radius: 999px;
+  min-width: 20px;
+  text-align: center;
+}
+/* Contagem > 0 — aplicada via JS (renderDrafts/carregarFilaNaoAvaliadas,
+   ver setor-qualidade.js), pra chamar atenção quando há algo pra ver. */
+.sq-collapsible-badge.sq-badge-ativo {
+  background: var(--accent);
+  color: #1a1e25;
+}
+
+.sq-collapsible-chevron {
+  margin-left: auto;
+  font-size: .7rem;
+  color: var(--text-3);
+  transition: transform .15s ease;
+}
+.sq-collapsible.open .sq-collapsible-chevron { transform: rotate(180deg); }
+
+.sq-collapsible-panel {
+  display: none;
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  max-height: 360px;
+  overflow-y: auto;
+}
+.sq-collapsible.open .sq-collapsible-panel { display: block; }
+
 .sq-fila-pendentes-vazio { font-size: .78rem; color: var(--text-3); }
 
 /* 4ª posição em diante — só aparece se a fila tiver mais de 3 baterias
@@ -92,6 +143,7 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-bottom: 10px;
 }
 .sq-fila-outras select { flex: 1; }
 
@@ -655,11 +707,22 @@ body {
 .sq-hide-view.is-view { display: none !important; }
 .sq-show-view { display: none; }
 .sq-show-view.is-view { display: inline-flex !important; }
-/* .sq-fila-pendentes usa .sq-hide-view só pra herdar a lógica de
-   esconder em modo só-leitura (ver setEditable, setor-qualidade.js) —
-   mas é um painel full-width, não um botão inline; precisa do próprio
-   "flex" em vez do "inline-flex" que .sq-hide-view assume por padrão. */
-.sq-fila-pendentes.sq-hide-view { display: flex; }
+/* .sq-collapsible-row.sq-hide-view (definida lá em cima, junto do resto
+   dos colapsáveis) usa o mesmo mecanismo de esconder em modo só-leitura
+   (ver setEditable, setor-qualidade.js) — só precisa do próprio "flex"
+   em vez do "inline-flex" que .sq-hide-view assume por padrão, por ser
+   um bloco full-width com 2 colapsáveis empilhados, não um botão inline. */
+
+/* "📖 Referência" → tipos simples (Configurações → Montagem) que ainda
+   não têm combinação de marcação definida — ver
+   _renderAvisoCombinacoesFaltando(), setor-qualidade.js. */
+.sq-ref-tipo-pendente {
+  background: rgba(245, 158, 11, .08);
+  border: 1px solid var(--accent-dim, var(--border));
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
 
 /* ── Responsivo ───────────────────────────────────────────── */
 @media (max-width: 1024px) {

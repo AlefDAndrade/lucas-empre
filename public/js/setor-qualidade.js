@@ -29,7 +29,7 @@
   let actionHistory  = [];
   let currentDraftId = null;
   let viewMode       = false;
-  let viewSource     = 'list';
+  let viewSource     = 'form';
   let palletTypes    = ['', '', '', ''];
   let slabConfig     = {};
   let modalTipoSel   = 'SP';
@@ -49,6 +49,16 @@
   // usado internamente aqui (ex: "SP") — ver _codigoMontagemPorLabel.
   let _montagemOpcoesCache = [];
 
+  // ── Combinações cor+forma → tipo simples (Referência de Marcadores) —
+  // também vem de config.json (marcadores_qualidade.opcoes), gravado lá
+  // JUNTO com o resto da configuração de montagem (ver salvarCombinacao
+  // Tipo, mais abaixo). _configBrutoCache guarda o config.json inteiro
+  // (não só marcadores_qualidade) porque salvar de volta usa /salvar-
+  // config, que substitui o arquivo inteiro — precisa reenviar tudo, não
+  // só o pedaço que mudou.
+  let _marcadoresQualidadeCache = null;
+  let _configBrutoCache = null;
+
   /**
    * Popula #sq-mountType a partir de config.json — mesma fonte de verdade
    * que Registrar Operação usa (ver public/js/data.js, _aplicarTiposMontagem).
@@ -65,6 +75,8 @@
       const res = await fetch('/db/config.json');
       if (!res.ok) throw new Error('Falha ao buscar config.json');
       const cfg = await res.json();
+      _configBrutoCache = cfg;
+      _marcadoresQualidadeCache = Array.isArray(cfg?.marcadores_qualidade?.opcoes) ? cfg.marcadores_qualidade.opcoes : null;
       const opcoes = Array.isArray(cfg?.tipos_montagem?.opcoes) ? cfg.tipos_montagem.opcoes : [];
       _montagemOpcoesCache = opcoes;
       const simples = opcoes.filter(o => o && o.modo === 'simples' && o.tipo && o.label);
@@ -78,6 +90,7 @@
       });
       html += '<option value="Personalizada">Personalizada</option>';
       sel.innerHTML = html;
+      _renderAvisoCombinacoesFaltando();
     } catch (err) {
       console.error('Falha ao carregar tipos de montagem de config.json — usando lista fixa de reserva:', err);
       // Fallback só pra tela não ficar sem nenhuma opção se config.json
@@ -107,30 +120,234 @@
   /* Referências Chart.js */
   let charts = {};
 
+  /* ── Combinações cor+forma → tipo simples ─────────────────
+     Antes 100% fixo no código (só reconhecia 2P/SP/3T/1T). Agora vem de
+     config.json (marcadores_qualidade.opcoes) — qualquer tipo simples
+     novo cadastrado em Configurações → Montagem só ganha uma combinação
+     de marcação quando alguém definir uma explicitamente (ver "📖
+     Referência" → "Tipos sem marcação definida", mais abaixo). Até lá,
+     ou enquanto config.json ainda não carregou, usa exatamente o
+     comportamento de sempre (COMBINACOES_PADRAO) — ninguém que já usa
+     2P/SP/3T/1T é afetado por esta mudança. */
+  const COMBINACOES_PADRAO = [
+    { tipo: '2p', forma: 'circle',      corModificadora: null },
+    { tipo: 'sp', forma: 'dash',        corModificadora: null },
+    { tipo: '3t', forma: 'circle+dash', corModificadora: 'amarelo' },
+    { tipo: '1t', forma: 'circle+dash', corModificadora: 'laranja' },
+  ];
+  // Vermelho NUNCA entra aqui — é sempre o círculo de "reprovado" em
+  // QUALQUER combinação (regra fixa, não configurável). Verde/azul
+  // também são sempre o par "aprovado 1ª/2ª linha" em toda combinação —
+  // a única coisa que realmente varia de tipo pra tipo é a FORMA (círculo
+  // sozinho / traço sozinho / círculo+traço) e, quando combinada, a COR
+  // do traço modificador.
+  const CORES_MARCACAO = ['verde', 'vermelho', 'azul', 'amarelo', 'laranja'];
+  const CORES_RESERVADAS_APROVACAO = ['verde', 'azul', 'vermelho'];
+
+  function _combinacoesEfetivas() {
+    return (Array.isArray(_marcadoresQualidadeCache) && _marcadoresQualidadeCache.length)
+      ? _marcadoresQualidadeCache
+      : COMBINACOES_PADRAO;
+  }
+
   /* ── Classificação de marcas ──────────────────────────── */
   function classifyMarks(marks) {
     const circles = marks.filter(m => m.shape === 'circle');
     const dashes  = marks.filter(m => m.shape === 'dash');
     const cor     = arr => arr.length ? arr[0].color : null;
     const ok      = c => c === 'verde' || c === 'azul';
+    const combinacoes = _combinacoesEfetivas();
+
     if (circles.length && dashes.length) {
       const cc = cor(circles), dc = cor(dashes);
-      if (ok(cc) && dc === 'amarelo') return '3T aprovado';
-      if (cc === 'vermelho' && dc === 'amarelo') return '3T reprovado';
-      if (ok(cc) && dc === 'laranja')  return '1T aprovado';
-      if (cc === 'vermelho' && dc === 'laranja')  return '1T reprovado';
+      const combo = combinacoes.find(c => c.forma === 'circle+dash' && c.corModificadora === dc);
+      if (combo) {
+        if (ok(cc)) return `${combo.tipo.toUpperCase()} aprovado`;
+        if (cc === 'vermelho') return `${combo.tipo.toUpperCase()} reprovado`;
+      }
       return 'Múltiplas';
     }
-    if (circles.length) { const c = cor(circles); return ok(c) ? '2P aprovado' : c === 'vermelho' ? '2P reprovado' : 'Outros'; }
-    if (dashes.length)  { const c = cor(dashes);  return ok(c) ? 'SP aprovado'  : c === 'vermelho' ? 'SP reprovado'  : 'Outros'; }
+    if (circles.length) {
+      const combo = combinacoes.find(c => c.forma === 'circle');
+      const c = cor(circles);
+      if (combo) {
+        if (ok(c)) return `${combo.tipo.toUpperCase()} aprovado`;
+        if (c === 'vermelho') return `${combo.tipo.toUpperCase()} reprovado`;
+      }
+      return 'Outros';
+    }
+    if (dashes.length) {
+      const combo = combinacoes.find(c => c.forma === 'dash');
+      const c = cor(dashes);
+      if (combo) {
+        if (ok(c)) return `${combo.tipo.toUpperCase()} aprovado`;
+        if (c === 'vermelho') return `${combo.tipo.toUpperCase()} reprovado`;
+      }
+      return 'Outros';
+    }
     return 'Sem marcação';
   }
   function getClassifiedInfo(marks) {
     const s = classifyMarks(marks);
     if (['Sem marcação', 'Múltiplas', 'Outros'].includes(s))
-      return { tipoObtido: s, resultado: s.toLowerCase().replace(' ', '_') };
+      return { tipoObtido: s, resultado: s.toLowerCase().replace(' ', '_'), linha: null };
     const [tipo, resultado] = s.split(' ');
-    return { tipoObtido: tipo, resultado };
+    // "linha" é um dado A MAIS — nunca muda o valor de "resultado" (seguem
+    // sendo só 'aprovado'/'reprovado', como sempre foram), porque o resto
+    // do código já compara `p.resultado === 'aprovado'` em vários lugares
+    // (KPIs, gráficos, resumo) pra decidir o que conta como aprovação —
+    // um painel de 2ª linha PRECISA continuar contando como aprovado ali.
+    const linha = resultado === 'aprovado' ? _linhaDoAprovado(marks) : null;
+    return { tipoObtido: tipo, resultado, linha };
+  }
+
+  // Verde = 1ª linha, Azul = 2ª linha — mesma cor que decidiu "aprovado"
+  // em classifyMarks() (a do círculo quando existe — cobre 2P sozinho e
+  // 3T/1T combinado; a do próprio traço quando só há traço — cobre SP).
+  function _linhaDoAprovado(marks) {
+    const circles = marks.filter(m => m.shape === 'circle');
+    const dashes  = marks.filter(m => m.shape === 'dash');
+    const corAprovacao = circles.length ? circles[0].color : (dashes.length ? dashes[0].color : null);
+    if (corAprovacao === 'verde') return '1ª';
+    if (corAprovacao === 'azul')  return '2ª';
+    return null;
+  }
+
+  /* ── Referência de Marcadores: tipos sem combinação definida ──────
+     Compara os tipos simples cadastrados em Configurações → Montagem
+     (tipos_montagem.opcoes) com as combinações já definidas
+     (marcadores_qualidade.opcoes) — qualquer tipo simples cadastrado
+     que ainda não tenha uma combinação aparece aqui, com a opção de
+     definir uma (só entre as que ainda não estão em uso por outro
+     tipo — nunca duas combinações pro mesmo par cor+forma). */
+  function _tiposSimplesSemCombinacao() {
+    const simples = (_montagemOpcoesCache || []).filter(o => o && o.modo === 'simples' && o.tipo && o.label);
+    const combinacoes = _combinacoesEfetivas();
+    return simples.filter(o => !combinacoes.some(c => c.tipo === o.tipo));
+  }
+
+  // Combinações "de slot" ainda livres — círculo sozinho, traço sozinho,
+  // e círculo+traço com uma cor modificadora que ainda não está em uso.
+  // Vermelho/verde/azul NUNCA aparecem aqui como cor modificadora (ver
+  // CORES_RESERVADAS_APROVACAO, acima) — são sempre o par aprovado/
+  // reprovado, em toda combinação, não um jeito de diferenciar tipos.
+  function _combinacoesDisponiveis() {
+    const combinacoes = _combinacoesEfetivas();
+    const disponiveis = [];
+    if (!combinacoes.some(c => c.forma === 'circle'))
+      disponiveis.push({ forma: 'circle', corModificadora: null, label: 'Círculo sozinho' });
+    if (!combinacoes.some(c => c.forma === 'dash'))
+      disponiveis.push({ forma: 'dash', corModificadora: null, label: 'Traço sozinho' });
+    CORES_MARCACAO.filter(c => !CORES_RESERVADAS_APROVACAO.includes(c)).forEach(corMod => {
+      if (!combinacoes.some(c => c.forma === 'circle+dash' && c.corModificadora === corMod)) {
+        disponiveis.push({ forma: 'circle+dash', corModificadora: corMod, label: `Círculo + traço ${corMod}` });
+      }
+    });
+    return disponiveis;
+  }
+
+  // Monta a seção dinâmica dentro do popover "📖 Referência" — chamada
+  // sempre que config.json é recarregado (_carregarOpcoesMontagem) e
+  // depois de salvar uma combinação nova (ver salvarCombinacaoTipo).
+  function _renderAvisoCombinacoesFaltando() {
+    const el = document.getElementById('sq-ref-sem-combinacao');
+    if (!el) return;
+    const semCombinacao = _tiposSimplesSemCombinacao();
+    if (!semCombinacao.length) { el.innerHTML = ''; return; }
+
+    const disponiveis = _combinacoesDisponiveis();
+    el.innerHTML = `
+      <hr class="divider" style="margin:10px 0">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);font-weight:700;margin-bottom:8px">
+        ⚠️ Tipos sem marcação definida
+      </div>
+      ${semCombinacao.map(o => `
+        <div class="sq-ref-tipo-pendente" id="sq-ref-pendente-${o.tipo}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span style="font-size:.82rem"><strong>${LW.escaparHtml(o.label)}</strong> (${String(o.tipo).toUpperCase()})</span>
+            ${disponiveis.length
+              ? `<button type="button" class="btn btn-ghost btn-sm" onclick="SQ.abrirDefinirCombinacao('${o.tipo}')">Definir combinação</button>`
+              : `<span style="font-size:.72rem;color:var(--text-3)">Nenhuma combinação disponível</span>`}
+          </div>
+          <div id="sq-ref-picker-${o.tipo}" style="display:none;margin-top:8px"></div>
+        </div>`).join('')}
+    `;
+  }
+
+  // Abre o seletor de combinação disponível pra um tipo específico —
+  // aparece embutido, logo abaixo do tipo, dentro do próprio popover.
+  function abrirDefinirCombinacao(tipo) {
+    const picker = document.getElementById(`sq-ref-picker-${tipo}`);
+    if (!picker) return;
+    const disponiveis = _combinacoesDisponiveis();
+    if (!disponiveis.length) return; // botão nem deveria existir nesse caso
+    const opcoesHtml = disponiveis.map((c, i) =>
+      `<option value="${i}">${c.label}</option>`
+    ).join('');
+    picker.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="form-input form-select" id="sq-ref-select-${tipo}" style="font-size:.78rem;flex:1">${opcoesHtml}</select>
+        <button type="button" class="btn btn-primary btn-sm" onclick="SQ.salvarCombinacaoTipo('${tipo}')">Salvar</button>
+      </div>`;
+    picker.style.display = 'block';
+    picker.dataset.disponiveis = JSON.stringify(disponiveis);
+  }
+
+  // Grava a combinação escolhida em config.json (marcadores_qualidade.
+  // opcoes) via /salvar-config — mesma rota que Configurações usa pra
+  // qualquer alteração (reenvia o config.json INTEIRO, não só o pedaço
+  // que mudou, porque é assim que /salvar-config funciona: substitui o
+  // arquivo por completo). Revalida contra o config.json mais recente
+  // antes de gravar — se ALGUÉM MAIS já tiver usado essa combinação
+  // enquanto o picker estava aberto aqui, recusa e avisa, em vez de
+  // gravar 2 tipos na mesma combinação.
+  async function salvarCombinacaoTipo(tipo) {
+    const picker = document.getElementById(`sq-ref-picker-${tipo}`);
+    const select = document.getElementById(`sq-ref-select-${tipo}`);
+    if (!picker || !select) return;
+    const disponiveis = JSON.parse(picker.dataset.disponiveis || '[]');
+    const escolhida = disponiveis[parseInt(select.value, 10)];
+    if (!escolhida) return;
+
+    try {
+      const res = await fetch('/db/config.json');
+      if (!res.ok) throw new Error('Falha ao buscar config.json atualizado.');
+      const cfg = await res.json();
+      const atuais = Array.isArray(cfg?.marcadores_qualidade?.opcoes) ? cfg.marcadores_qualidade.opcoes : [];
+      // Revalidação: já existe combinação pra este tipo, ou a combinação
+      // escolhida já foi usada por outro tipo enquanto o picker estava
+      // aberto? Nos 2 casos, recusa — só pode existir 1 combinação por
+      // tipo, e 1 tipo por combinação.
+      if (atuais.some(c => c.tipo === tipo)) {
+        showAlert('Aviso', 'Este tipo já ganhou uma combinação (talvez em outra aba/dispositivo). Recarregando a referência...');
+        _carregarOpcoesMontagem();
+        return;
+      }
+      if (atuais.some(c => c.forma === escolhida.forma && c.corModificadora === escolhida.corModificadora)) {
+        showAlert('Aviso', 'Essa combinação acabou de ser usada por outro tipo (talvez em outra aba/dispositivo). Escolha outra.');
+        abrirDefinirCombinacao(tipo); // reabre com a lista de disponíveis já atualizada
+        _carregarOpcoesMontagem();
+        return;
+      }
+
+      const novaLista = [...atuais, { tipo, forma: escolhida.forma, corModificadora: escolhida.corModificadora }];
+      cfg.marcadores_qualidade = { opcoes: novaLista };
+
+      const salvar = await fetch('/salvar-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      if (!salvar.ok) throw new Error('O servidor recusou salvar.');
+
+      _marcadoresQualidadeCache = novaLista;
+      _configBrutoCache = cfg;
+      _renderAvisoCombinacoesFaltando();
+      showAlert('Salvo', `Combinação definida para ${tipo.toUpperCase()} — já pode marcar painéis desse tipo.`);
+    } catch (err) {
+      console.error('Falha ao salvar combinação de marcação:', err);
+      showAlert('Erro', 'Não consegui salvar a combinação agora (' + err.message + '). Tente de novo.');
+    }
   }
 
   /* ── Tipo esperado de uma placa ───────────────────────── */
@@ -298,6 +515,43 @@
     if (!e.target.closest('.sq-pallet-header')) closeAllDropdowns();
   });
 
+  // ── "Em Andamento" e "Fila" — retraídos por padrão, mesmo padrão de
+  // toggle/fechar-ao-clicar-fora do toggleDropdown acima. Só 1 aberto por
+  // vez (closeAllCollapsibles fecha o outro antes de abrir o clicado).
+  // nome: 'andamento' ou 'fila' -> alvo #sq-andamento-wrap / #sq-fila-wrap.
+  function toggleCollapsible(nome) {
+    if (viewMode) return;
+    const wrap = document.getElementById(`sq-${nome}-wrap`);
+    if (!wrap) return;
+    const open = wrap.classList.contains('open');
+    closeAllCollapsibles();
+    if (!open) wrap.classList.add('open');
+    event.stopPropagation();
+  }
+  function closeAllCollapsibles() {
+    document.querySelectorAll('.sq-collapsible').forEach(el => el.classList.remove('open'));
+  }
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.sq-collapsible')) closeAllCollapsibles();
+  });
+
+  // ── Popover de Referência dos Marcadores — mesmo padrão do botão
+  // "📖 Referências" da página Registrar Operação (LWOp.togglePopover,
+  // operacao.js): 1 classe .active por vez, fecha ao clicar fora.
+  function togglePopover(id, ev) {
+    if (ev) ev.stopPropagation();
+    const el = document.getElementById(id);
+    if (!el) return;
+    const wasActive = el.classList.contains('active');
+    document.querySelectorAll('.ao-popover').forEach(p => p.classList.remove('active'));
+    if (!wasActive) el.classList.add('active');
+  }
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.ao-popover') && !e.target.closest('.btn-sm')) {
+      document.querySelectorAll('.ao-popover').forEach(p => p.classList.remove('active'));
+    }
+  });
+
   /* ── Histórico de ações (desfazer) ───────────────────── */
   function pushState() {
     actionHistory.push(JSON.parse(JSON.stringify(slabState)));
@@ -373,8 +627,11 @@
     const nav = document.getElementById('sq-nav-' + section);
     if (sec) sec.classList.add('active');
     if (nav) nav.classList.add('active');
-    if (section === 'list')      renderDrafts();
-    if (section === 'form')      carregarFilaNaoAvaliadas();
+    // "Em Andamento" deixou de ser uma tela própria — agora é um dos 2
+    // colapsáveis dentro da própria aba "Avaliação" (ver renderDrafts,
+    // toggleCollapsible), junto com a Fila. Por isso os dois são
+    // atualizados juntos, sempre que a aba "form" é aberta.
+    if (section === 'form')      { carregarFilaNaoAvaliadas(); renderDrafts(); }
     if (section === 'history')   { renderHistory(); carregarAvaliacoesQualidade().then(renderHistory); }
     if (section === 'dashboard') { renderDashboard(); carregarAvaliacoesQualidade().then(renderDashboard); }
   }
@@ -584,6 +841,7 @@
     if (!listEl) return; // painel só existe na aba "Avaliação"
     const outrasWrap = document.getElementById('sq-fila-outras-wrap');
     const sel         = document.getElementById('sq-fila-select');
+    const badge       = document.getElementById('sq-fila-badge');
 
     fetch('/operacoes-nao-avaliadas')
       .then(r => r.json())
@@ -600,6 +858,11 @@
         );
         filaOperacoes = (Array.isArray(lista) ? lista : [])
           .filter(op => op.id === linkedOperacaoId || !idsComRascunho.has(op.id));
+
+        if (badge) {
+          badge.textContent = String(filaOperacoes.length);
+          badge.classList.toggle('sq-badge-ativo', filaOperacoes.length > 0);
+        }
 
         if (!filaOperacoes.length) {
           outrasWrap.style.display = 'none';
@@ -641,6 +904,7 @@
   function iniciarAvaliacaoDaFila(idOperacao) {
     const op = filaOperacoes.find(o => o.id === idOperacao);
     _iniciarForm(op || null);
+    closeAllCollapsibles();
   }
 
   function iniciarAvaliacaoDoSelect() {
@@ -686,12 +950,20 @@
   }
 
   /* ── Render lista de rascunhos ────────────────────────── */
+  // "Em Andamento" — agora um dos 2 colapsáveis dentro da aba "Avaliação"
+  // (ver toggleCollapsible), não mais uma tela própria.
   function renderDrafts() {
     const el = document.getElementById('sq-draft-list');
+    if (!el) return; // painel só existe na aba "Avaliação"
+    const badge = document.getElementById('sq-andamento-badge');
     const drafts = getDrafts();
+    if (badge) {
+      badge.textContent = String(drafts.length);
+      badge.classList.toggle('sq-badge-ativo', drafts.length > 0);
+    }
     el.innerHTML = '';
     if (!drafts.length) {
-      el.innerHTML = `<div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.<br>Clique em "Iniciar Nova Avaliação" para começar.</div>`;
+      el.innerHTML = `<div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.</div>`;
       return;
     }
     drafts.sort((a, b) => b.lastModified - a.lastModified).forEach(d => {
@@ -743,7 +1015,11 @@
     localStorage.setItem(`sq_draft_${id}`, JSON.stringify(data));
     currentDraftId = id;
     showAlert('Salvo', 'Avaliação salva com sucesso!');
-    navigateTo('list');
+    // "Em Andamento" não é mais uma tela própria pra navegar até — só
+    // atualiza a contagem/lista do colapsável e a fila (o rascunho salvo
+    // agora sai da fila, ver carregarFilaNaoAvaliadas), e continua na
+    // própria aba "Avaliação".
+    renderDrafts();
     carregarFilaNaoAvaliadas();
   }
 
@@ -760,6 +1036,7 @@
     calculateCureTime();
     setEditable(true);
     validateAllSlabs();
+    closeAllCollapsibles();
   }
 
   function deleteDraft(id) {
@@ -795,7 +1072,7 @@
       evalObj.paineis = Object.entries(slabState).map(([id, marks]) => {
         const parts = id.split('-');
         const info  = getClassifiedInfo(marks);
-        return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, marcas: marks };
+        return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, linha: info.linha, marcas: marks };
       });
 
       const opIdParaMarcar = linkedOperacaoId;
@@ -821,7 +1098,7 @@
           clearForm();
           currentDraftId = null;
           showAlert('Concluído', 'Avaliação registrada com sucesso!');
-          navigateTo('list');
+          navigateTo('form');
           carregarAvaliacoesQualidade();
 
           if (opIdParaMarcar) {
@@ -855,10 +1132,11 @@
     applyFormData(d);
     autoSetThickness();
     calculateCureTime();
-    viewSource = 'list';
+    viewSource = 'form';
     setEditable(false);
     viewMode = true;
     navigateTo('form');
+    closeAllCollapsibles();
   }
 
   function viewHistoryRecord(evId) {
@@ -922,7 +1200,7 @@
     filtered.forEach(item => {
       const panels = d.paineis.filter(p => p.avaliacaoId === item.id);
       const counts = {};
-      panels.forEach(p => { const k = `${p.tipoObtido} ${p.resultado}`; counts[k] = (counts[k]||0) + 1; });
+      panels.forEach(p => { const k = `${p.tipoObtido} ${p.resultado}${_linhaDoPainel(p) === '2ª' ? ' (2ª linha)' : ''}`; counts[k] = (counts[k]||0) + 1; });
       const summary = Object.entries(counts).map(([k,n]) => `${k}: ${n}`).join(', ') || '—';
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -1006,6 +1284,16 @@
   function prevMirror() { if (mirrorIndex > 0) { mirrorIndex--; renderMirror(mirrorIndex); } }
   function nextMirror() { if (mirrorIndex < dashboardEvals.length - 1) { mirrorIndex++; renderMirror(mirrorIndex); } }
 
+  // Registros salvos ANTES desta distinção existir não têm "p.linha"
+  // gravado — mas já tinham "p.marcas" (a marca bruta, cor+forma), então
+  // dá pra recalcular na hora em vez de depender de reprocessar o banco.
+  // Usado em qualquer lugar que precise saber a linha de um painel já
+  // registrado (KPIs, gráfico de distribuição, resumo, tela Registros).
+  function _linhaDoPainel(p) {
+    if (p.linha !== undefined) return p.linha;
+    return p.marcas ? _linhaDoAprovado(p.marcas) : null;
+  }
+
   /* ── Dashboard ────────────────────────────────────────── */
   function renderDashboard() {
     const d    = getData();
@@ -1025,6 +1313,7 @@
     const fp  = d.paineis.filter(p => ids.includes(p.avaliacaoId));
     const apr = fp.filter(p => p.resultado==='aprovado').length;
     const rep = fp.filter(p => p.resultado==='reprovado').length;
+    const seg = fp.filter(p => _linhaDoPainel(p)==='2ª').length; // aprovado, mas 2ª linha (ver getClassifiedInfo/_linhaDoPainel)
     const tt  = apr + rep;
     const ar  = tt ? ((apr/tt)*100).toFixed(1) : 0;
     const rr  = tt ? ((rep/tt)*100).toFixed(1) : 0;
@@ -1032,6 +1321,7 @@
     document.getElementById('sq-kpi-grid').innerHTML = `
       <div class="kpi-card"><div class="kpi-label">Total Registros</div><div class="kpi-value" style="font-size:1.8rem;">${fe.length}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Painéis Avaliados</div><div class="kpi-value green" style="font-size:1.8rem;">${fp.length}</div></div>
+      <div class="kpi-card" data-tooltip="Aprovados de 2ª linha (marcados em azul) — já contam dentro da Taxa de Aprovação; aqui é só pra saber quantos desses aprovados são 2ª linha."><div class="kpi-label">Painéis 2ª Linha</div><div class="kpi-value" style="font-size:1.8rem;color:var(--sq-cor-azul)">${seg}</div></div>
       <div class="kpi-card"><div class="kpi-label">Taxa de Aprovação</div><div class="kpi-value accent" style="font-size:1.8rem;">${ar}%</div></div>
       <div class="kpi-card red"><div class="kpi-label">Taxa de Reprovação</div><div class="kpi-value red" style="font-size:1.8rem;">${rr}%</div></div>`;
 
@@ -1047,14 +1337,18 @@
       options: baseChartOptions({ legend: false }),
     });
 
-    /* Distribuição das classificações */
-    const cc = {}; fp.forEach(p => { const k=`${p.tipoObtido} ${p.resultado}`; cc[k]=(cc[k]||0)+1; });
+    /* Distribuição das classificações — "(2ª linha)" vira fatia própria
+       quando p.linha==='2ª' (ver getClassifiedInfo/_linhaDoAprovado); não
+       mexe no valor de p.resultado, só no rótulo usado aqui pra separar
+       visualmente aprovados de 1ª dos de 2ª linha. */
+    const cc = {}; fp.forEach(p => { const k = `${p.tipoObtido} ${p.resultado}${_linhaDoPainel(p) === '2ª' ? ' (2ª linha)' : ''}`; cc[k]=(cc[k]||0)+1; });
     const ql = Object.keys(cc), qv = Object.values(cc);
     const cmap = { 'SP aprovado':'#4d8dff','SP reprovado':'#ff6b6b','2P aprovado':'#a78bfa','2P reprovado':'#d45d79','3T aprovado':'#f1c40f','3T reprovado':'#f39c12','1T aprovado':'#2ed3a3','1T reprovado':'#d35400' };
+    const corSegunda = 'var(--sq-cor-azul)';
     destroyChart('quality');
     charts.quality = new Chart(document.getElementById('sq-chart-quality').getContext('2d'), {
       type: 'doughnut',
-      data: { labels: ql.length?ql:['Sem dados'], datasets: [{ data:ql.length?qv:[1], backgroundColor:ql.length?ql.map(l=>cmap[l]||'var(--border-2)'):['var(--border-2)'], borderWidth:0 }] },
+      data: { labels: ql.length?ql:['Sem dados'], datasets: [{ data:ql.length?qv:[1], backgroundColor:ql.length?ql.map(l=>l.includes('2ª linha')?corSegunda:(cmap[l]||'var(--border-2)')):['var(--border-2)'], borderWidth:0 }] },
       options: { ...baseChartOptions(), plugins: { legend:{ position:'bottom', labels:{ color:'var(--text-3)', boxWidth:12, padding:8 } }, datalabels:{display:false} } },
     });
 
@@ -1125,6 +1419,7 @@
 
     /* Resumo */
     let summ=`Avaliados <b>${fp.length}</b> painéis em <b>${fe.length}</b> registros. `;
+    if(seg) summ+=`<b>${seg}</b> aprovado${seg>1?'s':''} de 2ª linha. `;
     if(rnk.length){const rx=rnk[0];summ+=`Maior recorrência: <b>${rx.batteryId} · Pallet ${rx.pallet} · Posição ${rx.posicao}</b> (${rx.d}/${rx.N}, ${rx.taxa.toFixed(0)}%).`;}
     else if(fe.length) summ+='Nenhum ponto de recorrência significativo detectado.';
     else summ='Nenhum dado disponível para o período.';
@@ -1328,6 +1623,10 @@
     selectColor, selectShape,
     selectAllPallet, applyColorToPallet,
     toggleDropdown,
+    toggleCollapsible,
+    togglePopover,
+    abrirDefinirCombinacao,
+    salvarCombinacaoTipo,
     undoLastAction, clearAllMarks,
     formatTemperature, calculateCureTime, autoSetThickness,
     editField,

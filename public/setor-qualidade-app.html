@@ -43,28 +43,16 @@
   <div class="sq-topbar">
     <div class="sq-brand"><div class="sq-bar"></div>Avaliação de Baterias</div>
     <nav class="sq-nav">
-      <button class="sq-nav-btn"        id="sq-nav-list"       onclick="SQ.navigateTo('list')">📋 Em Andamento</button>
       <button class="sq-nav-btn active" id="sq-nav-form"       onclick="SQ.startNew()">🧪 Avaliação</button>
       <button class="sq-nav-btn"        id="sq-nav-dashboard"  onclick="SQ.navigateTo('dashboard')">📊 Dashboard</button>
       <button class="sq-nav-btn"        id="sq-nav-history"    onclick="SQ.navigateTo('history')">📋 Registros</button>
     </nav>
   </div>
 
-  <!-- ══════════════════════════════════════════════════════
-       TELA 1: EM ANDAMENTO — só as avaliações já iniciadas (salvas como
-       rascunho). A fila de baterias PENDENTES (ainda nem iniciadas) não
-       mora mais aqui — ela vive na aba "🧪 Avaliação" (ver #sq-form,
-       mais abaixo), junto com o formulário que ela alimenta.
-  ══════════════════════════════════════════════════════════ -->
-  <div class="sq-section" id="sq-list">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-folder-open"></i> Avaliações em aberto</span>
-      <button class="btn btn-primary btn-sm" onclick="SQ.startNew()"><i class="fas fa-plus-circle"></i> Avaliação</button>
-    </div>
-    <div id="sq-draft-list">
-      <div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.<br>Clique em "🧪 Avaliação" para começar.</div>
-    </div>
-  </div>
+  <!-- "Em Andamento" deixou de ser uma tela própria — agora é um dos 2
+       colapsáveis dentro da aba "Avaliação" (ver #sq-form, mais abaixo),
+       junto com a Fila, os dois retraídos por padrão (abrem em popover
+       ao clicar — ver SQ.toggleCollapsible, js/setor-qualidade.js). -->
 
   <!-- ══════════════════════════════════════════════════════
        TELA 2: DASHBOARD
@@ -158,34 +146,63 @@
       <button class="btn btn-ghost btn-sm sq-show-view"  id="sq-btn-back"     onclick="SQ.goBack()"><i class="fas fa-arrow-left"></i> Voltar</button>
     </div>
 
-    <!-- Fila de baterias pendentes, ordenada por previsão de desemplaque
+    <!-- "Em Andamento" (avaliações já iniciadas/salvas como rascunho) e
+         Fila de baterias pendentes, ordenada por previsão de desemplaque
          (a mais antiga = 1ª = a que já pode/deve ser desemplacada e
          avaliada primeiro) — ACIMA do "Cabeçalho do registro", logo
-         abaixo. Só as 3 primeiras posições viram cartão; da 4ª em diante
-         fica num <select> (ver sq-fila-outras-wrap), pra não lotar a
-         tela quando a fila for grande. Clicar em qualquer cartão (ou
+         abaixo. Os dois ficam RETRAÍDOS por padrão (só um botão com a
+         contagem) — clicar abre um popover com a lista completa (ver
+         SQ.toggleCollapsible, js/setor-qualidade.js); só 1 aberto por vez.
+
+         Na Fila: só as 3 primeiras posições viram cartão; da 4ª em diante
+         fica num <select> (ver sq-fila-outras-wrap), pra não lotar o
+         popover quando a fila for grande. Clicar em qualquer cartão (ou
          escolher no select + Iniciar) preenche o formulário inteiro com
          os dados daquela bateria (ver SQ.iniciarAvaliacaoDaFila /
-         SQ.iniciarAvaliacaoDoSelect, js/setor-qualidade.js). Atualizada
-         sempre que uma avaliação é salva ou registrada — a 2ª sobe pra
-         1ª, a 3ª pra 2ª, a 1ª do select vira 3ª, e assim por diante,
-         automaticamente (é só a ordem de chegada na fila, não algo
-         guardado por item). Escondida em modo só-leitura (ver
-         .sq-hide-view — mesma classe usada nos botões Salvar/Registrar),
-         já que faz sentido pra iniciar uma avaliação nova, não pra
-         quem só está revendo uma já registrada. -->
-    <div class="sq-fila-pendentes sq-hide-view" id="sq-fila-panel">
-      <div class="sq-fila-pendentes-titulo"><i class="fas fa-list-ol"></i> Ordem de Previsão de Desemplaque</div>
+         SQ.iniciarAvaliacaoDoSelect, js/setor-qualidade.js) e fecha o
+         popover. Atualizada sempre que uma avaliação é salva ou
+         registrada — a 2ª sobe pra 1ª, a 3ª pra 2ª, a 1ª do select vira
+         3ª, e assim por diante, automaticamente (é só a ordem de chegada
+         na fila, não algo guardado por item).
 
-      <!-- 4ª posição em diante — só aparece se houver mais de 3 na fila -->
-      <div class="sq-fila-outras" id="sq-fila-outras-wrap" style="display:none;">
-        <select class="form-input form-select" id="sq-fila-select"></select>
-        <button class="btn btn-primary btn-sm" onclick="SQ.iniciarAvaliacaoDoSelect()"><i class="fas fa-play"></i> Iniciar</button>
+         Escondidos em modo só-leitura (ver .sq-hide-view — mesma classe
+         usada nos botões Salvar/Registrar), já que fazem sentido pra
+         iniciar/continuar uma avaliação, não pra quem só está revendo
+         uma já registrada. -->
+    <div class="sq-collapsible-row sq-hide-view" id="sq-collapsible-row">
+
+      <div class="sq-collapsible" id="sq-andamento-wrap">
+        <button type="button" class="sq-collapsible-btn" onclick="SQ.toggleCollapsible('andamento')">
+          <i class="fas fa-folder-open"></i> Em Andamento
+          <span class="sq-collapsible-badge" id="sq-andamento-badge">0</span>
+          <i class="fas fa-chevron-down sq-collapsible-chevron"></i>
+        </button>
+        <div class="sq-collapsible-panel">
+          <div id="sq-draft-list">
+            <div class="sq-empty"><i class="fas fa-inbox"></i>Nenhuma avaliação em andamento.</div>
+          </div>
+        </div>
       </div>
 
-      <div id="sq-fila-list">
-        <span class="sq-fila-pendentes-vazio"><i class="fas fa-spinner fa-spin"></i> Carregando…</span>
+      <div class="sq-collapsible" id="sq-fila-wrap">
+        <button type="button" class="sq-collapsible-btn" onclick="SQ.toggleCollapsible('fila')">
+          <i class="fas fa-list-ol"></i> Ordem de Previsão de Desemplaque
+          <span class="sq-collapsible-badge" id="sq-fila-badge">0</span>
+          <i class="fas fa-chevron-down sq-collapsible-chevron"></i>
+        </button>
+        <div class="sq-collapsible-panel">
+          <!-- 4ª posição em diante — só aparece se houver mais de 3 na fila -->
+          <div class="sq-fila-outras" id="sq-fila-outras-wrap" style="display:none;">
+            <select class="form-input form-select" id="sq-fila-select"></select>
+            <button class="btn btn-primary btn-sm" onclick="SQ.iniciarAvaliacaoDoSelect()"><i class="fas fa-play"></i> Iniciar</button>
+          </div>
+
+          <div id="sq-fila-list">
+            <span class="sq-fila-pendentes-vazio"><i class="fas fa-spinner fa-spin"></i> Carregando…</span>
+          </div>
+        </div>
       </div>
+
     </div>
 
     <div style="position:relative;">
@@ -267,6 +284,103 @@
         <div class="sq-tools-sep"></div>
         <button class="btn btn-ghost btn-sm"         onclick="SQ.undoLastAction()"><i class="fas fa-undo-alt"></i> Desfazer</button>
         <button class="btn btn-danger btn-sm"        onclick="SQ.clearAllMarks()"><i class="fas fa-trash-alt"></i> Limpar</button>
+        <div class="sq-tools-sep"></div>
+
+        <!-- Referência visual dos marcadores — mesmo padrão do botão
+             "📖 Referências" da página Registrar Operação (popover
+             .ao-popover, ver css/styles.css e SQ.togglePopover no JS).
+             Mostra o que cada cor/forma significa e as combinações mais
+             comuns, no mesmo critério exato de classifyMarks()
+             (setor-qualidade.js) — círculo sozinho = 2P, traço sozinho =
+             SP, os dois juntos = 3T (traço amarelo) ou 1T (traço laranja). -->
+        <div style="position:relative;display:inline-block">
+          <button class="btn btn-ghost btn-sm" onclick="SQ.togglePopover('popover-sq-referencia', event)">
+            <i class="fas fa-book-open"></i> Referência
+          </button>
+          <div id="popover-sq-referencia" class="ao-popover" style="width:340px">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:700;margin-bottom:8px">Cor</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:.8rem;margin-bottom:14px">
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:12px;height:12px;border-radius:50%;background:var(--sq-cor-verde);display:inline-block;flex-shrink:0"></span>Verde — Aprovado (1ª linha)</div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:12px;height:12px;border-radius:50%;background:var(--sq-cor-azul);display:inline-block;flex-shrink:0"></span>Azul — Aprovado (2ª linha)</div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:12px;height:12px;border-radius:50%;background:var(--sq-cor-vermelho);display:inline-block;flex-shrink:0"></span>Vermelho — Reprovado</div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:17px;height:3px;border-radius:2px;background:var(--sq-cor-amarelo);display:inline-block;flex-shrink:0"></span>Amarelo (só no traço) — indica 3T</div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="width:17px;height:3px;border-radius:2px;background:var(--sq-cor-laranja);display:inline-block;flex-shrink:0"></span>Laranja (só no traço) — indica 1T</div>
+            </div>
+
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:700;margin-bottom:8px">Forma</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:.8rem;margin-bottom:14px">
+              <div style="display:flex;align-items:center;gap:9px"><span class="sq-shape-circle" style="display:inline-block;flex-shrink:0;background:var(--text-2)"></span>Círculo sozinho → <strong>2P</strong></div>
+              <div style="display:flex;align-items:center;gap:9px"><span class="sq-shape-dash" style="display:inline-block;flex-shrink:0;background:var(--text-2)"></span>Traço sozinho → <strong>SP</strong></div>
+              <div style="display:flex;align-items:center;gap:9px">
+                <span class="sq-shape-circle" style="display:inline-block;flex-shrink:0;background:var(--text-2)"></span><span style="margin:0 2px">+</span><span class="sq-shape-dash" style="display:inline-block;flex-shrink:0;background:var(--text-2)"></span>
+                Círculo + traço → <strong>3T</strong> ou <strong>1T</strong> (conforme a cor do traço)
+              </div>
+            </div>
+
+            <hr class="divider" style="margin:10px 0">
+            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:700;margin-bottom:6px">Combinação → Classificação</div>
+            <table style="width:100%;font-size:.76rem;border-collapse:collapse;color:var(--text-2)">
+              <thead>
+                <tr>
+                  <th style="text-align:left;padding:4px 6px 6px 0;border-bottom:1px solid var(--border);color:var(--text-3);font-size:.66rem;text-transform:uppercase;font-weight:700">Combinação</th>
+                  <th style="text-align:left;padding:4px 0 6px 6px;border-bottom:1px solid var(--border);color:var(--text-3);font-size:.66rem;text-transform:uppercase;font-weight:700">Classificação</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)"><span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-verde);margin-right:2px"></span><span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-azul)"></span> Círculo verde ou azul</td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>2P</strong> aprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)"><span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-vermelho)"></span> Círculo vermelho</td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>2P</strong> reprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)"><span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-verde);margin-right:2px"></span><span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-azul)"></span> Traço verde ou azul</td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>SP</strong> aprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)"><span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-vermelho)"></span> Traço vermelho</td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>SP</strong> reprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)">
+                    <span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-verde);margin-right:2px"></span><span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-azul);margin-right:4px"></span>+<span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-amarelo);margin-left:4px"></span>
+                    Círculo (verde/azul) + traço amarelo
+                  </td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>3T</strong> aprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)">
+                    <span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-vermelho);margin-right:4px"></span>+<span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-amarelo);margin-left:4px"></span>
+                    Círculo vermelho + traço amarelo
+                  </td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>3T</strong> reprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0;border-bottom:1px solid var(--border)">
+                    <span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-verde);margin-right:2px"></span><span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-azul);margin-right:4px"></span>+<span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-laranja);margin-left:4px"></span>
+                    Círculo (verde/azul) + traço laranja
+                  </td>
+                  <td style="padding:7px 0 7px 6px;border-bottom:1px solid var(--border)">Painel <strong>1T</strong> aprovado</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 6px 7px 0">
+                    <span class="sq-shape-circle" style="display:inline-block;background:var(--sq-cor-vermelho);margin-right:4px"></span>+<span class="sq-shape-dash" style="display:inline-block;background:var(--sq-cor-laranja);margin-left:4px"></span>
+                    Círculo vermelho + traço laranja
+                  </td>
+                  <td style="padding:7px 0 7px 6px">Painel <strong>1T</strong> reprovado</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Preenchido dinamicamente por _renderAvisoCombinacoesFaltando()
+                 (setor-qualidade.js) — só aparece algo aqui se houver tipo
+                 simples cadastrado em Configurações → Montagem sem
+                 combinação de marcação definida ainda. -->
+            <div id="sq-ref-sem-combinacao"></div>
+          </div>
+        </div>
       </div>
 
       <!-- Pallets -->

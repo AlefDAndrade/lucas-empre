@@ -154,6 +154,7 @@
   // linha abre a edição da operação em vez de navegar pro Relatório de
   // Injeção (ver onClickLinhaRegistro()).
   let _modoEdicaoRegistro = false;
+  let _modoFocoRegistro = false;
 
   // Modo de edição do Relatório de Injeção — enquanto ativo, clicar numa
   // linha abre a edição daquele traço em vez do painel de detalhe de
@@ -628,6 +629,8 @@
         : '';
       const tituloLinha = _modoEdicaoRegistro
         ? 'Clique para editar esta operação'
+        : _modoFocoRegistro
+        ? 'Clique para ver todos os dados desta operação (berços, receita e avaliação)'
         : 'Clique para ver os traços desta bateria no Relatório de Injeção';
       return `
       <tr style="cursor:pointer" data-tooltip="${tituloLinha}"
@@ -1722,12 +1725,35 @@
     if (btn) btn.classList.toggle('btn-primary', _modoEdicaoRegistro);
     const aviso = document.getElementById('registro-aviso-edicao');
     if (aviso) aviso.style.display = _modoEdicaoRegistro ? 'flex' : 'none';
+    // Os 2 modos são mutuamente exclusivos — ligar edição desliga foco,
+    // e vice-versa (ver toggleModoFocoRegistro) — clicar numa linha com
+    // os dois ativos ao mesmo tempo seria ambíguo (editar ou abrir a
+    // Análise Focada?).
+    if (_modoEdicaoRegistro && _modoFocoRegistro) toggleModoFocoRegistro();
+    renderRegistro();
+  }
+
+  // Liga/desliga o modo de foco — enquanto ativo, clicar numa linha abre
+  // a Análise Focada daquela operação (ver public/js/analise-focada.js)
+  // em vez de navegar pro Relatório de Injeção. Mesmo padrão do modo de
+  // edição, acima.
+  function toggleModoFocoRegistro() {
+    _modoFocoRegistro = !_modoFocoRegistro;
+    const btn = document.getElementById('btn-foco-registro');
+    if (btn) btn.classList.toggle('btn-primary', _modoFocoRegistro);
+    const aviso = document.getElementById('registro-aviso-foco');
+    if (aviso) aviso.style.display = _modoFocoRegistro ? 'flex' : 'none';
+    if (_modoFocoRegistro && _modoEdicaoRegistro) toggleModoEdicaoRegistro();
     renderRegistro();
   }
 
   function onClickLinhaRegistro(bateria) {
     if (_modoEdicaoRegistro) {
       if (typeof window.abrirEdicaoOperacao === 'function') window.abrirEdicaoOperacao(bateria);
+      return;
+    }
+    if (_modoFocoRegistro) {
+      if (window.LWFocada) LWFocada.abrir(bateria.id);
       return;
     }
     navegarParaTracosDoRegistro(bateria);
@@ -1875,6 +1901,7 @@
     initTurnos, initRegistro, initRelatorio, renderRelatorio,
     navegarParaTracosDoRegistro,
     toggleModoEdicaoRegistro,
+    toggleModoFocoRegistro,
     onClickLinhaRegistro,
     toggleModoEdicaoRelatorio,
     onClickLinhaRelatorio,
