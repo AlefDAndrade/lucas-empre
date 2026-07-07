@@ -263,14 +263,33 @@
    * 3. UTILITÁRIOS
    * ────────────────────────────────────────────────────────── */
 
-  /** Retorna true se o foco está em um campo de texto */
+  /**
+   * Retorna true se o foco está num campo onde os atalhos devem ficar
+   * desligados — de propósito, só campos de TEXTO livre (onde digitar uma
+   * letra comum poderia disparar um atalho sem querer): input[type=text],
+   * textarea (mesmo raciocínio — texto livre, só que multi-linha, ex.:
+   * "Observações") e qualquer elemento contentEditable.
+   *
+   * Antes, QUALQUER <input> (exceto button/checkbox/radio/submit/reset) e
+   * qualquer <select> bloqueavam os atalhos — isso incluía date, number,
+   * color, file, password, o que fazia os atalhos de navegação (mudar de
+   * página) pararem de funcionar o tempo todo que o operador estivesse
+   * preenchendo uma data ou uma quantidade, por exemplo, mesmo sem estar
+   * digitando texto nenhum. Pedido explícito: exceção é só type="text".
+   *
+   * Tipos de input "texto livre por natureza" mas que não são
+   * type="text" (search/email/tel/url/password) não existem hoje neste
+   * app (ver grep em todos os partials) — se algum for adicionado no
+   * futuro e também precisar bloquear atalhos, incluir aqui.
+   */
   function _isFocusedOnInput() {
-    const tag = document.activeElement?.tagName?.toLowerCase();
-    const type = (document.activeElement?.type || '').toLowerCase();
-    const editable = document.activeElement?.isContentEditable;
+    const el = document.activeElement;
+    const tag = el?.tagName?.toLowerCase();
+    const type = (el?.type || '').toLowerCase();
+    const editable = el?.isContentEditable;
     if (editable) return true;
-    if (['textarea', 'select'].includes(tag)) return true;
-    if (tag === 'input' && !['button', 'checkbox', 'radio', 'submit', 'reset'].includes(type)) return true;
+    if (tag === 'textarea') return true;
+    if (tag === 'input' && type === 'text') return true;
     return false;
   }
 
