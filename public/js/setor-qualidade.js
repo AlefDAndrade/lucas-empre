@@ -1435,6 +1435,10 @@
   function registerEvaluation() {
     if (viewMode) return;
     if (!document.getElementById('sq-batteryId').value) { showAlert('Erro','Selecione o ID da Bateria.'); return; }
+    if (!document.getElementById('sq-confirma-avaliacao').checked) {
+      showAlert('Erro', 'Marque a confirmação de que avaliou todos os painéis desta bateria antes de registrar.');
+      return;
+    }
     const editando = !!_editandoAvaliacaoId;
     showConfirm(
       editando ? 'Salvar Correção' : 'Registrar',
@@ -1546,6 +1550,8 @@
   // só-leitura) quanto por editarAvaliacaoDoEspelho (modo editável).
   function _carregarAvaliacaoNoFormulario(item) {
     const d = getData();
+    const chkConfirma = document.getElementById('sq-confirma-avaliacao');
+    if (chkConfirma) chkConfirma.checked = false;
     palletTypes = [item.montagem?.pallet1, item.montagem?.pallet2, item.montagem?.pallet3, item.montagem?.pallet4];
     slabConfig  = {};
     updateMountTypeDropdown();
@@ -2493,6 +2499,8 @@
     _editandoAvaliacaoId = null;
     _editandoRegistradoEm = null;
     _editandoLinkedOperacaoId = null;
+    const chkConfirma = document.getElementById('sq-confirma-avaliacao');
+    if (chkConfirma) chkConfirma.checked = false;
     _aplicarModoBotoesForm();
     document.querySelectorAll('.sq-slab-marks').forEach(c => { c.innerHTML = ''; });
     document.getElementById('sq-batteryId').value    = 'B1';
