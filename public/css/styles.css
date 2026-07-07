@@ -895,6 +895,16 @@ td.mono {
 #relatorio-bercos-table th,
 #relatorio-bercos-table td {
   padding: 8px 10px;
+  border: 1px solid var(--border);
+}
+/* .table-wrap já desenha uma borda ao redor de toda a tabela — sem isso,
+   a borda direita/inferior da última coluna/linha ficaria dobrada (a da
+   célula + a do wrapper, mais grossa/escura que o resto da grade). */
+#relatorio-bercos-table {
+  border-collapse: collapse;
+}
+#relatorio-bercos-table tr:last-child td {
+  border-bottom: 1px solid var(--border);
 }
 #relatorio-bercos-table th.rb-sub {
   padding: 5px 10px;
@@ -902,9 +912,21 @@ td.mono {
 }
 #relatorio-bercos-table thead th {
   position: static;
+  text-align: center;
 }
 #relatorio-bercos-table td.rb-vazio {
   color: var(--text-3);
+}
+/* Tonalidade alternada por Bx (as 2 colunas E/D daquele berço, cabeçalho
+   e corpo) — só pra ficar fácil ver de relance onde um berço termina e o
+   próximo começa, já que agora a tabela toda tem borda em cada célula
+   (acima). rb-grupo-a fica no tom normal (sem overlay); rb-grupo-b leva
+   um overlay cinza neutro e sutil — funciona nos 3 temas (Escuro, Claro,
+   Lightwall) sem precisar de uma cor diferente pra cada um, porque não é
+   uma cor fixa: cinza a baixa opacidade escurece um pouco fundo claro e
+   clareia um pouco fundo escuro. */
+#relatorio-bercos-table .rb-grupo-b {
+  background: rgba(127, 127, 127, .09);
 }
 
 /* Popover de hover/toque do Relatório de Berços — mostra a grade completa

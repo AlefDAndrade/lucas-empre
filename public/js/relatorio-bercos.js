@@ -21,6 +21,17 @@
   let _cache = [];
   let _modoVisual = false; // false = tabela (padrão), true = grade colorida por bateria
 
+  // Alterna 2 classes por Bx (B1/B3/B5... vs B2/B4/B6...) — cada berço
+  // ocupa 2 colunas (E/D) inteiras nesta cor, pra ficar fácil ver de
+  // relance onde um berço termina e o próximo começa (ver .rb-grupo-a/
+  // .rb-grupo-b em styles.css). Uma função só, usada tanto no cabeçalho
+  // (_construirThead) quanto no corpo (_linhaBercos), pra garantir que as
+  // duas linhas do cabeçalho E o corpo sempre concordem em qual berço é
+  // "A" e qual é "B".
+  function _grupoBerco(i) {
+    return i % 2 === 1 ? 'rb-grupo-a' : 'rb-grupo-b';
+  }
+
   // Monta o cabeçalho de 2 linhas (Bx em cima com colspan=2, E/D embaixo)
   // uma única vez — refazer isso em toda renderização não muda nada (o
   // número de berços é sempre MAX_BERCOS) e só re-cria DOM à toa.
@@ -29,11 +40,12 @@
     const sub  = document.getElementById('relatorio-bercos-thead-sub');
     if (!topo || !sub || topo.childElementCount) return; // já construído
 
-    let topoHtml = '<th rowspan="2">Tipo de bateria</th><th rowspan="2">Montagem</th>';
+    let topoHtml = '<th rowspan="2">Data</th><th rowspan="2">Montagem</th>';
     let subHtml  = '';
     for (let i = 1; i <= MAX_BERCOS; i++) {
-      topoHtml += `<th colspan="2">B${i}</th>`;
-      subHtml  += `<th class="rb-sub">E</th><th class="rb-sub">D</th>`;
+      const grupo = _grupoBerco(i);
+      topoHtml += `<th colspan="2" class="${grupo}">B${i}</th>`;
+      subHtml  += `<th class="rb-sub ${grupo}">E</th><th class="rb-sub ${grupo}">D</th>`;
     }
     topo.innerHTML = topoHtml;
     sub.innerHTML  = subHtml;
@@ -42,10 +54,10 @@
   // 'estado' aqui já chega sempre preenchido ('okay' por padrão — ver
   // criarBercosVisuaisIniciais, db.js); o "—" só aparece quando o berço
   // nem existe nesta bateria (ver _linhaBercos, abaixo).
-  function _celulaEstado(estado) {
+  function _celulaEstado(estado, grupo) {
     const label = ESTADO_LABEL[estado];
-    if (!label) return '<td class="rb-vazio">—</td>';
-    return `<td style="color:${ESTADO_COR[estado] || 'var(--text-2)'};font-weight:600">${label}</td>`;
+    if (!label) return `<td class="rb-vazio ${grupo}">—</td>`;
+    return `<td class="${grupo}" style="color:${ESTADO_COR[estado] || 'var(--text-2)'};font-weight:600">${label}</td>`;
   }
 
   // Monta as 44 (MAX_BERCOS × 2) células de berços de UMA linha/bateria.
@@ -53,12 +65,13 @@
     const porOrdem = new Map((linha.bercos || []).map(b => [b.ordem, b]));
     let html = '';
     for (let i = 1; i <= MAX_BERCOS; i++) {
+      const grupo = _grupoBerco(i);
       const b = porOrdem.get(i);
       if (!b) {
-        html += '<td class="rb-vazio">—</td><td class="rb-vazio">—</td>';
+        html += `<td class="rb-vazio ${grupo}">—</td><td class="rb-vazio ${grupo}">—</td>`;
         continue;
       }
-      html += _celulaEstado(b.estado_esquerda) + _celulaEstado(b.estado_direita);
+      html += _celulaEstado(b.estado_esquerda, grupo) + _celulaEstado(b.estado_direita, grupo);
     }
     return html;
   }
@@ -100,7 +113,7 @@
     // partir do <tr>, qual item de _cache mostrar na grade completa.
     tbody.innerHTML = linhas.slice().reverse().map(l => `
       <tr data-id-operacao="${l.id_operacao}">
-        <td class="mono" title="${l.data ? l.data.split('-').reverse().join('/') + (l.turno ? ' — ' + l.turno : '') : ''}">${l.id_bateria || '—'}</td>
+        <td class="mono" title="${l.turno || ''}">${l.data ? l.data.split('-').reverse().join('/') : '—'}</td>
         <td>${l.tipo_montagem || '—'}</td>
         ${_linhaBercos(l)}
       </tr>
