@@ -2452,12 +2452,31 @@ const server = http.createServer((req, res) => {
           throw new Error('Payload inválido: "arquivos" ausente.');
         }
         const esperados = Object.keys(VALIDADORES_BACKUP_DADOS);
-        const faltando = esperados.filter(nome => typeof arquivos[nome] !== 'string');
+        // Arquivos adicionados DEPOIS do lançamento (bercos_visuais.json,
+        // avaliacoes_qualidade.json, operacoes_avaliadas.json — tabelas
+        // que só passaram a existir/ser exportadas em versões mais novas)
+        // são OPCIONAIS aqui: um backup ANTIGO, gerado antes de existirem,
+        // nunca vai ter esses arquivos dentro do .zip — e isso é normal,
+        // não motivo pra recusar a restauração inteira. Sem essa lista,
+        // TODO backup feito antes de qualquer um desses recursos existir
+        // ficava impossível de restaurar (sempre "Backup incompleto —
+        // faltam: ..."), mesmo sendo, fora isso, um backup perfeitamente
+        // válido. Se o arquivo VIER no backup, continua sendo validado
+        // normalmente (nem opcional nem obrigatório muda a validação em
+        // si) — só não trava tudo se estiver faltando.
+        const OPCIONAIS_BACKUP_DADOS = ['bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json'];
+        const obrigatorios = esperados.filter(n => !OPCIONAIS_BACKUP_DADOS.includes(n));
+        const faltando = obrigatorios.filter(nome => typeof arquivos[nome] !== 'string');
         if (faltando.length) {
           throw new Error('Backup incompleto — faltam: ' + faltando.join(', '));
         }
+        // Só os arquivos que REALMENTE vieram no payload — um opcional
+        // ausente simplesmente não entra aqui, e as tabelas dele (ver
+        // "presentes.includes(...)" mais abaixo) ficam como estão, sem
+        // apagar nem perder o que já existia antes da restauração.
+        const presentes = esperados.filter(nome => typeof arquivos[nome] === 'string');
         const textosValidados = {};
-        for (const nome of esperados) {
+        for (const nome of presentes) {
           let valor;
           try {
             valor = parseArquivoBackupDados(nome, arquivos[nome]);
@@ -2563,7 +2582,7 @@ const server = http.createServer((req, res) => {
           db.prepare('DELETE FROM operacoes_avaliadas').run();
         })();
 
-        if (esperados.includes('historico.json')) {
+        if (presentes.includes('historico.json')) {
           const novoHistorico = JSON.parse(textosValidados['historico.json']);
           const inserirOperacao = db.prepare(db.SQL_INSERIR_OPERACAO);
           db.transaction(() => {
@@ -2573,7 +2592,7 @@ const server = http.createServer((req, res) => {
             }
           })();
         }
-        if (esperados.includes('historico_edicoes.json')) {
+        if (presentes.includes('historico_edicoes.json')) {
           const novasEdicoes = JSON.parse(textosValidados['historico_edicoes.json']);
           const inserirEdicao = db.prepare('INSERT INTO edicoes_operacao (id_operacao, data_edicao, campos_alterados) VALUES (?, ?, ?)');
           db.transaction(() => {
@@ -2583,7 +2602,7 @@ const server = http.createServer((req, res) => {
             }
           })();
         }
-        if (esperados.includes('relatorio_edicoes.json')) {
+        if (presentes.includes('relatorio_edicoes.json')) {
           // Faltava completamente — o arquivo já era validado (formato
           // certo), mas nunca era de fato usado pra repor nada: restaurar
           // um backup sempre deixava o histórico de edição de traço como
@@ -2597,7 +2616,7 @@ const server = http.createServer((req, res) => {
             }
           })();
         }
-        if (esperados.includes('paradas.json')) {
+        if (presentes.includes('paradas.json')) {
           const novasParadas = JSON.parse(textosValidados['paradas.json']);
           const inserirParada = db.prepare(db.SQL_INSERIR_PARADA);
           db.transaction(() => {
@@ -2605,7 +2624,7 @@ const server = http.createServer((req, res) => {
             for (const p of novasParadas) inserirParada.run(db.paradaParaRow(p));
           })();
         }
-        if (esperados.includes('sobra.json')) {
+        if (presentes.includes('sobra.json')) {
           const novaSobra = JSON.parse(textosValidados['sobra.json']);
           if (novaSobra && Object.keys(novaSobra).length) {
             db.prepare(db.SQL_UPSERT_SOBRA).run(db.sobraParaRow(novaSobra));
@@ -2613,7 +2632,7 @@ const server = http.createServer((req, res) => {
             db.prepare('DELETE FROM sobra').run();
           }
         }
-        if (esperados.includes('contador_tracos.json')) {
+        if (presentes.includes('contador_tracos.json')) {
           const novoContador = JSON.parse(textosValidados['contador_tracos.json']);
           if (novoContador && novoContador.data) {
             db.prepare(`
@@ -2622,28 +2641,28 @@ const server = http.createServer((req, res) => {
             `).run(novoContador.data, novoContador.total || 0, novoContador.total || 0);
           }
         }
-        if (esperados.includes('relatorio_injecao.json')) {
+        if (presentes.includes('relatorio_injecao.json')) {
           const novoRelatorio = JSON.parse(textosValidados['relatorio_injecao.json']);
-          const novosAjustes = esperados.includes('ajustes_tracos.json')
+          const novosAjustes = presentes.includes('ajustes_tracos.json')
             ? JSON.parse(textosValidados['ajustes_tracos.json'])
             : db.todosOsAjustesTracosJSON(); // não fazia parte deste backup — preserva os ajustes atuais
           db.transaction(() => db.substituirTracosEAjustes(novoRelatorio, novosAjustes))();
-        } else if (esperados.includes('ajustes_tracos.json')) {
+        } else if (presentes.includes('ajustes_tracos.json')) {
           // Raro (backup só com ajustes, sem o relatório) — ainda assim
           // substitui só os ajustes, preservando os traços como estão.
           const novoRelatorioAtual = db.todosOsTracos();
           const novosAjustes = JSON.parse(textosValidados['ajustes_tracos.json']);
           db.transaction(() => db.substituirTracosEAjustes(novoRelatorioAtual, novosAjustes))();
         }
-        if (esperados.includes('bercos_visuais.json')) {
+        if (presentes.includes('bercos_visuais.json')) {
           const novosBercosVisuais = JSON.parse(textosValidados['bercos_visuais.json']);
           db.transaction(() => db.substituirBercosVisuais(novosBercosVisuais))();
         }
-        if (esperados.includes('avaliacoes_qualidade.json')) {
+        if (presentes.includes('avaliacoes_qualidade.json')) {
           const novasAvaliacoes = JSON.parse(textosValidados['avaliacoes_qualidade.json']);
           db.transaction(() => db.substituirAvaliacoesQualidade(novasAvaliacoes))();
         }
-        if (esperados.includes('operacoes_avaliadas.json')) {
+        if (presentes.includes('operacoes_avaliadas.json')) {
           const novasOperacoesAvaliadas = JSON.parse(textosValidados['operacoes_avaliadas.json']);
           db.transaction(() => db.substituirOperacoesAvaliadas(novasOperacoesAvaliadas))();
         }

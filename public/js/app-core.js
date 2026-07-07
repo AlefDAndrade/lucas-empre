@@ -628,15 +628,27 @@
       try {
         const zip = await JSZip.loadAsync(file);
         const esperados = Object.keys(RESTAURAR_VALIDACOES);
-        const faltando = esperados.filter(nome => !zip.file(nome));
+        // Mesma lista de opcionais do servidor (ver OPCIONAIS_BACKUP_DADOS,
+        // server.js) — um backup ANTIGO, de antes desses 3 arquivos
+        // existirem, é válido mesmo sem eles; sem esta lista, o próprio
+        // navegador já recusava o arquivo antes de chegar a enviar
+        // qualquer coisa pro servidor.
+        const OPCIONAIS = ['bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json'];
+        const obrigatorios = esperados.filter(n => !OPCIONAIS.includes(n));
+        const faltando = obrigatorios.filter(nome => !zip.file(nome));
         if (faltando.length) {
           mostrarErroRestaurar('Arquivo de backup incompleto — faltam: ' + faltando.join(', '));
           return;
         }
+        // Só os que realmente existem dentro deste .zip — um opcional
+        // ausente simplesmente não é lido nem mandado pro servidor (que
+        // por sua vez sabe que, faltando, é pra deixar aquela tabela como
+        // já está, sem mexer nela).
+        const presentes = esperados.filter(nome => !!zip.file(nome));
 
         const conteudos = {};
         const resumo = [];
-        for (const nome of esperados) {
+        for (const nome of presentes) {
           const texto = await zip.file(nome).async('string');
           let valor;
           try {
@@ -651,6 +663,12 @@
           }
           conteudos[nome] = texto;
           resumo.push(`• ${nome}: ${Array.isArray(valor) ? valor.length + ' registro(s)' : 'ok'}`);
+        }
+        // Avisa quais opcionais faltaram (backup mais antigo) — não bloqueia,
+        // só deixa claro que essas tabelas não vão ser tocadas pela restauração.
+        const opcionaisFaltando = OPCIONAIS.filter(n => !presentes.includes(n));
+        if (opcionaisFaltando.length) {
+          resumo.push(`<div style="margin-top:6px;color:var(--text-3)">⚠ Backup mais antigo — não tinha ainda: ${opcionaisFaltando.join(', ')} (essas tabelas não serão alteradas).</div>`);
         }
 
         _restaurarArquivos = conteudos;
