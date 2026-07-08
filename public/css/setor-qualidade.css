@@ -363,12 +363,25 @@ body {
 }
 
 /* ── KPI grid ─────────────────────────────────────────────── */
-/* Reutiliza .kpi-card, .kpi-label, .kpi-value do Lightwall   */
+/* Reutiliza .kpi-card, .kpi-label, .kpi-value do Lightwall — hover
+   próprio daqui (escopado por #sq-dashboard) pra não mudar o hover de
+   .kpi-card em nenhuma outra tela do sistema, já que ela é compartilhada
+   com o Dashboard geral/OEE/Paradas. Mesmo padrão fluido do
+   .menu-card:hover (styles.css): leve elevação + sombra colorida — aqui
+   em azul, a cor de destaque deste módulo (ver --sq-cor-azul, acima). */
 .sq-kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
+}
+#sq-dashboard .kpi-card {
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+#sq-dashboard .kpi-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--blue);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, .15);
 }
 
 /* ── Charts grid ──────────────────────────────────────────── */
@@ -379,7 +392,16 @@ body {
   margin-bottom: 20px;
 }
 /* Reutiliza .card do Lightwall para as caixas */
-.sq-chart-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; box-shadow: var(--sq-shadow); }
+.sq-chart-box {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 16px; box-shadow: var(--sq-shadow);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.sq-chart-box:hover {
+  transform: translateY(-3px);
+  border-color: var(--blue);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, .15);
+}
 .sq-chart-box h4 { color: var(--text-2); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .sq-chart-box svg { max-height: 200px; max-width: 100%; display: block; margin: 0 auto; }
 
@@ -391,6 +413,14 @@ body {
   padding: 16px 24px;
   margin-top: 12px;
   box-shadow: var(--sq-shadow);
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+/* Sem o "translateY" aqui de propósito — é uma caixa larga de texto
+   corrido (não um "card" que se clica/navega), então só realça a borda
+   e a sombra; levantar ela junto com o texto ficaria estranho. */
+.sq-summary-box:hover {
+  border-color: var(--blue);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, .12);
 }
 .sq-summary-box h4 { color: var(--text-2); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .sq-summary-box p { font-size: .88rem; color: var(--text-2); line-height: 1.6; }
