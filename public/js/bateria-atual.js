@@ -175,13 +175,12 @@
       const marcadoBerco = _bercosMarcados[berco] || {};
       const dirMarcado = marcadoBerco.direita === 'baixou';
       const esqMarcado = marcadoBerco.esquerda === 'baixou';
-      const algumMarcado = dirMarcado || esqMarcado;
       return `
         <div class="ba-celula" data-berco="${berco}"
           style="background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-3)'};border:1px solid ${cor ? cor.borda : 'var(--border)'}">
           <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}" data-berco="${berco}" data-lado="direita"
             data-tooltip="${_tituloDot(dirMarcado, 'direita')}">•</span>
-          <span class="ba-numero">B${numero}${algumMarcado ? ' ⚠️' : ''}</span>
+          <span class="ba-numero">B${numero}</span>
           <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}" data-berco="${berco}" data-lado="esquerda"
             data-tooltip="${_tituloDot(esqMarcado, 'esquerda')}">•</span>
         </div>`;
@@ -225,7 +224,7 @@
     const numEl = celulaEl && celulaEl.querySelector('.ba-numero');
     if (numEl) {
       const algumMarcado = Object.keys(_bercosMarcados[berco] || {}).length > 0;
-      numEl.textContent = numEl.textContent.replace(' ⚠️', '') + (algumMarcado ? ' ⚠️' : '');
+      numEl.textContent = numEl.textContent.replace(' ⚠️', '');
     }
 
     try {

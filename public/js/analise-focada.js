@@ -111,14 +111,13 @@
     el.innerHTML = `<div class="ba-grid">${ordenados.map(b => {
       const dirMarcado = b.estado_direita === 'baixou';
       const esqMarcado = b.estado_esquerda === 'baixou';
-      const algumMarcado = dirMarcado || esqMarcado;
       const numero = String(b.ordem).padStart(2, '0');
       const tipoBerco = ehPersonalizada ? (gradePersonalizada[b.ordem - 1] || null) : (op ? op.tipo_montagem : null);
       const cor = _corPorTipoBerco(ehPersonalizada, tipoBerco);
       return `
         <div class="ba-celula" style="background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-2)'};border:1px solid ${cor ? cor.borda : 'var(--border)'}">
           <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}" title="Direito">•</span>
-          <span class="ba-numero">B${numero}${algumMarcado ? ' ⚠️' : ''}</span>
+          <span class="ba-numero">B${numero}</span>
           <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}" title="Esquerdo">•</span>
         </div>`;
     }).join('')}</div>`;

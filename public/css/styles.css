@@ -2608,7 +2608,6 @@ td.mono {
 .ba-dot.ba-dot-marcado {
   opacity: 1;
   color: var(--red);
-  background: var(--red-dim);
   text-shadow: 0 0 6px var(--red);
 }
 
