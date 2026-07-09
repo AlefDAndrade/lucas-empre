@@ -2165,24 +2165,24 @@
     }, 8000);
   }
 
-  // Setor de Qualidade roda num <iframe> à parte (setor-qualidade-app.html
-  // — mesma origem, então dá pra acessar o window.SQ dele direto) com sua
-  // própria fila de baterias pendentes de avaliação, carregada só quando
-  // aquela aba é aberta/reaberta. Sem isso, uma bateria acabada de
-  // registrar aqui só aparecia lá depois de sair e voltar pra aba (ou dar
-  // F5) — esta função avisa o iframe na hora, sem recarregar nada visível
-  // (nem esta página, nem o iframe): só refaz o fetch da fila dele.
-  // Silenciosa de propósito (iframe pode não existir ainda, se a pessoa
-  // nunca abriu aquela aba nesta sessão) — nunca deve travar o fluxo de
-  // Registrar Operação por causa disso.
+  // Setor de Qualidade tem sua própria fila de baterias pendentes de
+  // avaliação, carregada só quando aquela página é aberta/reaberta. Sem
+  // isso, uma bateria acabada de registrar aqui só aparecia lá depois de
+  // sair e voltar pra aba (ou dar F5) — esta função avisa SQ na hora,
+  // sem recarregar nada visível: só refaz o fetch da fila dele. (Até
+  // pouco tempo, Setor de Qualidade rodava num <iframe> à parte e isto
+  // precisava atravessar a fronteira via contentWindow — ver histórico
+  // do arquivo; hoje é só mais uma página do mesmo documento, chamada
+  // direta.) Silenciosa de propósito — SQ pode não ter inicializado
+  // ainda (ninguém abriu aquela página nesta sessão, ver app-core.js
+  // #_sqInit) — nunca deve travar o fluxo de Registrar Operação por
+  // causa disso.
   function _atualizarFilaSetorQualidade() {
     try {
-      const frame = document.getElementById('setor-qualidade-frame');
-      const sq = frame && frame.contentWindow && frame.contentWindow.SQ;
-      if (sq && typeof sq.carregarFilaNaoAvaliadas === 'function') {
-        sq.carregarFilaNaoAvaliadas();
+      if (window.SQ && typeof window.SQ.carregarFilaNaoAvaliadas === 'function') {
+        window.SQ.carregarFilaNaoAvaliadas();
       }
-    } catch (e) { /* iframe ainda não carregado, ou indisponível por algum motivo — sem problema */ }
+    } catch (e) { /* SQ ainda não inicializado, ou indisponível por algum motivo — sem problema */ }
   }
 
   /**
@@ -2537,6 +2537,17 @@
       if (!wasActive) el.classList.add('active');
     },
     closeModal() {
+      $('success-modal').style.display = 'none';
+      _atualizarFilaSetorQualidade();
+    },
+    // Fecha o modal a partir do "✕" no canto — função própria, separada de
+    // closeModal() (usada por "Nova Operação"/"Ver Registro"), de propósito:
+    // o "✕" só deve fechar e manter a pessoa exatamente onde ela está,
+    // sem carregar nenhum sentido de "começar uma operação nova" nem
+    // qualquer navegação — mesmo que hoje as duas façam a mesma coisa por
+    // baixo, ficam desacopladas pra uma futura mudança em closeModal() (ex:
+    // resetar algo do formulário) nunca vazar pro comportamento do "✕".
+    fecharModalSucesso() {
       $('success-modal').style.display = 'none';
       _atualizarFilaSetorQualidade();
     }

@@ -551,6 +551,57 @@ if (_operacoesAvaliadoLegado.length) {
   console.log(`[migração] ${_operacoesAvaliadoLegado.length} operação(ões) com "avaliado=1" (coluna legada) migrada(s) para "operacoes_avaliadas".`);
 }
 
+// ------------------------------------------------------------
+//  Migração única: corrige avaliações AVULSAS registradas ANTES da
+//  correção do bug em marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada
+//  (ver comentário lá) — essas avaliações já tiraram a operação certa
+//  da fila (existe uma linha em "operacoes_avaliadas"), mas nunca
+//  ganharam id_operacao em "avaliacoes_qualidade" (ficou NULL pra
+//  sempre), o que fazia a Análise Focada nunca encontrar o resultado
+//  pra essas operações.
+//
+//  Conservador de propósito: só liga os pontos quando a resposta é
+//  INEQUÍVOCA — 1 avaliação avulsa (id_operacao NULL) e 1 operação
+//  daquela mesma bateria já marcada como avaliada mas ainda sem
+//  NENHUMA avaliação vinculada (nem desta nem de nenhuma outra). Se
+//  houver mais de uma avaliação avulsa OU mais de uma operação
+//  candidata pra mesma bateria, pula (ambíguo demais pra adivinhar) —
+//  melhor deixar sem vincular do que vincular errado.
+// ------------------------------------------------------------
+(function _migrarAvaliacoesAvulsasOrfas() {
+  const avulsas = db.prepare(`
+    SELECT id, id_bateria FROM avaliacoes_qualidade
+    WHERE id_operacao IS NULL AND id_bateria IS NOT NULL
+  `).all();
+  if (!avulsas.length) return;
+
+  const porBateria = new Map();
+  for (const a of avulsas) {
+    if (!porBateria.has(a.id_bateria)) porBateria.set(a.id_bateria, []);
+    porBateria.get(a.id_bateria).push(a.id);
+  }
+
+  let vinculadas = 0;
+  const executar = db.transaction(() => {
+    for (const [idBateria, idsAvaliacao] of porBateria) {
+      if (idsAvaliacao.length !== 1) continue; // mais de uma avulsa pra mesma bateria — ambíguo, pula
+
+      const candidatas = db.prepare(`
+        SELECT o.id FROM operacoes o
+        JOIN operacoes_avaliadas oa ON oa.id_operacao = o.id
+        WHERE o.id_bateria = ?
+          AND o.id NOT IN (SELECT id_operacao FROM avaliacoes_qualidade WHERE id_operacao IS NOT NULL)
+      `).all(idBateria);
+      if (candidatas.length !== 1) continue; // 0 ou >1 operação candidata — ambíguo, pula
+
+      _vincularAvaliacaoAOperacao(idsAvaliacao[0], candidatas[0].id);
+      vinculadas++;
+    }
+  });
+  executar();
+  if (vinculadas) console.log(`[migração] ${vinculadas} avaliação(ões) avulsa(s) retro-vinculada(s) à operação correta (bug da Análise Focada corrigido para dados já existentes).`);
+})();
+
 /**
  * Cria a linha inicial de bercos_visuais pra uma operação recém-
  * registrada — 1 linha pra bateria INTEIRA, com todos os berços
@@ -954,6 +1005,11 @@ function _normalizarPaineisParaSql(paineis) {
     tipoEsperado: p.tipoEsperado || null, tipoObtido: p.tipoObtido || null,
     resultado: p.resultado || null, linha: p.linha || null,
     marcas: p.marcas || [],
+    // Código do motivo do defeito (ver MOTIVOS_DEFEITO, setor-qualidade.js)
+    // — só existe (não-null) em painéis 2ª linha ou reprovados.
+    motivo: p.motivo || null,
+    // Descrição livre — só existe quando motivo === 'OT' ("Outros").
+    motivoDescricao: p.motivoDescricao || null,
   }));
 }
 function salvarAvaliacaoQualidade(avaliacao) {
@@ -1117,10 +1173,31 @@ function marcarOperacaoAvaliada(idOperacao) {
  * motivo de /operacoes-nao-avaliadas: o Setor de Qualidade não tem
  * noção de Modo de Teste.
  *
+ * BUG CORRIGIDO: esta função só tirava a operação da FILA (INSERT em
+ * "operacoes_avaliadas"), mas nunca vinculava a própria avaliação
+ * avulsa a essa operação (avaliacoes_qualidade.id_operacao continuava
+ * NULL). Resultado: a bateria sumia da fila (parecia "avaliada"), mas
+ * a Análise Focada — que busca a avaliação estritamente por
+ * id_operacao (ver db.detalheOperacao) — nunca encontrava nada pra
+ * essa operação, mesmo a avaliação certa já existindo. Agora, quando
+ * o FIFO identifica qual operação pendente é essa (`pendente.id`),
+ * também retro-vincula a avaliação avulsa a ela (ver
+ * _vincularAvaliacaoAOperacao), na mesma transação.
+ *
  * @param {string} idBateria
- * @returns {boolean} true se alguma operação foi marcada (havia pendente)
+ * @param {string} [idAvaliacao] - id da avaliação avulsa que disparou
+ *   esta chamada (ver POST /registrar-avaliacao-qualidade, server.js) —
+ *   usado só pra retro-vincular essa avaliação à operação encontrada.
+ *   Sem isso (chamada legada, sem o 2º argumento), o comportamento
+ *   volta a ser só o antigo (tira da fila, sem vincular).
+ * @returns {string|false} o id da operação marcada, ou false se não havia
+ *   nenhuma pendente pra essa bateria. Quem chama (server.js) usa esse id
+ *   pra também tirar a operação da fila em arquivo (ver
+ *   removerDaFilaNaoAvaliadas, server.js) — CONTINUA truthy como antes
+ *   (era `true`), então nenhuma chamada existente que só faz `if (...)`
+ *   com o retorno precisa mudar.
  */
-function marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada(idBateria) {
+function marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada(idBateria, idAvaliacao) {
   if (!idBateria) return false;
   const pendente = db.prepare(`
     SELECT id FROM operacoes
@@ -1130,7 +1207,40 @@ function marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada(idBateria) {
     LIMIT 1
   `).get(idBateria);
   if (!pendente) return false;
-  return marcarOperacaoAvaliada(pendente.id);
+
+  const executar = db.transaction(() => {
+    marcarOperacaoAvaliada(pendente.id);
+    if (idAvaliacao) _vincularAvaliacaoAOperacao(idAvaliacao, pendente.id);
+  });
+  executar();
+  return pendente.id;
+}
+
+/**
+ * Vincula, DEPOIS de já registrada, uma avaliação de qualidade a uma
+ * operação — usado só por marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada
+ * (acima), pra fechar a lacuna de uma avaliação AVULSA cuja operação
+ * correspondente só é descoberta depois (pelo FIFO de bateria), não no
+ * momento do registro.
+ *
+ * Atualiza id_operacao em avaliacoes_qualidade E avaliacao_paineis
+ * (mesma coluna nas duas tabelas — ver CREATE TABLE), e também
+ * "linkedOperacaoId" DENTRO do JSON "dados" — "dados" é quem o front
+ * lê de volta (ver listarAvaliacoesQualidade/editarAvaliacaoDoEspelho),
+ * então precisa continuar consistente com a coluna, senão a avaliação
+ * passaria a ser encontrada pela Análise Focada mas ainda apareceria
+ * como "avulsa" (sem vínculo) em qualquer tela que leia o JSON direto.
+ */
+function _vincularAvaliacaoAOperacao(idAvaliacao, idOperacao) {
+  const row = db.prepare('SELECT dados FROM avaliacoes_qualidade WHERE id = ?').get(idAvaliacao);
+  if (!row) return; // avaliação não existe (não deveria acontecer, mas não quebra a marcação da fila por causa disso)
+  const dados = JSON.parse(row.dados);
+  if (dados.linkedOperacaoId === idOperacao) return; // já vinculada a esta mesma operação — nada a fazer
+  dados.linkedOperacaoId = idOperacao;
+  db.prepare('UPDATE avaliacoes_qualidade SET id_operacao = ?, dados = ? WHERE id = ?')
+    .run(idOperacao, JSON.stringify(dados), idAvaliacao);
+  db.prepare('UPDATE avaliacao_paineis SET id_operacao = ? WHERE id_avaliacao = ?')
+    .run(idOperacao, idAvaliacao);
 }
 
 /**

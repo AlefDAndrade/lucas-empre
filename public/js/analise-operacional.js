@@ -851,8 +851,14 @@
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
     try {
       const res = await fetch('db/historico.json');
-      const dados = res.ok ? await res.json() : [];
-      const html = _gerarHtmlAoStandalone(dados);
+      const dadosTotal = res.ok ? await res.json() : [];
+      const ini = document.getElementById('ao-data-inicio')?.value || '';
+      const fim = document.getElementById('ao-data-fim')?.value || '';
+      const dados = filtrar(dadosTotal, ini, fim);
+      const descricaoPeriodo = (ini || fim)
+        ? (ini ? new Date(ini + 'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim + 'T00:00:00').toLocaleDateString('pt-BR') : 'hoje')
+        : 'Todos os registros';
+      const html = _gerarHtmlAoStandalone(dados, descricaoPeriodo);
       LW.baixarArquivoTexto(
         `analise_operacional_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}.html`,
         html
@@ -865,7 +871,11 @@
     }
   }
 
-  function _gerarHtmlAoStandalone(dados) {
+  // Retrato FIXO do que está na tela no momento do clique — "dados" já
+  // vem filtrado pelo período ativo (ver exportarInterativo, acima), não
+  // o histórico inteiro com uma UI de filtro pra reaplicar depois. Os
+  // gráficos continuam interativos (hover funciona, ver TOOLTIP_JS_FONTE).
+  function _gerarHtmlAoStandalone(dados, descricaoPeriodo) {
     const dadosJson = JSON.stringify(dados).replace(/<\/script/gi, '<\\/script');
 
     return `<!DOCTYPE html>
@@ -874,19 +884,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Análise Operacional — Exportado</title>
-<style>${LW.CSS_EXPORT_PADRAO}
+<style>${LW.gerarCssExportPadrao()}
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 </style>
 </head>
 <body>
   <h1>📊 Análise Operacional</h1>
-  <div class="sub" id="exp-sub"></div>
-
-  <div class="filtros">
-    <div class="campo"><label>Data Início</label><input type="date" id="ao-data-inicio"></div>
-    <div class="campo"><label>Data Fim</label><input type="date" id="ao-data-fim"></div>
-    <button class="botao" id="btn-ao-filtrar">🔄 Aplicar</button>
-  </div>
+  <div class="sub" id="exp-sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${LW.escaparHtml(descricaoPeriodo)}</b></div>
 
   <div id="ao-content">
     <div class="kpi-grid">
@@ -930,13 +935,13 @@
 
     <div class="chart-box"><h4>🏆 m² por Bateria (Top 8)</h4><canvas id="ao-prod-m2"></canvas></div>
   </div>
-  <div class="rodape">Exportado da Análise Operacional — Lightwall SC · dados embutidos neste arquivo, funciona offline.</div>
+  <div class="rodape">Exportado da Análise Operacional — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
 
 <script>${LW.TOOLTIP_JS_FONTE}</script>
 <script>
 (function () {
   'use strict';
-  const DADOS_TOTAL = ${dadosJson};
+  const DADOS = ${dadosJson};
   const C = ${JSON.stringify(C)};
   // Paleta fixa cíclica pra Montagem × Atraso (ver comentário em
   // exportarInterativo, acima — sem a cor configurada real aqui).
@@ -948,7 +953,6 @@
 
   ${normalizarMotivo}
   ${tempoMin}
-  ${filtrar}
   ${calcularKPIs}
   ${gerarInsights}
   ${px}
@@ -988,30 +992,17 @@
   }
 
   function render() {
-    const ini = document.getElementById('ao-data-inicio').value;
-    const fim = document.getElementById('ao-data-fim').value;
-    const filtrado = filtrar(DADOS_TOTAL, ini, fim);
-    const kpi = calcularKPIs(filtrado);
+    const kpi = calcularKPIs(DADOS);
 
-    renderKPIs(kpi, filtrado);
-    renderInsights(kpi, filtrado);
+    renderKPIs(kpi, DADOS);
+    renderInsights(kpi, DADOS);
     renderRankBaterias(kpi);
     renderRankMotivos(kpi);
-    renderCorrelacoes(kpi, filtrado);
+    renderCorrelacoes(kpi, DADOS);
     renderTendencias(kpi);
-    renderProdutividade(kpi, filtrado);
-
-    document.getElementById('exp-sub').textContent =
-      \`Período: \${(ini || fim) ? (ini ? new Date(ini+'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim+'T00:00:00').toLocaleDateString('pt-BR') : 'hoje') : 'Todos os registros'} · Gerado em \${new Date().toLocaleString('pt-BR')}\`;
+    renderProdutividade(kpi, DADOS);
   }
 
-  // Prefill: intervalo real dos dados (1º registro → mais recente).
-  if (DADOS_TOTAL.length) {
-    const dates = DADOS_TOTAL.map(r => r.data).filter(Boolean).sort();
-    document.getElementById('ao-data-inicio').value = dates[0];
-    document.getElementById('ao-data-fim').value = dates[dates.length - 1];
-  }
-  document.getElementById('btn-ao-filtrar').addEventListener('click', render);
   render();
 })();
 </script>

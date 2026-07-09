@@ -312,7 +312,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Análise Focada — ${LW.escaparHtml(String(detalhe.operacao?.id || ''))} — Exportado</title>
-<style>${LW.CSS_EXPORT_PADRAO}
+<style>${LW.gerarCssExportPadrao()}
   .af-cabecalho-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; }
   .af-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); margin-bottom:4px; }
   .af-valor { font-size:.95rem; color:var(--text); font-weight:600; }

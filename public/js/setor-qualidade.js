@@ -7,15 +7,17 @@
 
 (function () {
 
-  /* ── Escape de HTML local — NÃO usar LW.escaparHtml aqui ──
-     Este arquivo roda dentro do <iframe> setor-qualidade-app.html, que
-     NUNCA carrega data.js (só carrega este script + libs de gráfico) —
-     então `LW` simplesmente não existe neste documento. Usar
-     LW.escaparHtml quebra com "ReferenceError: LW is not defined" assim
-     que há algo real pra escapar (ex: o label de um tipo de montagem
-     sem combinação, ver _renderAvisoCombinacoesFaltando), o erro sobe
-     e interrompe toda a função que estava rodando — foi exatamente o
-     que impedia a seção "Tipos sem marcação definida" de aparecer. */
+  /* ── Escape de HTML local ──────────────────────────────
+     Função própria em vez de LW.escaparHtml (que já existe no mesmo
+     documento — este arquivo carrega depois de data.js, ver
+     index.template.html) só por não depender da ordem de carregamento
+     dos scripts: histórico daqui é que, quando esta tela rodava dentro
+     de um <iframe> à parte (setor-qualidade-app.html), LW simplesmente
+     não existia neste documento, e usar LW.escaparHtml quebrava com
+     "ReferenceError: LW is not defined" assim que havia algo real pra
+     escapar — o erro subia e interrompia toda a função que estava
+     rodando. A função local sobrou porque não há motivo real pra trocar
+     algo que já funciona só pra "usar a função companheira". */
   function _escaparHtml(str) {
     const div = document.createElement('div');
     div.textContent = String(str ?? '');
@@ -50,6 +52,22 @@
   let selectedColor  = 'verde';
   let selectedShape  = 'circle';
   let slabState      = {};
+  // Motivo do defeito (código, ver MOTIVOS_DEFEITO) por placa — só
+  // preenchido quando a placa vira 2ª linha (azul) ou reprovada
+  // (vermelho); sempre um objeto PARALELO a slabState (mesma chave —
+  // "stack{pallet}-{posicao}" — nunca uma propriedade DENTRO de cada
+  // marca), porque o motivo é do PAINEL como um todo, não de uma marca
+  // específica (um painel 3T reprovado, por exemplo, tem um círculo
+  // vermelho + um traço amarelo — o motivo se refere ao painel, não a
+  // qual das duas marcas). Precisa ser resetado/restaurado em todo lugar
+  // que mexe em slabState — ver clearForm, clearAllMarks, pushState/undo,
+  // saveDraft/loadDraft, _carregarAvaliacaoNoFormulario.
+  let slabMotivo     = {};
+  // Descrição livre — só existe (não-undefined) quando slabMotivo[id] ===
+  // 'OT' ("Outros"); todo o resto do ciclo de vida (undo, rascunho,
+  // limpar, carregar avaliação existente) trata este objeto exatamente
+  // igual a slabMotivo, sempre em paralelo, mesma chave.
+  let slabMotivoDescricao = {};
   let actionHistory  = [];
   let currentDraftId = null;
   let viewMode       = false;
@@ -88,13 +106,18 @@
   let _montagemOpcoesCache = [];
 
   // ── Combinações cor+forma → tipo simples (Referência de Marcadores) —
-  // também vem de config.json (marcadores_qualidade.opcoes), gravado lá
-  // JUNTO com o resto da configuração de montagem (ver salvarCombinacao
-  // Tipo, mais abaixo). _configBrutoCache guarda o config.json inteiro
-  // (não só marcadores_qualidade) porque salvar de volta usa /salvar-
+  // Antes: combinação cor+forma vivia numa lista À PARTE
+  // (marcadores_qualidade.opcoes), casada com o tipo só na hora de usar
+  // (por código `tipo`, ver _combinacoesEfetivas mais abaixo). Agora cada
+  // tipo SIMPLES carrega sua própria combinação junto (campo
+  // `combinacaoAvaliacao` dentro do próprio item de
+  // tipos_montagem.opcoes) — nasce vazia (null) quando o tipo é criado em
+  // Configurações → Montagem (ver cfgAdicionarMontagemSimples, app-
+  // core.js), e só é preenchida aqui, pelo Setor de Qualidade (ver
+  // salvarCombinacaoTipo, abaixo). _configBrutoCache guarda o config.json
+  // inteiro (não só tipos_montagem) porque salvar de volta usa /salvar-
   // config, que substitui o arquivo inteiro — precisa reenviar tudo, não
   // só o pedaço que mudou.
-  let _marcadoresQualidadeCache = null;
   let _configBrutoCache = null;
 
   /**
@@ -113,8 +136,8 @@
       const res = await fetch('/db/config.json');
       if (!res.ok) throw new Error('Falha ao buscar config.json');
       const cfg = await res.json();
+      const migrou = _migrarCombinacoesParaTiposMontagem(cfg);
       _configBrutoCache = cfg;
-      _marcadoresQualidadeCache = Array.isArray(cfg?.marcadores_qualidade?.opcoes) ? cfg.marcadores_qualidade.opcoes : null;
       const opcoes = Array.isArray(cfg?.tipos_montagem?.opcoes) ? cfg.tipos_montagem.opcoes : [];
       _montagemOpcoesCache = opcoes;
       const simples = opcoes.filter(o => o && o.modo === 'simples' && o.tipo && o.label);
@@ -130,6 +153,15 @@
       sel.innerHTML = html;
       _renderAvisoCombinacoesFaltando();
       _renderTabelaCombinacoes();
+
+      // Migração é feita só uma vez por instalação: persiste de volta pro
+      // config.json assim que detectada, pra outros dispositivos/abas já
+      // carregarem o formato novo direto, sem precisar migrar de novo.
+      if (migrou) {
+        fetch('/salvar-config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+        }).catch(err => console.error('Falha ao persistir migração de combinações de avaliação:', err));
+      }
     } catch (err) {
       console.error('Falha ao carregar tipos de montagem de config.json — usando lista fixa de reserva:', err);
       // Fallback só pra tela não ficar sem nenhuma opção se config.json
@@ -147,6 +179,30 @@
       // gerado, não mais hardcoded no HTML.
       _renderTabelaCombinacoes();
     }
+  }
+
+  // Migração única — instalações de antes desta mudança têm as
+  // combinações separadas em cfg.marcadores_qualidade.opcoes. Copia cada
+  // uma pro campo combinacaoAvaliacao do tipo correspondente (por código
+  // `tipo`) em cfg.tipos_montagem.opcoes, e remove a lista antiga (não é
+  // mais lida por nada depois desta mudança). Idempotente: instalação já
+  // migrada (sem marcadores_qualidade, ou já com combinacaoAvaliacao
+  // preenchido) não sofre nenhuma alteração — devolve false nesse caso,
+  // pra _carregarOpcoesMontagem saber que não precisa regravar o arquivo.
+  function _migrarCombinacoesParaTiposMontagem(cfg) {
+    const antigas = Array.isArray(cfg?.marcadores_qualidade?.opcoes) ? cfg.marcadores_qualidade.opcoes : [];
+    if (!antigas.length) return false;
+    const tipos = Array.isArray(cfg?.tipos_montagem?.opcoes) ? cfg.tipos_montagem.opcoes : [];
+    let mudou = false;
+    antigas.forEach(c => {
+      const alvo = tipos.find(o => o && o.modo === 'simples' && o.tipo === c.tipo);
+      if (alvo && !alvo.combinacaoAvaliacao) {
+        alvo.combinacaoAvaliacao = { forma: c.forma, corModificadora: c.corModificadora };
+        mudou = true;
+      }
+    });
+    delete cfg.marcadores_qualidade; // formato antigo, não é mais lido por nada depois de migrado
+    return mudou;
   }
 
   // Converte o tipo_montagem de uma operação real (LABEL — ex: "S/P",
@@ -167,13 +223,14 @@
   // destruir entre re-renders.)
 
   /* ── Combinações cor+forma → tipo simples ─────────────────
-     Antes 100% fixo no código (só reconhecia 2P/SP/3T/1T). Agora vem de
-     config.json (marcadores_qualidade.opcoes) — qualquer tipo simples
-     novo cadastrado em Configurações → Montagem só ganha uma combinação
-     de marcação quando alguém definir uma explicitamente (ver "📖
-     Referência" → "Tipos sem marcação definida", mais abaixo). Até lá,
-     ou enquanto config.json ainda não carregou, usa exatamente o
-     comportamento de sempre (COMBINACOES_PADRAO) — ninguém que já usa
+     Antes 100% fixo no código (só reconhecia 2P/SP/3T/1T). Agora vem do
+     campo combinacaoAvaliacao de cada item em config.json
+     (tipos_montagem.opcoes) — qualquer tipo simples novo cadastrado em
+     Configurações → Montagem nasce com combinacaoAvaliacao vazio (null),
+     e só ganha uma combinação de marcação quando alguém definir uma
+     explicitamente (ver "📖 Referência" → "Tipos sem marcação
+     definida", mais abaixo). Até lá, ou enquanto config.json ainda não
+     carregou, usa exatamente o comportamento de sempre (COMBINACOES_PADRAO) — ninguém que já usa
      2P/SP/3T/1T é afetado por esta mudança. */
   const COMBINACOES_PADRAO = [
     { tipo: '2p', forma: 'circle',      corModificadora: null },
@@ -201,10 +258,50 @@
   const CORES_MARCACAO = ['verde', 'vermelho', 'azul', 'amarelo', 'laranja'];
   const CORES_RESERVADAS_APROVACAO = ['verde', 'azul', 'vermelho'];
 
+  // Motivo do defeito — obrigatório sempre que uma placa vira 2ª linha
+  // (azul) ou reprovada (vermelho): ver _corExigeMotivo/_abrirSeletorMotivo,
+  // mais abaixo. Lista fixa (não configurável em Configurações — diferente
+  // dos tipos de montagem), porque é terminologia de qualidade já em uso
+  // na fábrica, não algo que varia por instalação.
+  const MOTIVOS_DEFEITO = [
+    { codigo: 'BC', nome: 'Borra de Cimento' },
+    { codigo: 'CD', nome: 'Cimentícia Descamando' },
+    { codigo: 'CC', nome: 'Cimentícia Não Colada' },
+    { codigo: 'CF', nome: 'Cimentícia Fora de Posição' },
+    { codigo: 'EM', nome: 'Espessura Maior' },
+    { codigo: 'EP', nome: 'Engoliu Placa' },
+    { codigo: 'FD', nome: 'Falha Desmoldante' },
+    { codigo: 'FE', nome: 'Falha Enchimento' },
+    { codigo: 'FT', nome: 'Falha Traço' },
+    { codigo: 'PA', nome: 'Painel Amassado' },
+    { codigo: 'QE', nome: 'Quebra por Empilhadeira' },
+    { codigo: 'PQ', nome: 'Painel Quebrado' },
+    { codigo: 'PT', nome: 'Perfil Torto' },
+    { codigo: 'TR', nome: 'Trincada' },
+    // "Outros" é diferente de todo o resto da lista: não tem uma
+    // descrição fixa — quem marca digita a descrição na hora (ver
+    // _abrirSeletorMotivo, showPrompt). O hover no badge "OT" mostra essa
+    // descrição digitada, não um nome fixo (diferente dos outros 14
+    // códigos, cujo hover é sempre o mesmo texto pra todo mundo).
+    { codigo: 'OT', nome: 'Outros' },
+  ];
+  const _MOTIVO_POR_CODIGO = Object.fromEntries(MOTIVOS_DEFEITO.map(m => [m.codigo, m.nome]));
+
+  // Cor da MARCA que dispara a exigência de motivo — 2ª linha (azul) e
+  // reprovado (vermelho), nas duas formas (círculo sozinho, ou traço
+  // sozinho quando o tipo é "traço só" — ver COMBINACOES_PADRAO). Verde
+  // (1ª linha aprovada) e amarelo/laranja (modificador de tipo, não de
+  // status) NUNCA exigem motivo — só fazem sentido junto de um círculo,
+  // que é quem já decide aprovado/reprovado.
+  function _corExigeMotivo(cor) {
+    return cor === 'azul' || cor === 'vermelho';
+  }
+
   function _combinacoesEfetivas() {
-    return (Array.isArray(_marcadoresQualidadeCache) && _marcadoresQualidadeCache.length)
-      ? _marcadoresQualidadeCache
-      : COMBINACOES_PADRAO;
+    const doConfig = (_montagemOpcoesCache || [])
+      .filter(o => o && o.modo === 'simples' && o.tipo && o.combinacaoAvaliacao)
+      .map(o => ({ tipo: o.tipo, forma: o.combinacaoAvaliacao.forma, corModificadora: o.combinacaoAvaliacao.corModificadora }));
+    return doConfig.length ? doConfig : COMBINACOES_PADRAO;
   }
 
   /* ── Classificação de marcas ──────────────────────────── */
@@ -271,12 +368,12 @@
   }
 
   /* ── Referência de Marcadores: tipos sem combinação definida ──────
-     Compara os tipos simples cadastrados em Configurações → Montagem
-     (tipos_montagem.opcoes) com as combinações já definidas
-     (marcadores_qualidade.opcoes) — qualquer tipo simples cadastrado
-     que ainda não tenha uma combinação aparece aqui, com a opção de
-     definir uma (só entre as que ainda não estão em uso por outro
-     tipo — nunca duas combinações pro mesmo par cor+forma). */
+     Verifica os tipos simples cadastrados em Configurações → Montagem
+     (tipos_montagem.opcoes) cujo campo combinacaoAvaliacao ainda está
+     vazio (null — estado de quando o tipo foi criado) — qualquer tipo
+     simples cadastrado que ainda não tenha uma combinação aparece aqui,
+     com a opção de definir uma (só entre as que ainda não estão em uso
+     por outro tipo — nunca duas combinações pro mesmo par cor+forma). */
   function _tiposSimplesSemCombinacao() {
     const simples = (_montagemOpcoesCache || []).filter(o => o && o.modo === 'simples' && o.tipo && o.label);
     const combinacoes = _combinacoesEfetivas();
@@ -343,9 +440,9 @@
   // Referência" — antes era texto fixo no HTML (sempre "2P"/"SP"/"3T"/
   // "1T", mesmo quando o tipo cadastrado em Configurações → Montagem
   // tinha outro código ou nem existia). Agora cada linha vem das
-  // combinações efetivas (_combinacoesEfetivas — config.json →
-  // marcadores_qualidade.opcoes, com COMBINACOES_PADRAO como reserva) e
-  // o nome exibido é sempre o LABEL real do tipo simples correspondente
+  // combinações efetivas (_combinacoesEfetivas — campo combinacaoAvaliacao
+  // de cada tipo em tipos_montagem.opcoes, com COMBINACOES_PADRAO como
+  // reserva) e o nome exibido é sempre o LABEL real do tipo simples correspondente
   // em tipos_montagem.opcoes (ex.: código "sp" cadastrado com label
   // "S/P" aparece como "S/P", não como "SP" — são a mesma coisa, só
   // "SP" é o código interno usado pra casar com a combinação, nunca o
@@ -416,6 +513,25 @@
     }).join('');
   }
 
+  // Popover "Motivos" no cabeçalho do Espelho Visual — o que cada código
+  // (ex: "BC") significa. Renderizado 1 vez, no init (a lista é fixa,
+  // MOTIVOS_DEFEITO, não muda em tempo de execução) — diferente de
+  // _renderTabelaCombinacoes/_renderAvisoCombinacoesFaltando, que dependem
+  // de config.json e por isso são re-renderizadas toda vez que ele recarrega.
+  function _renderReferenciaMotivos() {
+    const el = document.getElementById('popover-sq-motivos');
+    if (!el) return;
+    el.innerHTML = `
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:700;margin-bottom:8px">
+        Motivo do defeito (2ª linha / reprovado)
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;font-size:.8rem">
+        ${MOTIVOS_DEFEITO.map(m => `
+          <div style="display:flex;gap:8px"><strong style="min-width:26px;color:var(--accent)">${m.codigo}</strong><span>${_escaparHtml(m.nome)}${m.codigo === 'OT' ? ' — descrição livre, veja no hover do código' : ''}</span></div>
+        `).join('')}
+      </div>`;
+  }
+
   // Abre o seletor de combinação disponível pra um tipo específico —
   // aparece embutido, logo abaixo do tipo, dentro do próprio popover.
   function abrirDefinirCombinacao(tipo) {
@@ -435,12 +551,13 @@
     picker.dataset.disponiveis = JSON.stringify(disponiveis);
   }
 
-  // Grava a combinação escolhida em config.json (marcadores_qualidade.
-  // opcoes) via /salvar-config — mesma rota que Configurações usa pra
-  // qualquer alteração (reenvia o config.json INTEIRO, não só o pedaço
-  // que mudou, porque é assim que /salvar-config funciona: substitui o
-  // arquivo por completo). Revalida contra o config.json mais recente
-  // antes de gravar — se ALGUÉM MAIS já tiver usado essa combinação
+  // Grava a combinação escolhida DENTRO do próprio tipo, em
+  // cfg.tipos_montagem.opcoes[i].combinacaoAvaliacao — via /salvar-config
+  // (mesma rota que Configurações usa pra qualquer alteração; reenvia o
+  // config.json INTEIRO, não só o pedaço que mudou, porque é assim que
+  // /salvar-config funciona: substitui o arquivo por completo). Revalida
+  // contra o config.json mais recente antes de gravar — se ALGUÉM MAIS
+  // já tiver usado essa combinação, ou definido uma pro mesmo tipo,
   // enquanto o picker estava aberto aqui, recusa e avisa, em vez de
   // gravar 2 tipos na mesma combinação.
   async function salvarCombinacaoTipo(tipo) {
@@ -455,25 +572,34 @@
       const res = await fetch('/db/config.json');
       if (!res.ok) throw new Error('Falha ao buscar config.json atualizado.');
       const cfg = await res.json();
-      const atuais = Array.isArray(cfg?.marcadores_qualidade?.opcoes) ? cfg.marcadores_qualidade.opcoes : [];
+      _migrarCombinacoesParaTiposMontagem(cfg); // idempotente — cobre o caso de outro dispositivo ainda não migrado
+      const tipos = Array.isArray(cfg?.tipos_montagem?.opcoes) ? cfg.tipos_montagem.opcoes : [];
+      const alvo = tipos.find(o => o && o.modo === 'simples' && o.tipo === tipo);
+      if (!alvo) {
+        showAlert('Aviso', 'Este tipo não existe mais em Configurações → Montagem. Recarregando a referência...');
+        _carregarOpcoesMontagem();
+        return;
+      }
       // Revalidação: já existe combinação pra este tipo, ou a combinação
       // escolhida já foi usada por outro tipo enquanto o picker estava
       // aberto? Nos 2 casos, recusa — só pode existir 1 combinação por
       // tipo, e 1 tipo por combinação.
-      if (atuais.some(c => c.tipo === tipo)) {
+      if (alvo.combinacaoAvaliacao) {
         showAlert('Aviso', 'Este tipo já ganhou uma combinação (talvez em outra aba/dispositivo). Recarregando a referência...');
         _carregarOpcoesMontagem();
         return;
       }
-      if (atuais.some(c => c.forma === escolhida.forma && c.corModificadora === escolhida.corModificadora)) {
+      const emUsoPorOutro = tipos.some(o => o !== alvo && o?.combinacaoAvaliacao
+        && o.combinacaoAvaliacao.forma === escolhida.forma
+        && o.combinacaoAvaliacao.corModificadora === escolhida.corModificadora);
+      if (emUsoPorOutro) {
         showAlert('Aviso', 'Essa combinação acabou de ser usada por outro tipo (talvez em outra aba/dispositivo). Escolha outra.');
         abrirDefinirCombinacao(tipo); // reabre com a lista de disponíveis já atualizada
         _carregarOpcoesMontagem();
         return;
       }
 
-      const novaLista = [...atuais, { tipo, forma: escolhida.forma, corModificadora: escolhida.corModificadora }];
-      cfg.marcadores_qualidade = { opcoes: novaLista };
+      alvo.combinacaoAvaliacao = { forma: escolhida.forma, corModificadora: escolhida.corModificadora };
 
       const salvar = await fetch('/salvar-config', {
         method: 'POST',
@@ -482,8 +608,8 @@
       });
       if (!salvar.ok) throw new Error('O servidor recusou salvar.');
 
-      _marcadoresQualidadeCache = novaLista;
       _configBrutoCache = cfg;
+      _montagemOpcoesCache = tipos;
       _renderAvisoCombinacoesFaltando();
       _renderTabelaCombinacoes();
       showAlert('Salvo', `Combinação definida para ${tipo.toUpperCase()} — já pode marcar painéis desse tipo.`);
@@ -579,12 +705,56 @@
         mc.className = 'sq-slab-marks';
         slab.appendChild(mc);
 
+        // Badge do código de motivo (ex: "BC") — só aparece quando a placa
+        // tem um motivo salvo (ver _renderBadgeMotivo). Clique reabre o
+        // seletor pra trocar, SEM alternar a marca (stopPropagation — o
+        // clique na placa em si continua marcando/desmarcando normalmente).
+        const mo = document.createElement('span');
+        mo.className = 'sq-slab-motivo';
+        mo.title = 'Clique para editar o motivo';
+        mo.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (viewMode) return;
+          if ((slabState[id] || []).some(m => _corExigeMotivo(m.color))) _abrirSeletorMotivo(id);
+        });
+        slab.appendChild(mo);
+
         if (slabState[id]) renderMarks(slab, slabState[id]);
+        _renderBadgeMotivo(id);
         slab.addEventListener('click', () => toggleMark(slab));
         stack.appendChild(slab);
       }
     });
     validateAllSlabs();
+  }
+
+  // Mostra/esconde o badge do código de motivo (ex: "BC") na placa —
+  // "?" quando a placa tem marca que exige motivo mas ainda não foi
+  // escolhido (chama atenção pra terminar); o código quando já escolhido;
+  // escondido quando não se aplica. Chamada sempre que o motivo muda
+  // (seletor, desmarcação) e ao (re)renderizar a placa do zero
+  // (renderStacks, acima).
+  function _renderBadgeMotivo(id) {
+    const slab = document.querySelector(`.sq-slab[data-id="${id}"]`);
+    const badge = slab?.querySelector('.sq-slab-motivo');
+    if (!badge) return;
+    const exigeMotivo = (slabState[id] || []).some(m => _corExigeMotivo(m.color));
+    const codigo = slabMotivo[id];
+    badge.classList.toggle('sq-slab-motivo-pendente', exigeMotivo && !codigo);
+    if (codigo) {
+      badge.textContent = codigo;
+      badge.title = codigo === 'OT'
+        ? (slabMotivoDescricao[id] || 'Outros (sem descrição)') + ' (clique para editar)'
+        : `${codigo} — ${_MOTIVO_POR_CODIGO[codigo] || ''} (clique para editar)`;
+      badge.style.display = '';
+    } else if (exigeMotivo) {
+      badge.textContent = '?';
+      badge.title = 'Motivo do defeito pendente — clique para escolher';
+      badge.style.display = '';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
   }
 
   function renderMarks(slabEl, marks) {
@@ -606,10 +776,129 @@
     const id = el.dataset.id;
     if (!slabState[id]) slabState[id] = [];
     const idx = slabState[id].findIndex(m => m.color === selectedColor && m.shape === selectedShape);
-    if (idx !== -1) slabState[id].splice(idx, 1);
-    else slabState[id].push({ color: selectedColor, shape: selectedShape });
+    if (idx !== -1) {
+      slabState[id].splice(idx, 1);
+      _atualizarMotivoAposDesmarcar(id);
+    } else {
+      slabState[id].push({ color: selectedColor, shape: selectedShape });
+      _renderBadgeMotivo(id); // mostra o "?" pendente na hora, antes mesmo do popover abrir
+    }
     renderMarks(el, slabState[id]);
     validateAllSlabs();
+    if (idx === -1 && _corExigeMotivo(selectedColor)) _abrirSeletorMotivo(id);
+  }
+
+  // Desmarcar uma cor azul/vermelho pode deixar o painel sem NENHUMA marca
+  // que ainda exija motivo (ex: era só um círculo vermelho, foi removido)
+  // — nesse caso o motivo salvo não faz mais sentido e é limpo junto. Se
+  // ainda sobrar outra marca azul/vermelho (raro, mas possível numa
+  // combinação círculo+traço onde as duas contam status — não é o caso
+  // hoje, mas não custa checar), mantém o motivo como estava.
+  function _atualizarMotivoAposDesmarcar(id) {
+    const aindaExigeMotivo = (slabState[id] || []).some(m => _corExigeMotivo(m.color));
+    if (!aindaExigeMotivo) { delete slabMotivo[id]; delete slabMotivoDescricao[id]; }
+    _renderBadgeMotivo(id);
+  }
+
+  // Seletor de motivo — popover flutuante com os 14 códigos (ver
+  // MOTIVOS_DEFEITO). 2 modos, conforme os argumentos:
+  //   - _abrirSeletorMotivo(id) — 1 placa só (clique direto na placa ou no
+  //     badge "?"/código dela). Ancorado na placa.
+  //   - _abrirSeletorMotivo(null, stackId) — pallet inteiro (depois de
+  //     "Marcar Tudo"/cor no cabeçalho do pallet, ver applyMarksToPallet).
+  //     Aplica o motivo escolhido em TODA placa do pallet que estiver
+  //     exigindo motivo agora. Ancorado no cabeçalho do pallet.
+  // Sem opção de "pular" de propósito (só ✕ fecha sem escolher, deixando
+  // o badge "?" — a pessoa pode reabrir clicando nele quando quiser
+  // terminar; não trava o fluxo de marcação, mas também não deixa a
+  // pendência invisível).
+  function _abrirSeletorMotivo(id, stackId) {
+    document.querySelectorAll('.sq-motivo-popover').forEach(el => el.remove());
+
+    const ancora = id
+      ? document.querySelector(`.sq-slab[data-id="${id}"]`)
+      : document.querySelector(`#${stackId} .sq-pallet-header`) || document.getElementById(stackId);
+    if (!ancora) return;
+
+    const pop = document.createElement('div');
+    pop.className = 'sq-motivo-popover';
+    pop.innerHTML = `
+      <div class="sq-motivo-popover-titulo">
+        ${id ? 'Motivo do defeito' : 'Motivo do defeito — pallet inteiro'}
+        <button type="button" class="sq-motivo-popover-fechar" title="Fechar sem escolher">✕</button>
+      </div>
+      <div class="sq-motivo-popover-grid">
+        ${MOTIVOS_DEFEITO.map(m => `
+          <button type="button" class="sq-motivo-popover-item" data-codigo="${m.codigo}" title="${_escaparHtml(m.nome)}">
+            <strong>${m.codigo}</strong><span>${_escaparHtml(m.nome)}</span>
+          </button>`).join('')}
+      </div>`;
+    document.body.appendChild(pop);
+
+    const rect = ancora.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + 6;
+    if (left + popRect.width > window.innerWidth - 8) left = window.innerWidth - popRect.width - 8;
+    if (top + popRect.height > window.innerHeight - 8) top = rect.top - popRect.height - 6;
+    pop.style.left = Math.max(8, left) + 'px';
+    pop.style.top = Math.max(8, top) + 'px';
+
+    function fechar() {
+      pop.remove();
+      document.removeEventListener('mousedown', aoClicarFora, true);
+    }
+    function aoClicarFora(e) {
+      if (!pop.contains(e.target)) fechar();
+    }
+    // setTimeout: sem isso, o MESMO clique que abriu o popover (ex: clique
+    // na placa) já contaria como "clique fora" e fecharia na hora.
+    setTimeout(() => document.addEventListener('mousedown', aoClicarFora, true), 0);
+
+    pop.querySelector('.sq-motivo-popover-fechar').addEventListener('click', fechar);
+    // Aplica o motivo escolhido — na PLACA (id) ou em todo o PALLET
+    // (stackId, quando id é null), sempre nas placas que ainda estiverem
+    // exigindo motivo agora (mesmo critério dos 2 modos, ver comentário
+    // da função). Único ponto que de fato grava slabMotivo/slabMotivoDescricao,
+    // usado tanto pro clique direto num código quanto pelo fluxo de "OT"
+    // (que só chama isto DEPOIS do showPrompt confirmado).
+    function aplicar(codigo, descricao) {
+      if (id) {
+        slabMotivo[id] = codigo;
+        if (codigo === 'OT') slabMotivoDescricao[id] = descricao; else delete slabMotivoDescricao[id];
+        _renderBadgeMotivo(id);
+      } else {
+        document.getElementById(stackId).querySelectorAll('.sq-slab').forEach(slab => {
+          const sid = slab.dataset.id;
+          if ((slabState[sid] || []).some(m => _corExigeMotivo(m.color))) {
+            slabMotivo[sid] = codigo;
+            if (codigo === 'OT') slabMotivoDescricao[sid] = descricao; else delete slabMotivoDescricao[sid];
+            _renderBadgeMotivo(sid);
+          }
+        });
+      }
+    }
+    pop.querySelectorAll('.sq-motivo-popover-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const codigo = btn.dataset.codigo;
+        if (codigo === 'OT') {
+          // Descrição livre — fecha o popover de códigos e abre o prompt
+          // de texto (showPrompt, mesmo modal de sempre). Só aplica se a
+          // pessoa confirmar com um texto não-vazio; cancelar ou deixar
+          // em branco não marca nada (placa continua com "?" pendente,
+          // ver _renderBadgeMotivo — igual a fechar o popover sem
+          // escolher nenhum código).
+          const descricaoAtual = id ? (slabMotivoDescricao[id] || '') : '';
+          fechar();
+          showPrompt('Descreva o motivo', 'Descrição curta do defeito — aparece no hover do código "OT".', descricaoAtual, (texto) => {
+            if (texto && texto.trim()) aplicar('OT', texto.trim());
+          });
+          return;
+        }
+        aplicar(codigo, null);
+        fechar();
+      });
+    });
   }
 
   /* ── Seleção de cor / forma ───────────────────────────── */
@@ -630,9 +919,9 @@
   // Numeração segue a ORDEM que os botões aparecem na tela (mesma ordem
   // do DOM — ver querySelectorAll abaixo), não uma lista fixa aqui: hoje
   // são 5 cores e 2 formas, mas adicionar uma 6ª cor ou uma 3ª forma no
-  // HTML (public/setor-qualidade-app.html) já funciona sozinho, sem
-  // tocar neste código — a tecla "6" ou "Ctrl+3" simplesmente passam a
-  // existir. Os badges numerados nos próprios botões (ver CSS,
+  // HTML (public/partials/page-setor-qualidade.html) já funciona
+  // sozinho, sem tocar neste código — a tecla "6" ou "Ctrl+3" simplesmente
+  // passam a existir. Os badges numerados nos próprios botões (ver CSS,
   // counter-increment em .sq-btn-color/.sq-btn-shape) seguem a MESMA
   // ordem, então o que a pessoa vê no botão é sempre a tecla certa.
   // "Ctrl+nº" no Windows/Linux e "Cmd+nº" no Mac (metaKey) fazem a mesma
@@ -664,44 +953,6 @@
   }
   document.addEventListener('keydown', _sqAtalhoTeclado);
 
-  // ── Repassa atalhos de NAVEGAÇÃO ENTRE PÁGINAS (Alt+dígito, Alt+P,
-  //    Alt+Q, Alt+seta) pro documento PAI ─────────────────────────────
-  // Setor de Qualidade roda dentro de um <iframe> (ver public/index.html,
-  // #setor-qualidade-frame) — um documento à parte, com foco próprio.
-  // Os atalhos de "viagem entre páginas" (Alt+1..0, Alt+P/Q, Alt+←/→)
-  // são tratados só no documento PAI (ver keyboard-shortcuts.js, que só
-  // é carregado no index.html, nunca aqui dentro) — e evento de teclado
-  // NUNCA atravessa a fronteira de um iframe sozinho. Resultado: assim
-  // que a pessoa clica em QUALQUER coisa aqui dentro (o que move o foco
-  // do navegador pra dentro do iframe), o documento pai para de receber
-  // esses eventos e os atalhos de navegação somem — exatamente o
-  // comportamento reportado. Como o iframe é da MESMA origem (mesmo
-  // servidor), dá pra repassar o evento manualmente pro `document` do
-  // pai, onde o listener de verdade mora, e ele reage normalmente.
-  // Só repassa combos com Alt — são os ÚNICOS usados pra navegação entre
-  // páginas; nunca colide com os atalhos de cor/forma daqui em cima
-  // (_sqAtalhoTeclado, dígito puro ou Ctrl+dígito, nunca Alt).
-  document.addEventListener('keydown', function (e) {
-    if (!e.altKey) return; // só o que é atalho de navegação
-    if (window.parent === window) return; // aberto direto, fora de um iframe — nada a repassar
-    // Mesma cautela do keyboard-shortcuts.js no pai: não repassa
-    // enquanto a pessoa está digitando em algum campo AQUI dentro.
-    const alvo = document.activeElement;
-    const tag = (alvo?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select' || alvo?.isContentEditable) return;
-    try {
-      window.parent.document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: e.key, code: e.code, keyCode: e.keyCode, which: e.which,
-        ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey,
-        bubbles: true, cancelable: true,
-      }));
-    } catch (err) {
-      // Mesma origem devia sempre permitir isto — se por algum motivo
-      // falhar, só ignora; um atalho de navegação que não repassou não
-      // pode quebrar o resto da página.
-    }
-  });
-
   /* ── Ações em lote (pallet inteiro) ──────────────────── */
   function applyMarksToPallet(stackId, color, shape) {
     if (viewMode) return;
@@ -712,8 +963,16 @@
       if (!slabState[id].find(m => m.color === color && m.shape === shape))
         slabState[id].push({ color, shape });
       renderMarks(slab, slabState[id]);
+      _renderBadgeMotivo(id);
     });
     validateAllSlabs();
+    // 1 seletor só pro pallet inteiro (não 1 por placa) — quem marca em
+    // lote normalmente está registrando o MESMO defeito pra todas
+    // (ex: "esse pallet inteiro veio com falha de traço"). Aplica o
+    // motivo escolhido em toda placa do pallet que ficou exigindo motivo
+    // (sobrescreve qualquer motivo individual anterior — é uma ação em
+    // lote deliberada).
+    if (_corExigeMotivo(color)) _abrirSeletorMotivo(null, stackId);
   }
   function selectAllPallet(sid) { applyMarksToPallet(sid, selectedColor, selectedShape); }
   function applyColorToPallet(sid, color) { closeAllDropdowns(); applyMarksToPallet(sid, color, selectedShape); }
@@ -766,13 +1025,12 @@
     if (!wasActive) {
       el.classList.add('active');
       // O popover de Referência mostra "Tipos sem marcação definida",
-      // calculado a partir de config.json (tipos_montagem/marcadores_
-      // qualidade) — SEM isto, quem cadastra um tipo novo em
+      // calculado a partir de config.json (tipos_montagem.opcoes, campo
+      // combinacaoAvaliacao) — SEM isto, quem cadastra um tipo novo em
       // Configurações enquanto esta página já está aberta (ou só sem dar
       // F5) não via o tipo novo aparecer aqui: o cache
-      // (_montagemOpcoesCache/_marcadoresQualidadeCache) só era
-      // atualizado 1 vez, no carregamento inicial da página. Recarregar
-      // toda vez que este popover específico abre é barato (só acontece
+      // (_montagemOpcoesCache) só era atualizado 1 vez, no carregamento
+      // inicial da página. Recarregar toda vez que este popover específico abre é barato (só acontece
       // no clique da pessoa) e garante que a lista sempre reflete o
       // config.json mais recente.
       if (id === 'popover-sq-referencia') _carregarOpcoesMontagem();
@@ -786,7 +1044,14 @@
 
   /* ── Histórico de ações (desfazer) ───────────────────── */
   function pushState() {
-    actionHistory.push(JSON.parse(JSON.stringify(slabState)));
+    // slabMotivo snapshotado JUNTO — desfazer uma marcação precisa
+    // desfazer o motivo associado também, senão um "?"/código ficava
+    // "grudado" numa placa que o undo já tinha desmarcado.
+    actionHistory.push({
+      slabState:  JSON.parse(JSON.stringify(slabState)),
+      slabMotivo: JSON.parse(JSON.stringify(slabMotivo)),
+      slabMotivoDescricao: JSON.parse(JSON.stringify(slabMotivoDescricao)),
+    });
     if (actionHistory.length > 30) actionHistory.shift();
   }
 
@@ -875,11 +1140,20 @@
   function goBack() { if (viewMode) exitViewMode(); navigateTo(viewSource); }
 
   // Aba "🧪 Avaliação" (topbar) chama isto direto — abre o formulário em
-  // branco (avaliação avulsa, sem vincular a nenhuma operação ainda) já
-  // COM a fila de baterias pendentes visível acima do cabeçalho do
-  // formulário (ver carregarFilaNaoAvaliadas, abaixo). Clicar num item da
-  // fila vincula e preenche; não precisa mais de um botão "Nova
-  // Avaliação" separado nem de nenhum passo intermediário.
+  // branco, já COM a fila de baterias pendentes visível acima do
+  // cabeçalho (ver carregarFilaNaoAvaliadas, abaixo). Clicar num item da
+  // fila vincula e preenche o formulário.
+  //
+  // IMPORTANTE — avaliação AVULSA (registrar sem nunca ter clicado num
+  // item da fila) NÃO é mais permitida (ver bloqueio em
+  // registerEvaluation(), abaixo, e a trava definitiva em
+  // POST /registrar-avaliacao-qualidade, server.js): dava pra registrar
+  // uma avaliação livre, digitando só o ID da bateria, e esse era
+  // exatamente o cenário que fazia a Análise Focada não encontrar o
+  // resultado (a operação real nunca ficava vinculada). O formulário
+  // continua abrindo em branco aqui (pra mostrar a fila e permitir
+  // rascunho), mas "Registrar" fica desabilitado até a pessoa escolher
+  // uma bateria da fila (ver _aplicarModoBotoesForm).
   function startNew() {
     _iniciarForm(null);
   }
@@ -896,6 +1170,7 @@
       autoSetThickness();
     }
     setEditable(true);
+    _aplicarModoBotoesForm(); // reflete no botão "Registrar" se ficou sem operação vinculada (ver comentário lá)
   }
 
   // Pré-preenche ID da Bateria, Turno, Tipo de Montagem e — se a operação
@@ -1398,6 +1673,8 @@
       observations: document.getElementById('sq-obs').value,
       slabsPerPallet: parseInt(document.getElementById('sq-thickness').value),
       slabState,
+      slabMotivo,
+      slabMotivoDescricao,
       palletInfos: {}
     };
     for (let p = 1; p <= 4; p++) {
@@ -1432,6 +1709,7 @@
     setEditable(true);
     validateAllSlabs();
     closeAllCollapsibles();
+    _aplicarModoBotoesForm(); // reflete no botão "Registrar" se este rascunho não tem operação vinculada
   }
 
   function deleteDraft(id) {
@@ -1444,11 +1722,22 @@
   function registerEvaluation() {
     if (viewMode) return;
     if (!document.getElementById('sq-batteryId').value) { showAlert('Erro','Selecione o ID da Bateria.'); return; }
+    const editando = !!_editandoAvaliacaoId;
+    // Avaliação AVULSA não é mais permitida (ver bloqueio espelhado — e
+    // definitivo — em POST /registrar-avaliacao-qualidade, server.js):
+    // só dá pra registrar uma avaliação NOVA se ela veio de um clique na
+    // fila (linkedOperacaoId setado por iniciarAvaliacaoDaFila/
+    // iniciarAvaliacaoDoSelect). Uma CORREÇÃO (editando) nunca cai aqui —
+    // ela já tem um id existente, então não é bloqueada mesmo que o
+    // registro original (legado) não tenha vínculo.
+    if (!editando && !linkedOperacaoId) {
+      showAlert('Selecione uma bateria da fila', 'Avaliação avulsa não é mais permitida — abra "Ordem de Previsão de Desemplaque" acima e escolha a bateria que você está avaliando antes de registrar.');
+      return;
+    }
     if (!document.getElementById('sq-confirma-avaliacao').checked) {
       showAlert('Erro', 'Marque a confirmação de que avaliou todos os painéis desta bateria antes de registrar.');
       return;
     }
-    const editando = !!_editandoAvaliacaoId;
     showConfirm(
       editando ? 'Salvar Correção' : 'Registrar',
       editando
@@ -1480,10 +1769,15 @@
       // avaliação inteira (ver db.salvarAvaliacaoQualidade, db.js),
       // "avaliacaoId" mantido em cada painel só por compatibilidade com
       // quem já filtra por ele (ver getData()/carregarAvaliacoesQualidade).
+      // "motivo" (código, ver MOTIVOS_DEFEITO) só existe pra painéis 2ª
+      // linha/reprovados — null nos demais (slabMotivo[id] nunca é
+      // preenchido pra placa aprovada 1ª linha, ver _corExigeMotivo).
+      // "motivoDescricao" só existe quando motivo === 'OT' — descrição
+      // livre digitada na hora (ver showPrompt em _abrirSeletorMotivo).
       evalObj.paineis = Object.entries(slabState).map(([id, marks]) => {
         const parts = id.split('-');
         const info  = getClassifiedInfo(marks);
-        return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, linha: info.linha, marcas: marks };
+        return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, linha: info.linha, marcas: marks, motivo: slabMotivo[id] || null, motivoDescricao: slabMotivoDescricao[id] || null };
       });
 
       // Numa correção, a bateria já saiu da fila há muito tempo (foi por
@@ -1573,8 +1867,16 @@
     document.getElementById('sq-obs').value          = item.observations || '';
     refreshPalletInfos();
     const ns = {};
-    d.paineis.filter(p => p.avaliacaoId === item.id).forEach(p => { ns[`stack${p.pallet}-${p.posicao}`] = p.marcas; });
+    const nm = {};
+    const nd = {};
+    d.paineis.filter(p => p.avaliacaoId === item.id).forEach(p => {
+      ns[`stack${p.pallet}-${p.posicao}`] = p.marcas;
+      if (p.motivo) nm[`stack${p.pallet}-${p.posicao}`] = p.motivo;
+      if (p.motivo === 'OT' && p.motivoDescricao) nd[`stack${p.pallet}-${p.posicao}`] = p.motivoDescricao;
+    });
     slabState     = ns;
+    slabMotivo    = nm;
+    slabMotivoDescricao = nd;
     actionHistory = [];
     document.getElementById('sq-thickness').value = item.totalSlabs / 4;
     autoSetThickness();
@@ -1745,7 +2047,13 @@
         // cai nisso quando não há painel — mantém a cor/identificação
         // mesmo em placas sem nenhuma marca.
         const tipo = panel?.tipoEsperado || item.montagem?.['pallet'+p] || '';
-        html += `<div class="sq-mini-slab"><span class="sq-mini-slab-number">${i}</span><div class="sq-mini-slab-marks">${getMirrorMark(panel)}</div>${tipo?`<span class="sq-mini-slab-type ${cm[tipo]||''}">${tipo}</span>`:''}</div>`;
+        const tituloMotivo = panel?.motivo === 'OT'
+          ? (panel.motivoDescricao || 'Outros (sem descrição)')
+          : (_MOTIVO_POR_CODIGO[panel?.motivo] || panel?.motivo);
+        const motivoHtml = panel?.motivo
+          ? `<span class="sq-mini-slab-motivo" title="${_escaparHtml(tituloMotivo)}">${_escaparHtml(panel.motivo)}</span>`
+          : '';
+        html += `<div class="sq-mini-slab"><span class="sq-mini-slab-number">${i}</span><div class="sq-mini-slab-marks">${getMirrorMark(panel)}</div>${motivoHtml}${tipo?`<span class="sq-mini-slab-type ${cm[tipo]||''}">${tipo}</span>`:''}</div>`;
       }
       html += '</div>';
     }
@@ -1785,9 +2093,11 @@
 
   const SVG_W = 600, SVG_H = 220; // viewBox de referência — os containers são <div>, escalam via width="100%".
 
-  // "2026-01-05" → "05/01" — só pro eixo X de datas, sem depender de LW
-  // (que não existe neste documento — é um <iframe> à parte, ver
-  // _escaparHtml/togglePopover mais acima pro mesmo motivo).
+  // "2026-01-05" → "05/01" — só pro eixo X de datas, sem depender de LW.
+  // Não é por causa do iframe (não roda mais num) — é porque esta função
+  // também é embutida via toString() no HTML standalone exportado (ver
+  // exportDashboardHTML/_gerarHtmlDashboardStandalone, mais abaixo), que
+  // continua sendo um arquivo à parte, sem acesso a LW nenhum.
   function _fmtDataEixo(iso) {
     const p = String(iso).split('-');
     return p.length === 3 ? `${p[2]}/${p[1]}` : String(iso);
@@ -2178,7 +2488,21 @@
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando…'; btn.disabled = true;
     try {
       await carregarAvaliacoesQualidade(); // garante dataset atualizado antes de embutir
-      const avaliacoes = getData().avaliacoes.filter(a => !a.excluidaDaFila);
+      // MESMO filtro que está valendo no dashboard na tela agora (ver
+      // renderDashboard, acima) — período (sq-dash-start/end) e bateria
+      // (sq-dash-bat) — não mais TODAS as avaliações. Exclui
+      // "excluídaDaFila" pelo mesmo motivo de sempre (não são avaliações
+      // de verdade).
+      const sd = document.getElementById('sq-dash-start').value;
+      const ed = document.getElementById('sq-dash-end').value;
+      const bf = document.getElementById('sq-dash-bat').value;
+      const avaliacoes = getData().avaliacoes.filter(item => {
+        if (item.excluidaDaFila) return false;
+        const dt = new Date(item.registeredAt);
+        return (!sd || dt >= new Date(sd)) &&
+               (!ed || dt <= new Date(ed + 'T23:59:59')) &&
+               (!bf || item.batteryId === bf);
+      });
       const html = _gerarHtmlDashboardStandalone(avaliacoes, _descricaoPeriodoAtual());
 
       const blob = new Blob([html], { type: 'text/html' });
@@ -2198,12 +2522,93 @@
     }
   }
 
+  // Cópia standalone da parte de "hover em elemento [data-tooltip]" de
+  // tooltip.js (delegação no document, desktop + toque) — os gráficos SVG
+  // deste dashboard (_svgLineChart/_svgDonutChart/etc.) marcam cada ponto/
+  // fatia/barra com data-tooltip="texto", mas esse atributo sozinho não
+  // mostra nada sem ALGUÉM ouvindo hover/toque em [data-tooltip] e
+  // desenhando o balão — é o que tooltip.js faz na tela ao vivo. Sem
+  // embutir isso aqui, o arquivo exportado tinha os atributos mas nenhum
+  // tooltip aparecia de verdade ao passar o mouse. Só a parte de
+  // [data-tooltip] (não a de canvas — ligarHoverCanvas — que esta tela
+  // não usa, é só SVG).
+  const _TOOLTIP_DATA_ATTR_JS = `
+  (function () {
+    let tooltipEl = null, alvoAtivo = null, ultimoToque = 0;
+    function _el() {
+      if (tooltipEl) return tooltipEl;
+      tooltipEl = document.createElement('div');
+      tooltipEl.className = 'lw-tooltip';
+      document.body.appendChild(tooltipEl);
+      return tooltipEl;
+    }
+    function _posicionar(x, y) {
+      const tt = _el();
+      const margem = 12;
+      let left = x + margem, top = y + margem;
+      const w = tt.offsetWidth, h = tt.offsetHeight;
+      if (left + w > window.innerWidth - 8) left = x - margem - w;
+      if (top + h > window.innerHeight - 8) top = y - margem - h;
+      if (left < 8) left = 8;
+      if (top < 8) top = 8;
+      tt.style.left = left + 'px';
+      tt.style.top = top + 'px';
+    }
+    function mostrarTexto(texto, x, y) {
+      if (!texto) { esconder(); return; }
+      const tt = _el();
+      tt.textContent = texto;
+      tt.style.display = 'block';
+      _posicionar(x, y);
+    }
+    function _mostrarDoElemento(alvo, x, y) {
+      const texto = alvo.getAttribute('data-tooltip');
+      if (!texto) return;
+      mostrarTexto(texto, x, y);
+      alvoAtivo = alvo;
+    }
+    function esconder() {
+      if (tooltipEl) tooltipEl.style.display = 'none';
+      alvoAtivo = null;
+    }
+    document.addEventListener('mouseover', (e) => {
+      if (Date.now() - ultimoToque < 700) return;
+      const alvo = e.target.closest('[data-tooltip]');
+      if (alvo) _mostrarDoElemento(alvo, e.clientX, e.clientY);
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!alvoAtivo) return;
+      if (e.target.closest('[data-tooltip]') === alvoAtivo) _posicionar(e.clientX, e.clientY);
+    });
+    document.addEventListener('mouseout', (e) => {
+      if (alvoAtivo && e.target.closest('[data-tooltip]') === alvoAtivo) esconder();
+    });
+    document.addEventListener('touchstart', (e) => {
+      ultimoToque = Date.now();
+      const alvo = e.target.closest('[data-tooltip]');
+      if (!alvo) { esconder(); return; }
+      if (alvoAtivo === alvo) { esconder(); return; }
+      const t = e.touches[0];
+      _mostrarDoElemento(alvo, t.clientX, t.clientY);
+    }, { passive: true });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-tooltip]')) esconder();
+    });
+    window.addEventListener('scroll', esconder, true);
+    window.addEventListener('resize', esconder);
+  })();
+`;
+
   // Monta o HTML standalone inteiro (string) — ver comentário de
-  // exportDashboardHTML, acima. `avaliacoes` já vem filtrado (sem
-  // excluídas da fila); cada item mantém sua própria lista `.paineis`
-  // (mesmo formato salvo em avaliacoes_qualidade.dados, db.js), então não
-  // precisa embutir uma 2ª lista de painéis separada — o script exportado
-  // usa flatMap nelas, igual a este arquivo faz em carregarAvaliacoesQualidade().
+  // exportDashboardHTML, acima. `avaliacoes` já vem filtrado (mesmo
+  // período/bateria da tela, sem excluídas da fila) — RETRATO fixo do que
+  // estava na tela no momento da exportação, não tem mais campos de
+  // filtro pra reaplicar depois (ver comentário abaixo, onde o antigo
+  // bloco ".filtros" com inputs foi trocado por um chip só de leitura).
+  // Cada item mantém sua própria lista `.paineis` (mesmo formato salvo em
+  // avaliacoes_qualidade.dados, db.js), então não precisa embutir uma 2ª
+  // lista de painéis separada — o script exportado usa flatMap nelas,
+  // igual a este arquivo faz em carregarAvaliacoesQualidade().
   function _gerarHtmlDashboardStandalone(avaliacoes, descricaoPeriodo) {
     // "</script" dentro de uma string do JSON quebraria o parser de HTML
     // no meio do <script> — escapa a barra pra nunca fechar a tag sem
@@ -2219,48 +2624,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard de Qualidade — Exportado</title>
-<style>
-  :root {
-    --blue:#4d8dff; --red:#e5484d; --green:#2ecc71; --accent:#4d8dff;
-    --text:#1c2530; --text-2:#48576b; --text-3:#8492a6;
-    --border:#e2e8f0; --border-2:#cbd5e1;
-    --bg-1:#f5f7fb; --bg-card:#ffffff;
-    --radius:8px; --radius-lg:12px;
-    --sq-orange:#f5821f; --sq-yellow:#f1c40f; --sq-purple:#8b5cf6;
-    --sq-cor-verde:var(--green); --sq-cor-vermelho:var(--red); --sq-cor-azul:var(--blue);
-    --font-mono: 'SFMono-Regular', Consolas, monospace;
-  }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif; background:var(--bg-1); color:var(--text-2); padding:28px; }
-  h1 { font-size:1.3rem; color:var(--text); margin:0 0 4px; }
-  .sub { font-size:.8rem; color:var(--text-3); margin-bottom:20px; }
-  .filtros { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:20px; }
-  .campo { display:flex; flex-direction:column; gap:4px; font-size:.75rem; color:var(--text-3); }
-  .campo input, .campo select { font:inherit; padding:6px 8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-1); color:var(--text-2); }
-  .botao { padding:7px 16px; border-radius:var(--radius); border:1px solid var(--accent); background:var(--accent); color:#fff; font-size:.8rem; cursor:pointer; }
-  .botao:hover { opacity:.9; }
-  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
-  .kpi-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; }
-  .kpi-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); margin-bottom:6px; }
-  .kpi-value { font-size:1.7rem; font-weight:700; color:var(--text); }
-  .green{color:var(--green)} .red{color:var(--red)} .accent{color:var(--accent)}
-  .charts-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; margin-bottom:20px; }
-  .chart-box { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px; }
-  .chart-box h4 { margin:0 0 10px; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-2); border-bottom:1px solid var(--border); padding-bottom:8px; font-weight:600; }
-  .summary-box { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px; font-size:.85rem; }
-  .rodape { margin-top:22px; font-size:.7rem; color:var(--text-3); text-align:center; }
+<style>${LW.gerarCssExportPadrao()}
+  /* 3 cores específicas desta tela, sem equivalente no restante do app
+     (ver mesma lista em css/setor-qualidade.css) — kpi-grid, chart-box,
+     filtro-aplicado, .lw-tooltip etc. já vêm todos prontos do bloco
+     acima (mesmo CSS-base compartilhado com os outros dashboards
+     exportáveis, ver LW.gerarCssExportPadrao em data.js). */
+  :root { --sq-orange:#f5821f; --sq-yellow:#f1c40f; --sq-purple:#8b5cf6;
+    --sq-cor-verde:var(--green); --sq-cor-vermelho:var(--red); --sq-cor-azul:var(--blue); }
 </style>
 </head>
 <body>
   <h1>📋 Relatório de Qualidade — Avaliação de Baterias</h1>
-  <div class="sub" id="exp-sub"></div>
-
-  <div class="filtros">
-    <div class="campo"><label>Data Inicial</label><input type="date" id="exp-start"></div>
-    <div class="campo"><label>Data Final</label><input type="date" id="exp-end"></div>
-    <div class="campo"><label>Bateria</label><select id="exp-bat"><option value="">Todas</option></select></div>
-    <button class="botao" id="exp-aplicar">🔄 Aplicar</button>
-  </div>
+  <div class="sub" id="exp-sub">Gerado em ${new Date(geradoEm).toLocaleString('pt-BR')}</div>
+  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${_escaparHtml(descricaoPeriodo)}</b></div>
 
   <div class="kpi-grid" id="exp-kpi"></div>
 
@@ -2276,14 +2653,13 @@
   </div>
 
   <div class="summary-box"><strong>Resumo &amp; Insights</strong><p id="exp-summary" style="margin:8px 0 0"></p></div>
-  <div class="rodape">Exportado do Setor de Qualidade — Lightwall SC · dados embutidos neste arquivo, funciona offline.</div>
+  <div class="rodape">Exportado do Setor de Qualidade — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
 
+<script>${_TOOLTIP_DATA_ATTR_JS}</script>
 <script>
 (function () {
   'use strict';
   const DADOS      = ${dadosJson};
-  const GERADO_EM  = ${JSON.stringify(geradoEm)};
-  const DESCRICAO_INICIAL = ${JSON.stringify(descricaoPeriodo)};
 
   function _escaparHtml(str) {
     const div = document.createElement('div');
@@ -2309,6 +2685,7 @@
 
   const SVG_W = 600, SVG_H = 220;
 
+  ${_escaparAtributo}
   ${_svgLineChart}
   ${_svgDonutChart}
   ${_svgBarChart}
@@ -2317,16 +2694,7 @@
   ${_svgGroupedBarChart}
 
   function atualizar() {
-    const sd = document.getElementById('exp-start').value;
-    const ed = document.getElementById('exp-end').value;
-    const bf = document.getElementById('exp-bat').value;
-
-    const fe = DADOS.filter(item => {
-      const dt = new Date(item.registeredAt);
-      return (!sd || dt >= new Date(sd)) &&
-             (!ed || dt <= new Date(ed + 'T23:59:59')) &&
-             (!bf || item.batteryId === bf);
-    });
+    const fe = DADOS;
     const fp = fe.flatMap(e => e.paineis || []);
 
     const apr = fp.filter(p => p.resultado==='aprovado').length;
@@ -2413,20 +2781,8 @@
     else if(fe.length) summ+='Nenhum ponto de recorrência significativo detectado.';
     else summ='Nenhum dado disponível para o período.';
     document.getElementById('exp-summary').innerHTML = summ;
-
-    const periodo = (sd || ed)
-      ? \`\${sd ? new Date(sd+'T00:00:00').toLocaleDateString('pt-BR') : 'início'} até \${ed ? new Date(ed+'T00:00:00').toLocaleDateString('pt-BR') : 'hoje'}\`
-      : 'Todos os registros';
-    document.getElementById('exp-sub').textContent =
-      \`Período: \${periodo}\${bf ? ' · Bateria: ' + bf : ''} · Gerado em \${new Date(GERADO_EM).toLocaleString('pt-BR')}\`;
   }
 
-  const baterias = [...new Set(DADOS.map(a => a.batteryId).filter(Boolean))].sort();
-  const selBat = document.getElementById('exp-bat');
-  baterias.forEach(b => { const o = document.createElement('option'); o.value = b; o.textContent = b; selBat.appendChild(o); });
-
-  document.getElementById('exp-aplicar').addEventListener('click', atualizar);
-  document.getElementById('exp-sub').textContent = DESCRICAO_INICIAL + ' · Gerado em ' + new Date(GERADO_EM).toLocaleString('pt-BR');
   atualizar();
 })();
 </script>
@@ -2462,6 +2818,8 @@
     }
     document.getElementById('sq-thickness').value = d.slabsPerPallet || 10;
     slabState     = d.slabState || {};
+    slabMotivo    = d.slabMotivo || {};
+    slabMotivoDescricao = d.slabMotivoDescricao || {};
     actionHistory = [];
   }
 
@@ -2477,6 +2835,13 @@
   // uma avaliação já registrada (ver editarAvaliacaoDoEspelho): esconde
   // "Salvar" (rascunho — não faz sentido pra uma correção), troca o
   // texto de "Registrar" pra "Salvar Alteração", e mostra "Cancelar".
+  //
+  // Também desabilita "Registrar" (com título explicando o motivo)
+  // quando NÃO está editando e não há operação vinculada — reforço
+  // visual da trava de avaliação avulsa (a trava de verdade é no
+  // servidor, ver POST /registrar-avaliacao-qualidade; isto aqui só
+  // evita a pessoa preencher a bateria inteira pra só então descobrir,
+  // no "Registrar", que precisava ter escolhido da fila).
   function _aplicarModoBotoesForm() {
     const editando  = !!_editandoAvaliacaoId;
     const btnSalvar = document.getElementById('sq-btn-save');
@@ -2487,7 +2852,16 @@
       ? '<i class="fas fa-check-circle"></i> Salvar Alteração'
       : '<i class="fas fa-check-circle"></i> Registrar';
     if (btnCancel) btnCancel.style.display = editando ? '' : 'none';
+
+    const semFila = !editando && !linkedOperacaoId;
+    if (btnReg) {
+      btnReg.disabled = semFila;
+      btnReg.title = semFila
+        ? 'Selecione uma bateria em "Ordem de Previsão de Desemplaque" antes de registrar — avaliação avulsa não é mais permitida.'
+        : '';
+    }
   }
+
 
   // Sai da edição SEM salvar nada — o registro original no banco nunca
   // chegou a ser tocado (só foi lido, pra preencher o formulário), então
@@ -2507,7 +2881,7 @@
   }
 
   function clearForm() {
-    slabState = {}; actionHistory = []; palletTypes = ['','','','']; slabConfig = {};
+    slabState = {}; slabMotivo = {}; slabMotivoDescricao = {}; actionHistory = []; palletTypes = ['','','','']; slabConfig = {};
     linkedOperacaoId = null;
     _editandoAvaliacaoId = null;
     _editandoRegistradoEm = null;
@@ -2584,14 +2958,23 @@
     showConfirm('Limpar', 'Apagar todas as marcações?', () => {
       pushState();
       slabState = {};
+      slabMotivo = {};
+      slabMotivoDescricao = {};
       document.querySelectorAll('.sq-slab-marks').forEach(c => { c.innerHTML = ''; });
+      document.querySelectorAll('.sq-slab-motivo').forEach(b => { b.textContent = ''; b.style.display = 'none'; });
       validateAllSlabs();
     });
   }
 
   function undoLastAction() {
     if (viewMode) return;
-    if (actionHistory.length) { slabState = actionHistory.pop(); renderStacks(); validateAllSlabs(); }
+    if (actionHistory.length) {
+      const anterior = actionHistory.pop();
+      slabState  = anterior.slabState;
+      slabMotivo = anterior.slabMotivo;
+      slabMotivoDescricao = anterior.slabMotivoDescricao || {};
+      renderStacks(); validateAllSlabs();
+    }
     else showAlert('Desfazer', 'Nada para desfazer.');
   }
 
@@ -2656,6 +3039,7 @@
     init() {
       _carregarOpcoesMontagem();
       carregarAvaliacoesQualidade();
+      _renderReferenciaMotivos();
       startNew();
     },
   };

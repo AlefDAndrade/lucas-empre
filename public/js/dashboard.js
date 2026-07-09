@@ -138,16 +138,21 @@
   }
 
   // ── Exportar Dashboard Interativo (HTML standalone) ─────────────────────
-  // Mesmo padrão de oee.js/setor-qualidade.js: busca o histórico completo
-  // (sem filtro), embute os dados + as mesmas funções (drawBarChart,
-  // somarPorTipo, formatDuration, via toString()) num único .html que
-  // recalcula tudo localmente ao trocar o período.
+  // Retrato FIXO do que está na tela no momento do clique — busca o
+  // histórico já filtrado pelo mesmo período ativo nos campos
+  // #turnos-data-inicio/#turnos-data-fim, não mais o histórico inteiro
+  // com uma UI de filtro pra reaplicar depois.
   async function exportarTurnosInterativo() {
     const btn = document.getElementById('btn-turnos-exportar');
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
     try {
-      const s = await LW.getStats({}); // sem filtro = histórico inteiro
-      const html = _gerarHtmlTurnosStandalone(s.data);
+      const inicio = document.getElementById('turnos-data-inicio')?.value || '';
+      const fim = document.getElementById('turnos-data-fim')?.value || '';
+      const s = await LW.getStats({ dataInicio: inicio, dataFim: fim });
+      const descricaoPeriodo = (inicio || fim)
+        ? (inicio ? new Date(inicio + 'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim + 'T00:00:00').toLocaleDateString('pt-BR') : 'hoje')
+        : 'Todos os registros';
+      const html = _gerarHtmlTurnosStandalone(s.data, descricaoPeriodo);
       LW.baixarArquivoTexto(
         `desempenho_turnos_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}.html`,
         html
@@ -160,7 +165,7 @@
     }
   }
 
-  function _gerarHtmlTurnosStandalone(dataArray) {
+  function _gerarHtmlTurnosStandalone(dataArray, descricaoPeriodo) {
     const dadosJson = JSON.stringify(dataArray).replace(/<\/script/gi, '<\\/script');
 
     return `<!DOCTYPE html>
@@ -169,7 +174,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Desempenho por Turnos — Exportado</title>
-<style>${LW.CSS_EXPORT_PADRAO}
+<style>${LW.gerarCssExportPadrao()}
   .turno-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; }
   .turno-card h3 { margin:0 0 10px; font-size:.9rem; }
   .turno-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px; }
@@ -180,16 +185,12 @@
 </head>
 <body>
   <h1>📊 Desempenho por Turnos</h1>
-  <div class="sub" id="exp-sub"></div>
+  <div class="sub" id="exp-sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${LW.escaparHtml(descricaoPeriodo)}</b></div>
 
-  <div class="filtros">
-    <div class="campo"><label>Data Início</label><input type="date" id="turnos-data-inicio"></div>
-    <div class="campo"><label>Data Fim</label><input type="date" id="turnos-data-fim"></div>
-    <button class="botao" id="btn-turnos-filtrar">🔄 Aplicar</button>
-    <div style="margin-left:auto;display:flex;gap:20px;font-size:.85rem;align-items:center">
-      <div>🏆 Mais eficiente: <strong class="accent" id="melhor-turno">—</strong></div>
-      <div>🐢 Menos eficiente: <strong id="pior-turno">—</strong></div>
-    </div>
+  <div style="display:flex;gap:20px;font-size:.85rem;align-items:center;margin-bottom:20px">
+    <div>🏆 Mais eficiente: <strong class="accent" id="melhor-turno">—</strong></div>
+    <div>🐢 Menos eficiente: <strong id="pior-turno">—</strong></div>
   </div>
 
   <div class="turno-grid">
@@ -213,7 +214,7 @@
   </div>
 
   <div class="summary-box"><strong>Insights</strong><div id="turnos-insights" style="margin-top:8px"></div></div>
-  <div class="rodape">Exportado de Desempenho por Turnos — Lightwall SC · dados embutidos neste arquivo, funciona offline.</div>
+  <div class="rodape">Exportado de Desempenho por Turnos — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
 
 <script>
 (function () {
@@ -252,10 +253,7 @@
   }
 
   function render() {
-    const inicio = document.getElementById('turnos-data-inicio').value;
-    const fim = document.getElementById('turnos-data-fim').value;
-    const data = DADOS.filter(b => (!inicio || b.data >= inicio) && (!fim || b.data <= fim));
-    const por_turno = calcularPorTurno(data);
+    const por_turno = calcularPorTurno(DADOS);
 
     const turnos = ['1º TURNO', '2º TURNO', '3º TURNO'];
     const ids = ['t1', 't2', 't3'];
@@ -292,12 +290,8 @@
     });
     if (!items.length) items.push({ icon: '✅', text: 'Desempenho equilibrado entre os turnos no período.' });
     el.innerHTML = items.map(i => \`<div style="display:flex;gap:8px;padding:4px 0"><span>\${i.icon}</span><span>\${i.text}</span></div>\`).join('');
-
-    document.getElementById('exp-sub').textContent =
-      \`Período: \${(inicio || fim) ? (inicio ? new Date(inicio+'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim+'T00:00:00').toLocaleDateString('pt-BR') : 'hoje') : 'Todos os registros'} · Gerado em \${new Date().toLocaleString('pt-BR')}\`;
   }
 
-  document.getElementById('btn-turnos-filtrar').addEventListener('click', render);
   render();
 })();
 </script>
@@ -1780,6 +1774,17 @@
       usos.forEach((op, idx) => {
         const limpa = v => (v === '—' ? '' : v); // _valRel devolve '—' pra vazio — fica '' na planilha
         const tempoTotal = limpa(_valRel(l.tempo_batida, 'tempo_batida'));
+        // Insumo (cimento/água/EPS/superplast/incorporador) é do TRAÇO
+        // inteiro, não de cada uso — mas a exportação gera 1 LINHA POR USO
+        // (ver comentário da função, acima), e repetia o mesmo total de
+        // insumo em toda linha do mesmo traço reaproveitado. Numa planilha,
+        // somar essa coluna contava o mesmo insumo 2x, 3x... (uma vez por
+        // uso) — o insumo em si só foi gasto UMA vez, na 1ª mistura. A
+        // partir do 2º uso (idx > 0), exporta "Reciclado" no lugar do
+        // número: fica claro pra quem lê que aquele insumo já está
+        // contado na linha do 1º uso deste traço, e um SOMA() na coluna
+        // ignora texto, então a soma bate certo sozinha.
+        const valorOuReciclado = v => (idx > 0 ? 'Reciclado' : limpa(v));
         out.push({
           data: l.data,
           id_bateria: op.id_bateria || '',
@@ -1792,11 +1797,11 @@
           densidade_eps: l.densidade_eps ?? '',
           expansao: l.expansao ?? '',
           silo: l.silo ?? '',
-          cimento: limpa(_valRel(l.cimento_real)),
-          agua: limpa(_valRel(l.agua_real)),
-          eps: limpa(_valRel(l.eps_real)),
-          superplast: limpa(_valRel(l.superplast_real)),
-          incorporador: limpa(_valRel(l.incorporador_real)),
+          cimento: valorOuReciclado(_valRel(l.cimento_real)),
+          agua: valorOuReciclado(_valRel(l.agua_real)),
+          eps: valorOuReciclado(_valRel(l.eps_real)),
+          superplast: valorOuReciclado(_valRel(l.superplast_real)),
+          incorporador: valorOuReciclado(_valRel(l.incorporador_real)),
           tempo_batida_seg: tempoTotal,
           obs: (op.obs !== undefined ? op.obs : l.obs) || '',
         });

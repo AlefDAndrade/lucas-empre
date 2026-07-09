@@ -610,24 +610,32 @@
   }
 
   // ── Exportar Dashboard Interativo (HTML standalone) ───────────────────────
-  // Gera 1 arquivo .html autossuficiente: busca o histórico/traços/paradas
-  // SEM filtro nenhum (período inteiro) — os filtros continuam
-  // funcionando dentro do arquivo exportado, recalculando tudo em cima
-  // desse conjunto completo, sem precisar do servidor depois de gerado.
-  // Reaproveita as MESMAS funções de cálculo e de render deste arquivo via
-  // toString() (cópia fiel do código-fonte, sem reescrever nada à mão) —
-  // só a orquestração (render()/_buscarDados()) é reescrita pra ler do
-  // objeto embutido em vez de buscar do servidor.
+  // Retrato FIXO do que está na tela no momento do clique — busca com os
+  // MESMOS filtros ativos agora (_lerFiltros(): período, bateria, turno),
+  // não mais o histórico inteiro com uma UI de filtro pra reaplicar
+  // depois. Reaproveita as MESMAS funções de cálculo e de render deste
+  // arquivo via toString() (cópia fiel do código-fonte, sem reescrever
+  // nada à mão) — só a orquestração (render()) é reescrita pra ler do
+  // objeto já filtrado embutido, sem precisar do servidor depois de gerado.
   async function exportarInterativo() {
     const btn = document.getElementById('btn-oee-exportar');
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
     try {
-      const { historico, tracos, paradas } = await _buscarDados({});
+      const filtros = _lerFiltros();
+      const { historico, tracos, paradas } = await _buscarDados(filtros);
       // Set não é serializável em JSON — converte pra array; o script
       // exportado reconstrói o Set na hora de usar (ver calcularPorGrupo).
       const tracosSerializaveis = tracos.map(t => ({ ...t, _baterias: [...(t._baterias || [])] }));
 
-      const html = _gerarHtmlOeeStandalone({ historico, tracos: tracosSerializaveis, paradas });
+      const descricaoFiltro = [
+        (filtros.dataInicio || filtros.dataFim)
+          ? (filtros.dataInicio ? new Date(filtros.dataInicio + 'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (filtros.dataFim ? new Date(filtros.dataFim + 'T00:00:00').toLocaleDateString('pt-BR') : 'hoje')
+          : 'Todos os períodos',
+        filtros.bateria ? `Bateria ${filtros.bateria}` : null,
+        filtros.turno || null,
+      ].filter(Boolean).join(' · ');
+
+      const html = _gerarHtmlOeeStandalone({ historico, tracos: tracosSerializaveis, paradas }, descricaoFiltro);
       LW.baixarArquivoTexto(
         `oee_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}.html`,
         html
@@ -640,9 +648,8 @@
     }
   }
 
-  function _gerarHtmlOeeStandalone(dados) {
+  function _gerarHtmlOeeStandalone(dados, descricaoFiltro) {
     const dadosJson = JSON.stringify(dados).replace(/<\/script/gi, '<\\/script');
-    const baterias = (LW.BATERIA_IDS || []).map(b => b.id);
 
     return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -650,21 +657,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OEE — Exportado</title>
-<style>${LW.CSS_EXPORT_PADRAO}
+<style>${LW.gerarCssExportPadrao()}
   .waterfall-row { margin-bottom:14px; }
 </style>
 </head>
 <body>
   <h1>⚙️ Análise de OEE</h1>
-  <div class="sub" id="exp-sub"></div>
-
-  <div class="filtros">
-    <div class="campo"><label>Data Início</label><input type="date" id="oee-data-inicio"></div>
-    <div class="campo"><label>Data Fim</label><input type="date" id="oee-data-fim"></div>
-    <div class="campo"><label>Bateria</label><select id="oee-bateria"><option value="">Todas</option>${baterias.map(b => `<option value="${b}">${b}</option>`).join('')}</select></div>
-    <div class="campo"><label>Turno</label><select id="oee-turno"><option value="">Todos</option><option>1º TURNO</option><option>2º TURNO</option><option>3º TURNO</option></select></div>
-    <button class="botao" id="btn-oee-filtrar">🔄 Aplicar</button>
-  </div>
+  <div class="sub" id="exp-sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${LW.escaparHtml(descricaoFiltro)}</b></div>
 
   <div id="oee-empty" style="display:none;text-align:center;padding:40px;color:var(--text-3)">Nenhum registro no período selecionado.</div>
 
@@ -709,7 +709,7 @@
       <table><thead><tr><th>Tipo de Montagem</th><th>Operações</th><th>Performance</th><th>Traços</th><th>Qualidade</th></tr></thead><tbody id="oee-tabela-montagem"></tbody></table>
     </div>
   </div>
-  <div class="rodape">Exportado da Análise de OEE — Lightwall SC · dados embutidos neste arquivo, funciona offline.</div>
+  <div class="rodape">Exportado da Análise de OEE — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
 
 <script>
 (function () {
@@ -746,41 +746,10 @@
 
   const ALTURA_CHART_TURNOS_PX = ${ALTURA_CHART_TURNOS_PX}, PAD_TOP_CHART_TURNOS_PX = ${PAD_TOP_CHART_TURNOS_PX}, PAD_BOTTOM_CHART_TURNOS_PX = ${PAD_BOTTOM_CHART_TURNOS_PX};
 
-  function _filtrar() {
-    const di = document.getElementById('oee-data-inicio').value;
-    const df = document.getElementById('oee-data-fim').value;
-    const bat = document.getElementById('oee-bateria').value;
-    const turno = document.getElementById('oee-turno').value;
-
-    let historico = DADOS.historico.filter(r => {
-      if (di && r.data < di) return false;
-      if (df && r.data > df) return false;
-      if (turno && r.turno !== turno) return false;
-      if (bat && r.id_bateria !== bat) return false;
-      return true;
-    });
-    let tracos = DADOS.tracos.map(t => ({ ...t, _baterias: new Set(t._baterias || []) })).filter(t => {
-      if (di && t.data < di) return false;
-      if (df && t.data > df) return false;
-      if (turno && t.turno !== turno) return false;
-      if (bat && !t._baterias.has(bat)) return false;
-      return true;
-    });
-    let paradas = DADOS.paradas.filter(p => {
-      // Mesma correção de _buscarDados: usar a data em Brasília, não o
-      // slice cru do ISO em UTC (ver dataBrasiliaDeISO em data.js).
-      const data = typeof dataBrasiliaDeISO === 'function'
-        ? dataBrasiliaDeISO(p.inicio)
-        : (p.inicio || '').slice(0, 10);
-      if (di && data < di) return false;
-      if (df && data > df) return false;
-      return true;
-    });
-    return { historico, tracos, paradas };
-  }
-
   function render() {
-    const { historico, tracos, paradas } = _filtrar();
+    const historico = DADOS.historico;
+    const tracos = DADOS.tracos.map(t => ({ ...t, _baterias: new Set(t._baterias || []) }));
+    const paradas = DADOS.paradas;
     const empty = document.getElementById('oee-empty');
     const content = document.getElementById('oee-content');
 
@@ -809,14 +778,8 @@
 
     _renderTabelaGrupo('oee-tabela-bateria', calcularPorGrupo(historico, tracos, 'id_bateria'), 'Bateria');
     _renderTabelaGrupo('oee-tabela-montagem', calcularPorGrupo(historico, tracos, 'tipo_montagem'), 'Tipo de Montagem');
-
-    const di = document.getElementById('oee-data-inicio').value;
-    const df = document.getElementById('oee-data-fim').value;
-    document.getElementById('exp-sub').textContent =
-      \`Período: \${(di || df) ? (di ? new Date(di+'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (df ? new Date(df+'T00:00:00').toLocaleDateString('pt-BR') : 'hoje') : 'Todos os registros'} · Gerado em \${new Date().toLocaleString('pt-BR')}\`;
   }
 
-  document.getElementById('btn-oee-filtrar').addEventListener('click', render);
   render();
 })();
 </script>

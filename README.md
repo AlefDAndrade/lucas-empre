@@ -60,6 +60,7 @@ public/
     ├── ajustes_tracos.json      # ajustes de receita por traço (insumo + tempo de batida) — fonte de verdade após uma edição (ver "Editar Traço")
     ├── sobra.json                # traço com sobra ativa entre operações
     ├── paradas.json              # paradas registradas (planejadas/não planejadas)
+    ├── operacoes_nao_avaliadas.json # fila de avaliação do Setor de Qualidade (IDs pendentes — fonte de verdade, ver "Fila de Avaliação")
     ├── operacao_andamento.json    # snapshot da operação em andamento agora (live), ou null
     └── contador_tracos.json      # contador diário de traços (reset automático)
 private/

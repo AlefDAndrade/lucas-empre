@@ -7,7 +7,7 @@
    ============================================================ */
 
 /* Variáveis específicas desta tela — nomes distintos dos do
-   Lightwall para não colidir, mesmo dentro do iframe */
+   Lightwall para não colidir, mesmo agora rodando no mesmo documento */
 :root {
   --sq-orange:      #f5821f;
   --sq-yellow:      #f1c40f;
@@ -39,21 +39,23 @@
 /* Reset mínimo — o Lightwall já faz o global */
 *, *::before, *::after { box-sizing: border-box; }
 
-body {
+/* Antes era "body { ... }" — fazia sentido quando esta tela era um
+   documento HTML à parte (iframe, setor-qualidade-app.html). Agora que
+   roda como mais uma página do app principal (mesmo <body> de todas as
+   outras — ver public/partials/page-setor-qualidade.html), esses
+   estilos precisam ficar presos ao CONTAINER desta tela, não vazar pro
+   <body> compartilhado (que quebraria o layout de todas as outras
+   páginas). max-width/margin:auto reproduz o mesmo "coluna centralizada"
+   de antes (era display:flex;justify-content:center no body). */
+.sq-container {
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  min-height: 100vh;
   padding: 20px 28px;
-  display: flex;
-  justify-content: center;
 }
-
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-2); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
-
-.sq-container { max-width: 1280px; width: 100%; }
 
 /* ── "Em Andamento" e Fila de baterias pendentes de avaliação — vivem
      dentro da aba "🧪 Avaliação" (#sq-form), logo ACIMA do "Cabeçalho do
@@ -467,6 +469,14 @@ body {
 .sq-mini-slab-type.p2 { color: var(--sq-tipo-p2-text); }
 .sq-mini-slab-type.t3 { color: var(--sq-tipo-t3-text); }
 .sq-mini-slab-type.t1 { color: var(--sq-tipo-t1-text); }
+/* Código do motivo (ex: "BC") no Espelho Visual — só leitura aqui (sem
+   clique — o espelho é a visão consolidada, editar motivo é lá no
+   formulário, ver editarAvaliacaoDoEspelho). */
+.sq-mini-slab-motivo {
+  font-size: .4rem; font-weight: 700; font-family: var(--font-mono);
+  color: #fff; background: var(--sq-cor-vermelho);
+  border-radius: 2px; padding: 0 2px; line-height: 1.3;
+}
 .sq-mini-mark { display: inline-block; }
 /* "Sem marcação" (a imensa maioria das placas) — círculo VAZADO (sem
    preenchimento), pra nunca ser confundido com uma marca real (círculo
@@ -715,6 +725,26 @@ body {
 .sq-mark-circle { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); }
 .sq-mark-dash   { width: 12px; height: 3px; border-radius: 2px; }
 
+/* Badge do código de motivo (ex: "BC") — canto oposto ao número da placa
+   (sq-slab-number, top-left), pra não competir por espaço. Pill com fundo
+   sólido (diferente de -number/-type, que são só texto solto) porque
+   também é CLICÁVEL (reabre o seletor — ver _abrirSeletorMotivo,
+   setor-qualidade.js) — precisa parecer um botão pequeno, não só uma
+   legenda. "?" (sq-slab-motivo-pendente) usa a cor de alerta — placa com
+   defeito marcado mas sem motivo escolhido ainda, fica visualmente
+   diferente do código já preenchido, pra chamar atenção sem travar nada. */
+.sq-slab-motivo {
+  position: absolute; top: 2px; right: 4px;
+  display: none; align-items: center; justify-content: center;
+  min-width: 15px; height: 13px; padding: 0 3px;
+  font-size: .48rem; font-weight: 700; font-family: var(--font-mono);
+  color: #fff; background: var(--sq-cor-vermelho);
+  border-radius: 3px; cursor: pointer; line-height: 1;
+  z-index: 1;
+}
+.sq-slab-motivo.sq-slab-motivo-pendente { background: var(--accent); }
+.sq-slab-motivo:hover { filter: brightness(1.15); }
+
 .sq-slab.invalid {
   border: 2px solid var(--red) !important;
   box-shadow: inset 0 0 0 1px var(--red), 0 0 6px rgba(239,68,68,.3);
@@ -854,13 +884,56 @@ body {
   margin-bottom: 6px;
 }
 
+/* ── Seletor de motivo (popover flutuante) ───────────────────
+   Diferente de .ao-popover (que fica DENTRO de um container relative,
+   posicionado por CSS puro — top/left fixos em relação ao botão-pai):
+   este é anexado direto em document.body (ver _abrirSeletorMotivo,
+   setor-qualidade.js) porque pode ancorar em QUALQUER placa da grade —
+   posição calculada em JS (getBoundingClientRect) e aplicada via
+   style.left/top inline, por isso position:fixed aqui (coordenadas de
+   viewport, iguais às que getBoundingClientRect devolve). */
+.sq-motivo-popover {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  animation: fadeInDown .15s ease;
+}
+.sq-motivo-popover-titulo {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: .78rem; font-weight: 700; color: var(--text);
+  margin-bottom: 10px;
+}
+.sq-motivo-popover-fechar {
+  background: none; border: none; color: var(--text-3);
+  font-size: 1rem; cursor: pointer; line-height: 1; padding: 0 2px;
+}
+.sq-motivo-popover-fechar:hover { color: var(--text); }
+.sq-motivo-popover-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 5px;
+}
+.sq-motivo-popover-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 5px 7px; cursor: pointer;
+  text-align: left; transition: border-color .1s, background .1s;
+}
+.sq-motivo-popover-item:hover { border-color: var(--accent); background: var(--bg-3); }
+.sq-motivo-popover-item strong { font-size: .74rem; color: var(--accent); font-family: var(--font-mono); }
+.sq-motivo-popover-item span { font-size: .64rem; color: var(--text-2); line-height: 1.25; }
+
 /* ── Responsivo ───────────────────────────────────────────── */
 @media (max-width: 1024px) {
-  body { padding: 14px 18px; }
+  .sq-container { padding: 14px 18px; }
   .sq-charts-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 700px) {
-  body { padding: 8px 10px; }
+  .sq-container { padding: 8px 10px; }
   .sq-charts-grid { grid-template-columns: 1fr; }
   .sq-kpi-grid { grid-template-columns: 1fr 1fr; }
   .sq-topbar, .sq-nav { flex-wrap: wrap; justify-content: center; }

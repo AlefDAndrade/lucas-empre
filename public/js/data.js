@@ -1438,6 +1438,13 @@ const ARQUIVOS_BACKUP_DB = [
   // Backup de Dados — restaurar um backup fazia toda bateria já avaliada
   // voltar a aparecer na fila, mesmo já avaliada de verdade antes do backup.
   'operacoes_avaliadas.json',
+  // Adicionado: agora "não avaliadas" é uma fila DE VERDADE, guardada em
+  // arquivo (não mais calculada na hora — ver OPERACOES_NAO_AVALIADAS_PATH,
+  // server.js) — sem isso, ela ficaria de fora do Backup de Dados (o
+  // servidor recalcula sozinho a partir do SQL se este arquivo faltar
+  // junto de historico.json/operacoes_avaliadas.json na restauração, mas
+  // é melhor levar o estado exato de qualquer jeito).
+  'operacoes_nao_avaliadas.json',
 ];
 
 /**
@@ -1694,14 +1701,56 @@ function baixarArquivoTexto(nomeArquivo, conteudo, mimeType = 'text/html') {
 // (cabeçalho, filtros, grade de KPIs, chart-box, resumo), só some com o
 // resto do CSS que cada tela cria em cima disso pra seus gráficos
 // específicos.
-const CSS_EXPORT_PADRAO = `
+//
+// gerarCssExportPadrao() — antes era uma string FIXA (sempre a mesma
+// paleta clara, nada a ver com o tema escolhido na tela) — agora é uma
+// função que lê o tema ATUAL (data-theme no <html>, ver
+// aplicarTema()/theme picker, app-core.js) e devolve a paleta
+// correspondente, pra o arquivo exportado parecer visualmente com a tela
+// de onde ele saiu, não um template genérico à parte. 3 paletas fixas
+// (não getComputedStyle direto): as variáveis do app "cru" (--text-3,
+// por exemplo, é branco puro ali — usado como destaque forte em outro
+// contexto) não bateriam com o PAPEL que cada variável tem AQUI (ex:
+// --text-3 aqui é o tom mais apagado, pra legendas/rodapé) — 3 paletas
+// próprias, uma por tema, evita herdar semântica errada.
+const _PALETAS_EXPORT_POR_TEMA = {
+  dark: { // tema padrão do app (sem data-theme) — azul-marinho neutro
+    bg1: '#0d0f12', bgCard: '#1e2229', border: '#2a2f3a', border2: '#353c4a',
+    text: '#e8eaf0', text2: '#9aa3b2', text3: '#6b7688',
+    blue: '#3b82f6', red: '#ef4444', green: '#10b981', accent: '#2968ff',
+    shadow: '0 4px 24px rgba(0,0,0,.5)',
+  },
+  light: {
+    bg1: '#f0f2f5', bgCard: '#ffffff', border: '#d1d5db', border2: '#b0b7c3',
+    text: '#111827', text2: '#4b5563', text3: '#8492a6',
+    blue: '#2563eb', red: '#dc2626', green: '#059669', accent: '#2968ff',
+    shadow: '0 4px 24px rgba(0,0,0,.10)',
+  },
+  lightwall: { // azul-marinho + laranja, paleta institucional (ver styles.css)
+    bg1: '#0a1626', bgCard: '#122236', border: '#1f3450', border2: '#2c4a6b',
+    text: '#eef2f7', text2: '#9fb0c4', text3: '#6f8296',
+    blue: '#3b82f6', red: '#ef4444', green: '#1fb88a', accent: '#2968ff',
+    shadow: '0 4px 24px rgba(0,0,0,.55)',
+  },
+};
+// Roxo/amarelo/laranja/ciano são só cores AUXILIARES de gráfico (scatter,
+// séries extras) — não têm variável equivalente no app em si, então ficam
+// fixas, iguais nos 3 temas (não precisam combinar com "fundo/texto").
+const _CORES_AUXILIARES_EXPORT = { purple: '#8b5cf6', yellow: '#f1c40f', orange: '#f5821f', cyan: '#06b6d4' };
+
+function gerarCssExportPadrao() {
+  let nomeTema = 'dark';
+  try { nomeTema = document.documentElement.getAttribute('data-theme') || 'dark'; } catch (e) { /* sem document (não deveria acontecer aqui, mas não quebra) */ }
+  const p = _PALETAS_EXPORT_POR_TEMA[nomeTema] || _PALETAS_EXPORT_POR_TEMA.dark;
+  const a = _CORES_AUXILIARES_EXPORT;
+  return `
   :root {
-    --blue:#4d8dff; --red:#e5484d; --green:#2ecc71; --accent:#4d8dff;
-    --text:#1c2530; --text-2:#48576b; --text-3:#8492a6;
-    --border:#e2e8f0; --border-2:#cbd5e1;
-    --bg-1:#f5f7fb; --bg-card:#ffffff;
+    --blue:${p.blue}; --red:${p.red}; --green:${p.green}; --accent:${p.accent};
+    --text:${p.text}; --text-2:${p.text2}; --text-3:${p.text3};
+    --border:${p.border}; --border-2:${p.border2};
+    --bg-1:${p.bg1}; --bg-card:${p.bgCard};
     --radius:8px; --radius-lg:12px;
-    --purple:#8b5cf6; --yellow:#f1c40f; --orange:#f5821f; --cyan:#06b6d4;
+    --purple:${a.purple}; --yellow:${a.yellow}; --orange:${a.orange}; --cyan:${a.cyan};
     --font-mono: 'SFMono-Regular', Consolas, monospace;
   }
   * { box-sizing:border-box; }
@@ -1713,6 +1762,12 @@ const CSS_EXPORT_PADRAO = `
   .campo input, .campo select { font:inherit; padding:6px 8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-1); color:var(--text-2); }
   .botao { padding:7px 16px; border-radius:var(--radius); border:1px solid var(--accent); background:var(--accent); color:#fff; font-size:.8rem; cursor:pointer; }
   .botao:hover { opacity:.9; }
+  /* Chip de "filtro aplicado" — export agora é um RETRATO fixo do que
+     estava na tela (ver comentário em cada exportarInterativo), não tem
+     mais inputs de filtro pra reaplicar; isto substitui visualmente o
+     antigo bloco ".filtros" com inputs, mostrando só o que foi usado. */
+  .filtro-aplicado { display:inline-flex; align-items:center; gap:8px; background:var(--bg-card); border:1px solid var(--border); border-radius:999px; padding:6px 14px; font-size:.78rem; color:var(--text-2); margin-bottom:20px; }
+  .filtro-aplicado b { color:var(--text); }
   .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
   .kpi-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; }
   .kpi-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); margin-bottom:6px; }
@@ -1734,6 +1789,7 @@ const CSS_EXPORT_PADRAO = `
     font-size:.78rem; line-height:1.45; white-space:pre-line; pointer-events:none;
   }
 `;
+}
 
 // Fonte de tooltip.js, embutida literalmente (não dá pra usar o truque de
 // toString() por função — as funções de tooltip.js vivem dentro da PRÓPRIA
@@ -1896,6 +1952,6 @@ window.LW = {
   // for inserido via innerHTML, pra evitar XSS armazenado.
   escaparHtml: _escaparHtml,
   baixarArquivoTexto,
-  CSS_EXPORT_PADRAO,
+  gerarCssExportPadrao,
   TOOLTIP_JS_FONTE,
 };

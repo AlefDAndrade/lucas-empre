@@ -700,19 +700,29 @@
   }
 
   // ── Exportar Dashboard Interativo (HTML standalone) ───────────────────────
-  // Mesmo padrão dos outros — LW.getRelatorioBercos()/getCorrelacaoTracoBerco()
-  // já retornam TUDO sem filtro (o filtro de período é sempre aplicado
-  // depois, client-side, por _filtrar()) — então basta buscar as duas uma
-  // vez, embutir os dois arrays e embutir as mesmas funções via toString().
+  // Retrato FIXO do que está na tela no momento do clique — embute só os
+  // registros já filtrados pelo período (ini/fim) ativo nos campos
+  // #ab-data-inicio/#ab-data-fim, não mais o histórico inteiro com um
+  // filtro pra reaplicar depois. Os gráficos continuam interativos
+  // (hover funciona, ver TOOLTIP_JS_FONTE), só não dá mais pra trocar o
+  // período DENTRO do arquivo exportado — quem quiser outro período,
+  // aplica na tela e exporta de novo.
   async function exportarInterativo() {
     const btn = document.getElementById('btn-ab-exportar');
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
     try {
-      const [linhas, correlacoes] = await Promise.all([
+      const ini = document.getElementById('ab-data-inicio')?.value || '';
+      const fim = document.getElementById('ab-data-fim')?.value || '';
+      const [linhasTotal, correlacoesTotal] = await Promise.all([
         LW.getRelatorioBercos(),
         LW.getCorrelacaoTracoBerco(),
       ]);
-      const html = _gerarHtmlAbStandalone(linhas, correlacoes);
+      const linhas = _filtrar(linhasTotal, ini, fim);
+      const correlacoes = _filtrar(correlacoesTotal, ini, fim).filter(c => c.taxa_vazamento !== null);
+      const descricaoPeriodo = (ini || fim)
+        ? (ini ? new Date(ini + 'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim + 'T00:00:00').toLocaleDateString('pt-BR') : 'hoje')
+        : 'Todos os registros';
+      const html = _gerarHtmlAbStandalone(linhas, correlacoes, descricaoPeriodo);
       LW.baixarArquivoTexto(
         `analise_bercos_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}.html`,
         html
@@ -725,9 +735,9 @@
     }
   }
 
-  function _gerarHtmlAbStandalone(linhas, correlacoesTotal) {
+  function _gerarHtmlAbStandalone(linhas, correlacoes, descricaoPeriodo) {
     const linhasJson = JSON.stringify(linhas).replace(/<\/script/gi, '<\\/script');
-    const correlacoesJson = JSON.stringify(correlacoesTotal).replace(/<\/script/gi, '<\\/script');
+    const correlacoesJson = JSON.stringify(correlacoes).replace(/<\/script/gi, '<\\/script');
 
     return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -735,7 +745,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Análise de Berços — Exportado</title>
-<style>${LW.CSS_EXPORT_PADRAO}
+<style>${LW.gerarCssExportPadrao()}
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   table.mono td { font-family:var(--font-mono); }
 </style>
@@ -743,12 +753,7 @@
 <body>
   <h1>🔍 Análise de Berços</h1>
   <div class="sub" id="exp-sub"></div>
-
-  <div class="filtros">
-    <div class="campo"><label>Data Início</label><input type="date" id="ab-data-inicio"></div>
-    <div class="campo"><label>Data Fim</label><input type="date" id="ab-data-fim"></div>
-    <button class="botao" id="btn-ab-filtrar">🔄 Aplicar</button>
-  </div>
+  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${LW.escaparHtml(descricaoPeriodo)}</b></div>
 
   <div id="ab-empty" style="display:none;text-align:center;padding:40px;color:var(--text-3)">Nenhum registro no período selecionado.</div>
 
@@ -788,14 +793,14 @@
 
     <div class="chart-box"><h4>Vazamentos por Mês</h4><canvas id="ab-chart-mes"></canvas></div>
   </div>
-  <div class="rodape">Exportado da Análise de Berços — Lightwall SC · dados embutidos neste arquivo, funciona offline.</div>
+  <div class="rodape">Exportado da Análise de Berços — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
 
 <script>${LW.TOOLTIP_JS_FONTE}</script>
 <script>
 (function () {
   'use strict';
-  const LINHAS_TOTAL = ${linhasJson};
-  const CORRELACOES_TOTAL = ${correlacoesJson};
+  const LINHAS = ${linhasJson};
+  const CORRELACOES = ${correlacoesJson};
   const C = ${JSON.stringify(C)};
   const MESES = ${JSON.stringify(MESES)};
   const LIMIAR_HOTSPOT = ${LIMIAR_HOTSPOT};
@@ -804,7 +809,6 @@
     tooltip: window.LW.tooltip,
   };
 
-  ${_filtrar}
   ${_achatar}
   ${_agrupar}
   ${_hotspots}
@@ -825,9 +829,7 @@
   ${_renderKpis}
 
   function render() {
-    const ini = document.getElementById('ab-data-inicio').value;
-    const fim = document.getElementById('ab-data-fim').value;
-    const linhas = _filtrar(LINHAS_TOTAL, ini, fim);
+    const linhas = LINHAS;
     const empty = document.getElementById('ab-empty');
     const content = document.getElementById('ab-content');
 
@@ -851,7 +853,7 @@
     const porMes = _agrupar(pos, p => p.mes).sort((a, b) => String(a.chave).localeCompare(String(b.chave)));
     const hotspots = _hotspots(pos);
 
-    const correlacoes = _filtrar(CORRELACOES_TOTAL, ini, fim).filter(c => c.taxa_vazamento !== null);
+    const correlacoes = CORRELACOES;
     const atrasoMapa = _mapaAtrasoVazamento(linhas);
     const comparativoTraco = _compararPrimeiroUltimoTraco(correlacoes);
 
@@ -888,11 +890,9 @@
       _drawScatter('ab-chart-traco-scatter', pontosTraco, C.purple, 220);
     });
 
-    document.getElementById('exp-sub').textContent =
-      \`Período: \${(ini || fim) ? (ini ? new Date(ini+'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim+'T00:00:00').toLocaleDateString('pt-BR') : 'hoje') : 'Todos os registros'} · Gerado em \${new Date().toLocaleString('pt-BR')}\`;
+    document.getElementById('exp-sub').textContent = \`Gerado em \${new Date().toLocaleString('pt-BR')}\`;
   }
 
-  document.getElementById('btn-ab-filtrar').addEventListener('click', render);
   render();
 })();
 </script>

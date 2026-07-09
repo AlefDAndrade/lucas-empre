@@ -317,15 +317,26 @@
   }
 
   // ── Exportar Dashboard Interativo (HTML standalone) ───────────────────────
-  // getTracosComFiltros({}) já devolve TUDO (sem filtro) com _tipoMontagem/
-  // _baterias resolvidos — mesmo padrão dos outros exports: embute esse
-  // array pronto + as mesmas funções de cálculo/render via toString().
+  // Retrato FIXO do que está na tela no momento do clique — busca com os
+  // MESMOS filtros ativos agora (lerFiltros(): período, bateria, turno,
+  // tipo de montagem), não mais tudo com uma UI de filtro pra reaplicar
+  // depois. Embute o array já filtrado + as mesmas funções de cálculo/
+  // render via toString().
   async function exportarInterativo() {
     const btn = document.getElementById('btn-qt-exportar');
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
     try {
-      const tracos = await getTracosComFiltros({});
-      const html = _gerarHtmlQtStandalone(tracos);
+      const filtros = lerFiltros();
+      const tracos = await getTracosComFiltros(filtros);
+      const descricaoFiltro = [
+        (filtros.dataInicio || filtros.dataFim)
+          ? (filtros.dataInicio ? new Date(filtros.dataInicio + 'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (filtros.dataFim ? new Date(filtros.dataFim + 'T00:00:00').toLocaleDateString('pt-BR') : 'hoje')
+          : 'Todos os períodos',
+        filtros.bateria ? `Bateria ${filtros.bateria}` : null,
+        filtros.turno || null,
+        filtros.tipoMontagem || null,
+      ].filter(Boolean).join(' · ');
+      const html = _gerarHtmlQtStandalone(tracos, descricaoFiltro);
       LW.baixarArquivoTexto(
         `cep_qualidade_tracos_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}.html`,
         html
@@ -338,10 +349,8 @@
     }
   }
 
-  function _gerarHtmlQtStandalone(tracos) {
+  function _gerarHtmlQtStandalone(tracos, descricaoFiltro) {
     const tracosJson = JSON.stringify(tracos).replace(/<\/script/gi, '<\\/script');
-    const baterias = [...new Set(tracos.flatMap(t => t._baterias || []))].sort();
-    const tipos = [...new Set(tracos.map(t => t._tipoMontagem).filter(t => t && t !== 'Desconhecido'))].sort();
 
     return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -349,22 +358,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CEP — Controle Estatístico de Processo — Exportado</title>
-<style>${LW.CSS_EXPORT_PADRAO}
+<style>${LW.gerarCssExportPadrao()}
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 </style>
 </head>
 <body>
   <h1>📐 CEP — Controle Estatístico de Processo</h1>
-  <div class="sub" id="exp-sub"></div>
-
-  <div class="filtros">
-    <div class="campo"><label>Data Início</label><input type="date" id="qt-data-inicio"></div>
-    <div class="campo"><label>Data Fim</label><input type="date" id="qt-data-fim"></div>
-    <div class="campo"><label>Bateria</label><select id="qt-bateria"><option value="">Todas</option>${baterias.map(b => `<option value="${b}">${b}</option>`).join('')}</select></div>
-    <div class="campo"><label>Turno</label><select id="qt-turno"><option value="">Todos</option><option>1º TURNO</option><option>2º TURNO</option><option>3º TURNO</option></select></div>
-    <div class="campo"><label>Tipo de Montagem</label><select id="qt-tipo-montagem"><option value="">Todos</option>${tipos.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
-    <button class="botao" id="btn-qt-filtrar">🔄 Aplicar</button>
-  </div>
+  <div class="sub" id="exp-sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${LW.escaparHtml(descricaoFiltro)}</b></div>
 
   <div id="qt-alertas" style="margin-bottom:16px;display:flex;flex-direction:column;gap:8px"></div>
 
@@ -410,13 +411,13 @@
 
   <div class="chart-box"><h4>Tendência por Tipo de Montagem</h4><div id="qt-tendencia-montagem" style="color:var(--text-3);font-size:.84rem"></div></div>
 
-  <div class="rodape">Exportado do CEP — Lightwall SC · dados embutidos neste arquivo, funciona offline.</div>
+  <div class="rodape">Exportado do CEP — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
 
 <script>${LW.TOOLTIP_JS_FONTE}</script>
 <script>
 (function () {
   'use strict';
-  const TRACOS_TOTAL = ${tracosJson};
+  const TRACOS = ${tracosJson};
   const INSUMOS_LABELS = ${JSON.stringify(INSUMOS_LABELS)};
   const LIMITE_DESVIO_PCT = ${LIMITE_DESVIO_PCT};
   const LIMITE_TAXA_ACERTO = ${LIMITE_TAXA_ACERTO};
@@ -448,28 +449,8 @@
   ${renderInsights}
   ${renderAlertas}
 
-  function filtrarTracos(filtros) {
-    const { dataInicio, dataFim, bateria, turno, tipoMontagem } = filtros;
-    return TRACOS_TOTAL.filter(t => {
-      if (dataInicio && t.data < dataInicio) return false;
-      if (dataFim && t.data > dataFim) return false;
-      if (bateria && !(t._baterias || []).includes(bateria)) return false;
-      if (turno && t.turno !== turno) return false;
-      if (tipoMontagem && t._tipoMontagem !== tipoMontagem) return false;
-      return true;
-    });
-  }
-
   function render() {
-    const filtros = {
-      dataInicio: document.getElementById('qt-data-inicio').value,
-      dataFim: document.getElementById('qt-data-fim').value,
-      bateria: document.getElementById('qt-bateria').value,
-      turno: document.getElementById('qt-turno').value,
-      tipoMontagem: document.getElementById('qt-tipo-montagem').value,
-    };
-    const tracos = filtrarTracos(filtros);
-    const ind = calcularIndicadores(tracos);
+    const ind = calcularIndicadores(TRACOS);
 
     renderAlertas(ind);
     renderKPIs(ind);
@@ -484,19 +465,8 @@
     renderCEP(ind);
     renderConsumo(ind);
     renderTendenciaMontagem(ind);
-
-    const { dataInicio: di, dataFim: df } = filtros;
-    document.getElementById('exp-sub').textContent =
-      \`Período: \${(di || df) ? (di ? new Date(di+'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (df ? new Date(df+'T00:00:00').toLocaleDateString('pt-BR') : 'hoje') : 'Todos os registros'} · Gerado em \${new Date().toLocaleString('pt-BR')}\`;
   }
 
-  // Prefill: últimos 90 dias com dado, ou intervalo total se não houver.
-  if (TRACOS_TOTAL.length) {
-    const dates = TRACOS_TOTAL.map(t => t.data).filter(Boolean).sort();
-    document.getElementById('qt-data-inicio').value = dates[0];
-    document.getElementById('qt-data-fim').value = dates[dates.length - 1];
-  }
-  document.getElementById('btn-qt-filtrar').addEventListener('click', render);
   render();
 })();
 </script>

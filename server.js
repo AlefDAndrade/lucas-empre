@@ -201,6 +201,13 @@ const VALIDADORES_BACKUP_DADOS = {
   // de "não avaliadas" do Setor de Qualidade, mesmo já tendo sido avaliada
   // de verdade antes do backup.
   'operacoes_avaliadas.json':  v => Array.isArray(v),
+  // Adicionado: agora que "não avaliadas" é a fila DE VERDADE (não mais
+  // calculada na hora — ver OPERACOES_NAO_AVALIADAS_PATH, mais abaixo),
+  // sem isso, restaurar um backup deixaria esse arquivo desatualizado em
+  // relação às tabelas SQL recém-substituídas (ver recalcularFilaNaoAvaliadasApartirDoSql,
+  // chamada como rede de segurança logo depois da restauração quando este
+  // arquivo específico não vier no backup enviado).
+  'operacoes_nao_avaliadas.json': v => Array.isArray(v),
 };
 
 // Alguns desses arquivos legitimamente ficam vazios (0 bytes) até o app
@@ -221,6 +228,7 @@ const DEFAULT_SE_VAZIO_BACKUP_DADOS = {
   'bercos_visuais.json': [],
   'avaliacoes_qualidade.json': [],
   'operacoes_avaliadas.json': [],
+  'operacoes_nao_avaliadas.json': [],
 };
 
 function parseArquivoBackupDados(nome, texto) {
@@ -459,6 +467,99 @@ function salvarOperacaoAndamentoNoDisco(dados) {
   fs.writeFileSync(tmp, JSON.stringify(dados, null, 2), 'utf8');
   fs.renameSync(tmp, OPERACAO_ANDAMENTO_PATH);
 }
+
+// ─── FILA DE AVALIAÇÃO (Setor de Qualidade): "não avaliadas" ──────────────
+// Antes, GET /operacoes-nao-avaliadas CALCULAVA a fila toda vez (SELECT ...
+// WHERE id NOT IN (SELECT id_operacao FROM operacoes_avaliadas)) — nunca
+// existia como lista própria, só como diferença entre duas outras coisas.
+// Agora é o CONTRÁRIO: um arquivo próprio (JSON simples — cresce a cada
+// operação registrada, encolhe a cada avaliação, e nunca chega perto do
+// tamanho de "operacoes"/"operacoes_avaliadas", que só crescem) é a fonte
+// de verdade — guarda só os IDs pendentes, na ordem em que entraram. GET
+// /operacoes-nao-avaliadas lê esta lista e busca os detalhes de cada
+// operação no SQL só pra exibir (não pra decidir QUEM está na fila).
+//
+// Mantido em sincronia em 2 pontos (nunca em mais nenhum outro lugar):
+//   - adicionarNaFilaNaoAvaliadas(id) — POST /registrar-operacao, depois do
+//     INSERT em "operacoes" (nunca em Modo de Teste — mesma regra de
+//     sempre, essas operações nunca entram na fila do Setor de Qualidade).
+//   - removerDaFilaNaoAvaliadas(id) — sempre que uma operação é marcada
+//     avaliada (POST /marcar-operacao-avaliada, e dentro de
+//     db.marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada, pro caso de
+//     avaliação avulsa — ver os 2 call sites, mais abaixo).
+const OPERACOES_NAO_AVALIADAS_PATH = path.join(DB_DIR, 'operacoes_nao_avaliadas.json');
+
+function lerOperacoesNaoAvaliadas() {
+  try {
+    const texto = fs.readFileSync(OPERACOES_NAO_AVALIADAS_PATH, 'utf8').trim();
+    return texto ? JSON.parse(texto) : [];
+  } catch (_) {
+    return []; // arquivo ainda não existe/corrompido — ver migrarFilaNaoAvaliadasSeNecessario, que cobre a 1ª vez
+  }
+}
+
+function salvarOperacoesNaoAvaliadasNoDisco(lista) {
+  const tmp = OPERACOES_NAO_AVALIADAS_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(lista, null, 2), 'utf8');
+  fs.renameSync(tmp, OPERACOES_NAO_AVALIADAS_PATH);
+}
+
+function adicionarNaFilaNaoAvaliadas(idOperacao) {
+  const lista = lerOperacoesNaoAvaliadas();
+  if (!lista.includes(idOperacao)) {
+    lista.push(idOperacao);
+    salvarOperacoesNaoAvaliadasNoDisco(lista);
+  }
+}
+
+function removerDaFilaNaoAvaliadas(idOperacao) {
+  const lista = lerOperacoesNaoAvaliadas();
+  const idx = lista.indexOf(idOperacao);
+  if (idx !== -1) {
+    lista.splice(idx, 1);
+    salvarOperacoesNaoAvaliadasNoDisco(lista);
+  }
+}
+
+// Recalcula a fila do ZERO a partir do SQL (mesmo critério de sempre: toda
+// operação real, fora de Modo de Teste, que ainda não tem linha em
+// "operacoes_avaliadas") — usada só em 2 situações, nunca no dia a dia:
+//   1) 1ª vez que o servidor sobe com este arquivo ainda inexistente (ver
+//      migrarFilaNaoAvaliadasSeNecessario, chamada no boot, abaixo) —
+//      instalação já em uso antes desta mudança existir.
+//   2) Depois de restaurar um backup que trouxe historico.json e/ou
+//      operacoes_avaliadas.json mas NÃO trouxe operacoes_nao_avaliadas.json
+//      (backup mais antigo, de antes deste arquivo existir) — sem isso, o
+//      arquivo antigo (se já existisse aqui) ficaria fora de sincronia com
+//      as tabelas SQL recém-substituídas (ver POST /restaurar-backup-dados).
+function recalcularFilaNaoAvaliadasApartirDoSql() {
+  const rows = db.prepare(`
+    SELECT id FROM operacoes
+    WHERE modo_teste = 0
+      AND id NOT IN (SELECT id_operacao FROM operacoes_avaliadas)
+    ORDER BY data ASC, fim ASC
+  `).all();
+  salvarOperacoesNaoAvaliadasNoDisco(rows.map(r => r.id));
+  return rows.length;
+}
+
+function migrarFilaNaoAvaliadasSeNecessario() {
+  if (fs.existsSync(OPERACOES_NAO_AVALIADAS_PATH)) return; // já existe — não é a 1ª vez, nada a fazer
+  try {
+    const qtd = recalcularFilaNaoAvaliadasApartirDoSql();
+    console.log(`[migração] operacoes_nao_avaliadas.json criado com ${qtd} operação(ões) pendente(s) (calculado a partir do estado atual do banco).`);
+  } catch (e) {
+    console.error('[migração] Falha ao criar operacoes_nao_avaliadas.json — seguindo com fila vazia:', e.message);
+    try { salvarOperacoesNaoAvaliadasNoDisco([]); } catch (_) { /* pior caso: arquivo continua ausente, lerOperacoesNaoAvaliadas() já trata isso como fila vazia */ }
+  }
+}
+// Chamada AQUI mesmo (logo depois das funções/consts acima, não lá em cima
+// junto das outras "Fase N" — ver caminhoArquivoDb, no topo do arquivo):
+// depende de OPERACOES_NAO_AVALIADAS_PATH (const, sem hoisting de valor) e
+// de "db" já com "operacoes"/"operacoes_avaliadas" prontas (migração de
+// histórico já rodou lá em cima) — chamar antes desta linha do arquivo ser
+// executada lançaria ReferenceError (TDZ) na const.
+migrarFilaNaoAvaliadasSeNecessario();
 
 // ─── BERÇOS DA OPERAÇÃO EM ANDAMENTO: "baixou/vazou" marcado ao vivo ──────
 // Snapshot separado de operacao_andamento.json de propósito: aquele arquivo
@@ -1078,14 +1179,26 @@ const server = http.createServer((req, res) => {
   // esperou mais tempo por avaliação aparece primeiro.
   if (req.method === 'GET' && urlPath === '/operacoes-nao-avaliadas') {
     try {
+      const ids = lerOperacoesNaoAvaliadas();
+      if (!ids.length) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('[]');
+        return;
+      }
+      // A LISTA de quem está pendente vem do arquivo (fonte de verdade,
+      // ver comentário em OPERACOES_NAO_AVALIADAS_PATH) — o SQL aqui é só
+      // pra buscar os DETALHES de cada uma pra exibir na tela, nunca pra
+      // decidir quem entra ou sai da fila. Um id que porventura não exista
+      // mais em "operacoes" (não deveria acontecer — nada aqui deleta
+      // operação) simplesmente não aparece no resultado, sem erro.
+      const placeholders = ids.map(() => '?').join(',');
       const rows = db.prepare(`
         SELECT id, id_bateria, tipo_montagem, data, fim, turno, capacidade,
                bercos_reais, bercos_personalizados
         FROM operacoes
-        WHERE modo_teste = 0
-          AND id NOT IN (SELECT id_operacao FROM operacoes_avaliadas)
+        WHERE id IN (${placeholders})
         ORDER BY data ASC, fim ASC
-      `).all();
+      `).all(...ids);
       // bercos_personalizados vem serializado (TEXT) — desserializa aqui
       // pra já entregar um array pronto (ou null) pro front, em vez de
       // cada consumidor ter que fazer o próprio JSON.parse.
@@ -1145,6 +1258,12 @@ const server = http.createServer((req, res) => {
           const qtdBercos = parseInt(record.bercos_reais) || parseInt(record.capacidade) || 0;
           db.criarBercosVisuaisIniciais(record.id, qtdBercos, lerBercosAndamento());
           salvarBercosAndamentoNoDisco({});
+
+          // Entra na fila de avaliação do Setor de Qualidade — ver
+          // comentário em OPERACOES_NAO_AVALIADAS_PATH, acima. Nunca em
+          // Modo de Teste (esse ramo nem chega aqui — ver `if (modoTeste)`
+          // logo acima; mesma regra de sempre pra essa fila).
+          adicionarNaFilaNaoAvaliadas(record.id);
 
           // Avisa todo mundo conectado agora (exceto quem registrou) —
           // dinâmica de "dono" da operação chegou ao fim. Nunca em modo de
@@ -1273,6 +1392,7 @@ const server = http.createServer((req, res) => {
         const existe = db.prepare('SELECT 1 FROM operacoes WHERE id = ?').get(id);
         if (!existe) throw new Error('Operação não encontrada (id: ' + id + ').');
         db.marcarOperacaoAvaliada(id); // idempotente — repetir a chamada não faz nada além de confirmar
+        removerDaFilaNaoAvaliadas(id); // idempotente também — id que já não está na lista, não faz nada
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
@@ -1300,20 +1420,56 @@ const server = http.createServer((req, res) => {
         if (!avaliacao || typeof avaliacao !== 'object' || !avaliacao.id) {
           throw new Error('Avaliação inválida — falta o id.');
         }
+
+        // ── BLOQUEIO DE AVALIAÇÃO AVULSA (2ª camada de prevenção) ──
+        // Avaliação avulsa (sem vir da fila, linkedOperacaoId ausente)
+        // era o que causava a Análise Focada não encontrar o resultado
+        // (ver correção em db.marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada,
+        // que resolve os casos que já existiam) — daqui pra frente, uma
+        // avaliação NOVA só é aceita se já vier vinculada a uma operação
+        // real da fila. O front (setor-qualidade.js) já trava isso na
+        // tela (botão "Registrar" desabilitado sem selecionar da fila),
+        // mas a validação de verdade é aqui — quem manda direto pra rota
+        // (sem passar pela tela) não consegue burlar.
+        //
+        // "jaExistiaAntes" distingue registro NOVO de CORREÇÃO (mesmo id
+        // já existente): uma correção de um registro legado que ainda
+        // não tenha vínculo (de antes desta trava existir) continua
+        // podendo ser salva — não trava quem só está editando algo que
+        // já estava assim.
+        const jaExistiaAntes = !!db.prepare('SELECT 1 FROM avaliacoes_qualidade WHERE id = ?').get(avaliacao.id);
+        if (!jaExistiaAntes) {
+          if (!avaliacao.linkedOperacaoId || typeof avaliacao.linkedOperacaoId !== 'string') {
+            throw new Error('Avaliação avulsa não é mais permitida — selecione uma bateria da fila (Ordem de Previsão de Desemplaque) antes de avaliar.');
+          }
+          const operacaoExiste = db.prepare('SELECT 1 FROM operacoes WHERE id = ?').get(avaliacao.linkedOperacaoId);
+          if (!operacaoExiste) {
+            throw new Error('Operação vinculada não encontrada — atualize a fila e tente novamente.');
+          }
+        }
+
         db.salvarAvaliacaoQualidade(avaliacao);
 
         // Classificação da operação como avaliada/não avaliada (ver
         // db.marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada, db.js):
         // avaliação vinda da fila já é marcada por uma chamada separada do
-        // front a /marcar-operacao-avaliada (com o id_operacao exato) —
-        // mas uma avaliação AVULSA (sem vir da fila, linkedOperacaoId
-        // ausente) nunca disparava essa chamada, deixando a operação real
-        // daquela bateria (se houver alguma pendente) presa como "não
-        // avaliada" pra sempre, mesmo já avaliada de verdade. Fecha essa
-        // lacuna aqui, casando pela bateria + mais antiga pendente (FIFO).
-        // Nunca mexe numa avaliação que já veio vinculada.
+        // front a /marcar-operacao-avaliada (com o id_operacao exato).
+        // O bloqueio acima impede QUALQUER avaliação nova sem
+        // linkedOperacaoId — este branch só continua existindo pra
+        // permitir salvar uma CORREÇÃO de um registro legado (de antes
+        // desta trava) que ainda não tinha vínculo, casando pela bateria
+        // + mais antiga pendente (FIFO). Nunca mexe numa avaliação que já
+        // veio vinculada.
         if (!avaliacao.linkedOperacaoId && avaliacao.batteryId) {
-          try { db.marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada(avaliacao.batteryId); }
+          // Passa o id da própria avaliação (avaliacao.id) pra também
+          // retro-vincular id_operacao nela, não só tirar a operação da
+          // fila — ver comentário de marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada
+          // (db.js) sobre o bug que isso corrige (Análise Focada não
+          // encontrava avaliações avulsas).
+          try {
+            const idMarcado = db.marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada(avaliacao.batteryId, avaliacao.id);
+            if (idMarcado) removerDaFilaNaoAvaliadas(idMarcado); // idem: tira da fila em arquivo também (ver OPERACOES_NAO_AVALIADAS_PATH)
+          }
           catch (e) { console.error('Falha ao classificar operação (avaliação avulsa) como avaliada:', e); }
         }
 
@@ -2454,17 +2610,23 @@ const server = http.createServer((req, res) => {
         const esperados = Object.keys(VALIDADORES_BACKUP_DADOS);
         // Arquivos adicionados DEPOIS do lançamento (bercos_visuais.json,
         // avaliacoes_qualidade.json, operacoes_avaliadas.json — tabelas
-        // que só passaram a existir/ser exportadas em versões mais novas)
-        // são OPCIONAIS aqui: um backup ANTIGO, gerado antes de existirem,
-        // nunca vai ter esses arquivos dentro do .zip — e isso é normal,
-        // não motivo pra recusar a restauração inteira. Sem essa lista,
-        // TODO backup feito antes de qualquer um desses recursos existir
-        // ficava impossível de restaurar (sempre "Backup incompleto —
-        // faltam: ..."), mesmo sendo, fora isso, um backup perfeitamente
-        // válido. Se o arquivo VIER no backup, continua sendo validado
-        // normalmente (nem opcional nem obrigatório muda a validação em
-        // si) — só não trava tudo se estiver faltando.
-        const OPCIONAIS_BACKUP_DADOS = ['bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json'];
+        // que só passaram a existir/ser exportadas em versões mais novas;
+        // operacoes_nao_avaliadas.json — arquivo literal, mas pelo mesmo
+        // motivo: só passou a existir depois) são OPCIONAIS aqui: um
+        // backup ANTIGO, gerado antes de existirem, nunca vai ter esses
+        // arquivos dentro do .zip — e isso é normal, não motivo pra
+        // recusar a restauração inteira. Sem essa lista, TODO backup feito
+        // antes de qualquer um desses recursos existir ficava impossível
+        // de restaurar (sempre "Backup incompleto — faltam: ..."), mesmo
+        // sendo, fora isso, um backup perfeitamente válido. Se o arquivo
+        // VIER no backup, continua sendo validado normalmente (nem
+        // opcional nem obrigatório muda a validação em si) — só não trava
+        // tudo se estiver faltando. Pra operacoes_nao_avaliadas.json
+        // especificamente, faltando + (historico.json OU
+        // operacoes_avaliadas.json presentes) dispara o recálculo
+        // automático a partir do SQL — ver recalcularFilaNaoAvaliadasApartirDoSql,
+        // chamada mais abaixo, depois de todas as tabelas restauradas.
+        const OPCIONAIS_BACKUP_DADOS = ['bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json', 'operacoes_nao_avaliadas.json'];
         const obrigatorios = esperados.filter(n => !OPCIONAIS_BACKUP_DADOS.includes(n));
         const faltando = obrigatorios.filter(nome => typeof arquivos[nome] !== 'string');
         if (faltando.length) {
@@ -2544,7 +2706,19 @@ const server = http.createServer((req, res) => {
         // tabelas SQL direto (também só depois que TODOS os outros
         // arquivos .tmp já foram validados e gravados, pra manter a mesma
         // garantia de "tudo ou nada").
+        //
+        // BUG CORRIGIDO: filtra também por "presentes" — antes, um arquivo
+        // LITERAL (não-SQL) que fosse OPCIONAL (ver OPCIONAIS_BACKUP_DADOS,
+        // acima) e estivesse ausente deste backup específico ainda assim
+        // entrava aqui (só não estava na lista de exclusão SQL), e
+        // `textosValidados[nome]` vinha `undefined` — fs.writeFileSync
+        // quebrava com "Received undefined" e a restauração INTEIRA
+        // falhava, mesmo com todo o resto do backup válido. Não dava pra
+        // notar antes porque todo arquivo literal, até aqui, também era
+        // sempre obrigatório — operacoes_nao_avaliadas.json é o 1º caso de
+        // "literal E opcional" ao mesmo tempo.
         const nomesArquivo = esperados.filter(n =>
+          presentes.includes(n) &&
           !['historico.json', 'historico_edicoes.json', 'paradas.json', 'sobra.json', 'contador_tracos.json',
             'relatorio_injecao.json', 'ajustes_tracos.json', 'relatorio_edicoes.json',
             'bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json'].includes(n));
@@ -2665,6 +2839,19 @@ const server = http.createServer((req, res) => {
         if (presentes.includes('operacoes_avaliadas.json')) {
           const novasOperacoesAvaliadas = JSON.parse(textosValidados['operacoes_avaliadas.json']);
           db.transaction(() => db.substituirOperacoesAvaliadas(novasOperacoesAvaliadas))();
+        }
+        // Rede de segurança: operacoes_nao_avaliadas.json já foi escrito
+        // (arquivo literal, ver "nomesArquivo" acima) SE ele veio no
+        // backup enviado. Mas se veio um backup ANTIGO (de antes deste
+        // arquivo existir) que trouxe historico.json e/ou
+        // operacoes_avaliadas.json — SEM trazer este —, o que já estava
+        // em disco ficaria fora de sincronia com as tabelas SQL recém-
+        // substituídas. Recalcula do zero nesse caso específico (ver
+        // recalcularFilaNaoAvaliadasApartirDoSql, acima).
+        if (!presentes.includes('operacoes_nao_avaliadas.json')
+          && (presentes.includes('historico.json') || presentes.includes('operacoes_avaliadas.json'))) {
+          try { recalcularFilaNaoAvaliadasApartirDoSql(); }
+          catch (e) { console.error('Falha ao recalcular a fila de avaliação depois da restauração:', e.message); }
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

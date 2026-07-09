@@ -187,6 +187,18 @@
       if (pageId === 'analise-focada') {
         LWFocada.init();
       }
+      // Setor de Qualidade — até pouco tempo rodava num <iframe> à parte
+      // (setor-qualidade-app.html), que carregava e chamava SQ.init()
+      // sozinho assim que o app subia, independente de qual página
+      // estivesse ativa (o iframe nunca saía do DOM, só ficava escondido
+      // por trás de .main{display:none}). Agora que é uma página normal
+      // (ver public/partials/page-setor-qualidade.html), reproduz o
+      // mesmo timing "só uma vez, na 1ª vez que abre" — mesmo padrão de
+      // guarda usado por todas as outras páginas aqui.
+      if (pageId === 'setor-qualidade' && !window._sqInit) {
+        window._sqInit = true;
+        SQ.init();
+      }
 
       // Tour guiado automático no 1º acesso a cada página (ver tour.js) —
       // não faz nada se essa página não tem tour, ou se já foi visto antes
@@ -1441,6 +1453,16 @@
         cimenticia: (opcao.cimenticia && typeof opcao.cimenticia === 'object')
           ? { leva: !!opcao.cimenticia.leva, quantidade: Number(opcao.cimenticia.quantidade) || 0 }
           : { leva: false, quantidade: 0 },
+        // Combinação de avaliação (Setor de Qualidade → Referência) —
+        // SÓ é lida aqui, nunca editada nesta tela (ver cfgRenderTudo:
+        // mostra um aviso quando vazia, mas não tem campo pra
+        // preencher). Precisa ser copiada pra UI e devolvida intacta em
+        // _montagemDaUIParaConfig (abaixo) — sem isso, abrir e salvar
+        // Configurações (por qualquer motivo, nem precisa mexer em
+        // Montagem) apagava silenciosamente toda combinação já definida.
+        combinacaoAvaliacao: (opcao.combinacaoAvaliacao && typeof opcao.combinacaoAvaliacao === 'object')
+          ? { forma: opcao.combinacaoAvaliacao.forma, corModificadora: opcao.combinacaoAvaliacao.corModificadora }
+          : null,
       };
     }
 
@@ -1462,6 +1484,11 @@
           leva: !!m.cimenticia?.leva,
           quantidade: m.cimenticia?.leva ? (m.cimenticia.quantidade || 0) : 0,
         },
+        // Ver comentário em _montagemDoConfigParaUI, acima — preserva o
+        // que já estava definido (ou null, se ainda não tiver sido).
+        combinacaoAvaliacao: (m.combinacaoAvaliacao && typeof m.combinacaoAvaliacao === 'object')
+          ? { forma: m.combinacaoAvaliacao.forma, corModificadora: m.combinacaoAvaliacao.corModificadora }
+          : null,
       };
       opcao[`paineis_${m.tipo}_por_berco`] = m.paineisPorBerco;
       return opcao;
@@ -1745,6 +1772,15 @@
         const swatch = (m.modo === 'simples' && typeof m.cor === 'string')
           ? `<span title="Cor deste tipo" style="display:inline-block;width:13px;height:13px;border-radius:50%;background:${m.cor};flex:0 0 auto"></span>`
           : '';
+        // Combinação de avaliação (cor+forma da marcação, Setor de
+        // Qualidade → Referência) nasce vazia (null) num tipo simples
+        // recém-cadastrado (ver cfgAdicionarMontagemSimples) — só quem
+        // define é o Setor de Qualidade, nunca aqui. Sinaliza o estado
+        // "ainda vazio" pra quem cadastra saber que falta esse passo,
+        // sem precisar ir até lá conferir.
+        const avisoSemCombinacao = (m.modo === 'simples' && !m.combinacaoAvaliacao)
+          ? `<span style="font-size:.7rem;color:var(--accent)" title="Definida em Setor de Qualidade → 📖 Referência">⚠ sem marcação definida</span>`
+          : '';
         return `
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;flex-wrap:wrap">
       ${swatch}
@@ -1752,6 +1788,7 @@
       <span style="font-size:.66rem;font-weight:700;color:${corBadge};text-transform:uppercase;letter-spacing:.06em;border:1px solid ${corBadge};border-radius:4px;padding:2px 6px">${m.modo === 'hibrida' ? 'Híbrida' : 'Simples'}</span>
       <span style="font-size:.78rem;color:var(--text-3)">${detalhe}</span>
       <span style="font-size:.78rem;color:var(--text-3)">${cimenticiaTxt}</span>
+      ${avisoSemCombinacao}
       <button onclick="cfgRemoverMontagem(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
     </div>
   `;
@@ -1897,6 +1934,12 @@
       _cfgDados.montagens.push({
         label, modo: 'simples', tipo, paineisPorBerco, cor,
         cimenticia: { leva: levaCimenticia, quantidade: levaCimenticia ? qtdCimenticia : 0 },
+        // Combinação cor+forma da Referência de Marcação (Setor de
+        // Qualidade) — nasce vazia de propósito. Só é preenchida de lá
+        // (ver salvarCombinacaoTipo, setor-qualidade.js), nunca aqui no
+        // cadastro: cadastrar o tipo e decidir sua marcação visual são
+        // passos distintos, e nem sempre feitos pela mesma pessoa.
+        combinacaoAvaliacao: null,
       });
 
       document.getElementById('cfg-mont-simples-label').value = '';
@@ -1968,12 +2011,18 @@
         // salvar, em vez de reconstruir do zero só com o que esta tela
         // conhece. /salvar-config SUBSTITUI o arquivo inteiro (não faz
         // merge) — então campos que este modal nunca edita (ex:
-        // marcadores_qualidade, definido pelo Setor de Qualidade em
-        // "📖 Referência" → "Definir combinação"; modoAutomatico) eram
-        // APAGADOS silenciosamente toda vez que alguém salvava Baterias e
-        // Tipos de Montagem aqui, mesmo sem mexer neles. Usar `...cfgAtual`
-        // como base preserva tudo que já existe; só os campos abaixo são
-        // de fato sobrescritos por esta tela.
+        // dispositivosAutorizados; modoAutomatico) eram APAGADOS
+        // silenciosamente toda vez que alguém salvava Baterias e Tipos de
+        // Montagem aqui, mesmo sem mexer neles. Usar `...cfgAtual` como
+        // base preserva tudo que já existe; só os campos abaixo são de
+        // fato sobrescritos por esta tela. (`tipos_montagem.opcoes` é UM
+        // desses campos sobrescritos — por isso `combinacaoAvaliacao` de
+        // cada tipo, definida pelo Setor de Qualidade em "📖 Referência"
+        // → "Definir combinação", precisa ser preservada no ROUND-TRIP
+        // config→UI→config, ver _montagemDoConfigParaUI/
+        // _montagemDaUIParaConfig acima — não dá pra confiar só no
+        // `...cfgAtual` pra isto, porque tipos_montagem não é herdado
+        // dele, é reconstruído do zero a partir de _cfgDados.montagens.)
         const resAtual = await fetch('/db/config.json');
         const cfgAtual = resAtual.ok ? await resAtual.json() : {};
 
