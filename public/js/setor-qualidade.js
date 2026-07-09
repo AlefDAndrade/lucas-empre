@@ -258,6 +258,21 @@
   const CORES_MARCACAO = ['verde', 'vermelho', 'azul', 'amarelo', 'laranja'];
   const CORES_RESERVADAS_APROVACAO = ['verde', 'azul', 'vermelho'];
 
+  // ── Marcador "X" — Painel não preenchido ──────────────────────────
+  // Forma extra, fora do sistema círculo/traço de COMBINACOES_PADRAO:
+  // não representa nenhum tipo de montagem, não é combinável com outra
+  // marca (sempre sozinha, ver toggleMark/applyMarksToPallet) e nunca
+  // muda de cor — é sempre cinza fixo (COR_NAO_PREENCHIDO), diferente de
+  // verde/vermelho/azul/amarelo/laranja (que o usuário escolhe). Existe
+  // pra distinguir, na hora de marcar, um painel que o avaliador olhou e
+  // decidiu conscientemente "não deu pra preencher" de um painel apenas
+  // esquecido (que fica "Sem marcação", ver classifyMarks). Entra numa
+  // categoria própria nos relatórios/KPIs — nunca conta como aprovado
+  // nem reprovado (ver getClassifiedInfo: resultado vira
+  // "não_preenchido", que nenhum filtro `resultado==='aprovado'/
+  // 'reprovado'` do dashboard/relatórios reconhece).
+  const COR_NAO_PREENCHIDO = 'cinza';
+
   // Motivo do defeito — obrigatório sempre que uma placa vira 2ª linha
   // (azul) ou reprovada (vermelho): ver _corExigeMotivo/_abrirSeletorMotivo,
   // mais abaixo. Lista fixa (não configurável em Configurações — diferente
@@ -306,6 +321,10 @@
 
   /* ── Classificação de marcas ──────────────────────────── */
   function classifyMarks(marks) {
+    // "X" é sempre sozinho (garantido em toggleMark/applyMarksToPallet —
+    // adicionar um X limpa qualquer outra marca da placa, e vice-versa),
+    // então basta checar a presença dele antes de qualquer outra coisa.
+    if (marks.some(m => m.shape === 'x')) return 'Não preenchido';
     const circles = marks.filter(m => m.shape === 'circle');
     const dashes  = marks.filter(m => m.shape === 'dash');
     const cor     = arr => arr.length ? arr[0].color : null;
@@ -343,7 +362,7 @@
   }
   function getClassifiedInfo(marks) {
     const s = classifyMarks(marks);
-    if (['Sem marcação', 'Múltiplas', 'Outros'].includes(s))
+    if (['Sem marcação', 'Múltiplas', 'Outros', 'Não preenchido'].includes(s))
       return { tipoObtido: s, resultado: s.toLowerCase().replace(' ', '_'), linha: null };
     const [tipo, resultado] = s.split(' ');
     // "linha" é um dado A MAIS — nunca muda o valor de "resultado" (seguem
@@ -663,7 +682,7 @@
         const exp = getExpectedType(id);
         if (!exp) return;
         const cls = classifyMarks(slabState[id] || []);
-        if (cls === 'Sem marcação') return;
+        if (cls === 'Sem marcação' || cls === 'Não preenchido') return;
         if (!cls.includes(exp)) {
           slab.classList.add('invalid');
           hasError = true;
@@ -763,6 +782,14 @@
     const root = getComputedStyle(document.documentElement);
     marks.forEach(m => {
       const el = document.createElement('span');
+      if (m.shape === 'x') {
+        // Sempre cinza fixo — nunca lê m.color (ver COR_NAO_PREENCHIDO):
+        // diferente das outras formas, aqui a cor nunca varia.
+        el.className = 'sq-mark-x';
+        el.textContent = '×';
+        c.appendChild(el);
+        return;
+      }
       el.className = m.shape === 'dash' ? 'sq-mark-dash' : 'sq-mark-circle';
       const varMap = { verde:'--sq-cor-verde', vermelho:'--sq-cor-vermelho', azul:'--sq-cor-azul', amarelo:'--sq-cor-amarelo', laranja:'--sq-cor-laranja' };
       el.style.backgroundColor = root.getPropertyValue(varMap[m.color] || '--sq-cor-verde').trim();
@@ -775,17 +802,26 @@
     pushState();
     const id = el.dataset.id;
     if (!slabState[id]) slabState[id] = [];
-    const idx = slabState[id].findIndex(m => m.color === selectedColor && m.shape === selectedShape);
+    const shape = selectedShape;
+    // X nunca usa a cor escolhida na paleta — é sempre cinza fixo
+    // (COR_NAO_PREENCHIDO), ver comentário na constante.
+    const color = shape === 'x' ? COR_NAO_PREENCHIDO : selectedColor;
+    const idx = slabState[id].findIndex(m => m.color === color && m.shape === shape);
     if (idx !== -1) {
       slabState[id].splice(idx, 1);
       _atualizarMotivoAposDesmarcar(id);
     } else {
-      slabState[id].push({ color: selectedColor, shape: selectedShape });
+      // X é sempre sozinho: marcar X apaga qualquer marca real que já
+      // existisse na placa; e marcar uma marca real remove um X que já
+      // estivesse lá (não faz sentido as duas coexistirem — X significa
+      // justamente que não há nenhuma marcação real).
+      slabState[id] = shape === 'x' ? [] : slabState[id].filter(m => m.shape !== 'x');
+      slabState[id].push({ color, shape });
       _renderBadgeMotivo(id); // mostra o "?" pendente na hora, antes mesmo do popover abrir
     }
     renderMarks(el, slabState[id]);
     validateAllSlabs();
-    if (idx === -1 && _corExigeMotivo(selectedColor)) _abrirSeletorMotivo(id);
+    if (idx === -1 && _corExigeMotivo(color)) _abrirSeletorMotivo(id);
   }
 
   // Desmarcar uma cor azul/vermelho pode deixar o painel sem NENHUMA marca
@@ -913,6 +949,11 @@
     document.querySelectorAll('.sq-btn-shape').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     selectedShape = shape;
+    // X nunca usa cor (é sempre cinza fixo, ver COR_NAO_PREENCHIDO) —
+    // desabilita a paleta visualmente pra não sugerir que a cor
+    // escolhida ali vai valer pra ele. Some outra forma é escolhida de
+    // novo, a paleta volta a funcionar normalmente.
+    document.querySelectorAll('.sq-btn-color').forEach(b => b.classList.toggle('sq-btn-color-disabled', shape === 'x'));
   }
 
   // ── Atalhos de teclado: nº = cor, Ctrl+nº = forma ───────────────────
@@ -957,11 +998,19 @@
   function applyMarksToPallet(stackId, color, shape) {
     if (viewMode) return;
     pushState();
+    // Mesma regra de toggleMark: X nunca usa a cor recebida (sempre
+    // cinza fixo) e é sempre sozinho na placa.
+    const corFinal = shape === 'x' ? COR_NAO_PREENCHIDO : color;
     document.getElementById(stackId).querySelectorAll('.sq-slab').forEach(slab => {
       const id = slab.dataset.id;
       if (!slabState[id]) slabState[id] = [];
-      if (!slabState[id].find(m => m.color === color && m.shape === shape))
-        slabState[id].push({ color, shape });
+      if (shape === 'x') {
+        slabState[id] = [{ color: corFinal, shape: 'x' }];
+      } else {
+        slabState[id] = slabState[id].filter(m => m.shape !== 'x');
+        if (!slabState[id].find(m => m.color === corFinal && m.shape === shape))
+          slabState[id].push({ color: corFinal, shape });
+      }
       renderMarks(slab, slabState[id]);
       _renderBadgeMotivo(id);
     });
@@ -972,7 +1021,7 @@
     // motivo escolhido em toda placa do pallet que ficou exigindo motivo
     // (sobrescreve qualquer motivo individual anterior — é uma ação em
     // lote deliberada).
-    if (_corExigeMotivo(color)) _abrirSeletorMotivo(null, stackId);
+    if (_corExigeMotivo(corFinal)) _abrirSeletorMotivo(null, stackId);
   }
   function selectAllPallet(sid) { applyMarksToPallet(sid, selectedColor, selectedShape); }
   function applyColorToPallet(sid, color) { closeAllDropdowns(); applyMarksToPallet(sid, color, selectedShape); }
@@ -1999,6 +2048,14 @@
     if (!panel?.marcas?.length)
       return `<span class="sq-mini-mark sq-mini-mark-vazia" title="Sem marcação"></span>`;
     return panel.marcas.map(m => {
+      // "Painel não preenchido" (marca X, ver COR_NAO_PREENCHIDO) — sempre
+      // sozinha, sempre cinza fixo. Visualmente diferente do × de "Não
+      // avaliado no sistema" (sq-mini-mark-nao-avaliado, acima: texto solto,
+      // sem fundo) de propósito — são conceitos diferentes (aqui é uma
+      // marcação real feita pelo avaliador, lá é a bateria inteira que
+      // nunca chegou a ser avaliada) e o hover/title já deixa isso explícito.
+      if (m.shape === 'x')
+        return `<span class="sq-mini-mark sq-mini-mark-x" title="Painel não preenchido">×</span>`;
       const w = m.shape==='dash' ? '12px' : '6px', h = m.shape==='dash' ? '2px' : '6px';
       const r = m.shape==='circle' ? '50%' : '2px';
       const varMap = { verde:'--sq-cor-verde', vermelho:'--sq-cor-vermelho', azul:'--sq-cor-azul', amarelo:'--sq-cor-amarelo', laranja:'--sq-cor-laranja' };

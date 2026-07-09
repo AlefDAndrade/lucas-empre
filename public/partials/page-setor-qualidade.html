@@ -265,6 +265,7 @@
               <span class="sq-tools-label"><i class="fas fa-shapes"></i> Forma</span>
               <button class="sq-btn-shape circle active"   onclick="SQ.selectShape(this,'circle')"><span class="sq-shape-circle"></span></button>
               <button class="sq-btn-shape dash"            onclick="SQ.selectShape(this,'dash')"><span class="sq-shape-dash"></span></button>
+              <button class="sq-btn-shape x"                onclick="SQ.selectShape(this,'x')" title="Painel não preenchido — sempre sozinha, cor vermelha fixa"><span class="sq-shape-x">×</span></button>
               <div class="sq-tools-sep"></div>
               <button class="btn btn-ghost btn-sm"         onclick="SQ.undoLastAction()"><i class="fas fa-undo-alt"></i> Desfazer</button>
               <button class="btn btn-danger btn-sm"        onclick="SQ.clearAllMarks()"><i class="fas fa-trash-alt"></i> Limpar</button>
@@ -291,6 +292,7 @@
                     <div style="display:flex;align-items:center;gap:9px"><span style="width:12px;height:12px;border-radius:50%;background:var(--sq-cor-vermelho);display:inline-block;flex-shrink:0"></span>Vermelho — Reprovado</div>
                     <div style="display:flex;align-items:center;gap:9px"><span style="width:17px;height:3px;border-radius:2px;background:var(--sq-cor-amarelo);display:inline-block;flex-shrink:0"></span>Amarelo (só no traço) — indica 3T</div>
                     <div style="display:flex;align-items:center;gap:9px"><span style="width:17px;height:3px;border-radius:2px;background:var(--sq-cor-laranja);display:inline-block;flex-shrink:0"></span>Laranja (só no traço) — indica 1T</div>
+                    <div style="display:flex;align-items:center;gap:9px"><span style="width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center;color:red;font-weight:800;font-size:1.6rem;flex-shrink:0">×</span>Vermelho (fixa, não é escolhida) — só da marca X</div>
                   </div>
 
                   <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:700;margin-bottom:8px">Forma</div>
@@ -301,6 +303,7 @@
                       <span class="sq-shape-circle" style="display:inline-block;flex-shrink:0;background:var(--text-2)"></span><span style="margin:0 2px">+</span><span class="sq-shape-dash" style="display:inline-block;flex-shrink:0;background:var(--text-2)"></span>
                       Círculo + traço → <strong>3T</strong> ou <strong>1T</strong> (conforme a cor do traço)
                     </div>
+                    <div style="display:flex;align-items:center;gap:9px"><span class="sq-shape-x" style="display:inline-flex;flex-shrink:0">×</span>X sozinho → <strong>Painel não preenchido</strong> (categoria própria — não conta como aprovado nem reprovado)</div>
                   </div>
                   <p style="font-size:.72rem;color:var(--text-3);margin:-6px 0 14px;line-height:1.4">
                     A cor do traço, quando vem <strong>junto de um círculo</strong>, serve só pra identificar o tipo — quem dita

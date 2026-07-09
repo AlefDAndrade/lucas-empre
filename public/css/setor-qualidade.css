@@ -17,6 +17,11 @@
   --sq-cor-azul:    var(--blue);
   --sq-cor-amarelo: #f1c40f;
   --sq-cor-laranja: #f5821f;
+  /* Cor FIXA (não configurável, nunca escolhida na paleta) do marcador
+     "X" — Painel não preenchido. Sempre a mesma, ao contrário das outras
+     5 cores de marcação (verde/vermelho/azul/amarelo/laranja, que o
+     usuário escolhe na paleta). */
+  --sq-cor-cinza:   red;
   /* Antes eram cores fixas (#23354a/#2a4054) — só faziam sentido no tema
      escuro padrão. bg-3/border-2 já existem no sistema principal (ver
      css/styles.css) e mudam com o tema selecionado, então a "placa" some
@@ -498,6 +503,22 @@
   font-weight: 700;
   color: var(--text-3);
 }
+/* "Painel não preenchido" (marca X feita pelo avaliador — ver
+   COR_NAO_PREENCHIDO em setor-qualidade.js). De propósito, um badge
+   preenchido (fundo cinza + × branco), não texto solto como
+   .sq-mini-mark-nao-avaliado logo acima — são conceitos diferentes
+   (aqui é uma marcação real; lá é a bateria inteira nunca avaliada) e
+   não podem ficar visualmente iguais no Espelho. */
+.sq-mini-mark-x {
+  width: 6px; height: 6px;
+  border-radius: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--sq-cor-cinza);
+  color: #fff;
+  font-size: .4rem;
+  font-weight: 800;
+  line-height: 1;
+}
 
 .sq-mirror-legend {
   display: flex; justify-content: center; gap: 16px;
@@ -574,6 +595,21 @@
 .sq-btn-shape.active { border-color: var(--text); background: var(--border); }
 .sq-shape-circle { width: 13px; height: 13px; border-radius: 50%; background: var(--text); }
 .sq-shape-dash   { width: 17px; height: 3px; border-radius: 2px; background: var(--text); }
+/* Ícone do botão de forma "X" — Painel não preenchido. Caractere, não
+   bloco preenchido (diferente de circle/dash), porque não há "cor
+   selecionada" pra representar aqui: é sempre neutro, veja
+   .sq-btn-color-disabled logo abaixo. */
+.sq-shape-x {
+  width: 13px; height: 13px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 1.6rem; line-height: 1;
+  color: var(--sq-cor-cinza);
+}
+
+/* Paleta de cor desabilitada enquanto a forma "X" está selecionada — X
+   nunca usa a cor escolhida (é sempre --sq-cor-cinza, ver
+   COR_NAO_PREENCHIDO em setor-qualidade.js). */
+.sq-btn-color-disabled { opacity: .3; pointer-events: none; }
 
 /* Badge com o número do atalho de teclado — canto inferior direito de
    cada botão. Cor sozinha = número (tecla "1", "2"...); forma usa o
@@ -724,6 +760,15 @@
 }
 .sq-mark-circle { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); }
 .sq-mark-dash   { width: 12px; height: 3px; border-radius: 2px; }
+/* Marca "X" — Painel não preenchido. Quadrada (não círculo/traço) e
+   sempre na cor fixa --sq-cor-cinza, nunca lida de m.color (ver
+   renderMarks, setor-qualidade.js) — só pra ficar visualmente óbvio,
+   de longe, que é uma categoria à parte das marcas normais. */
+.sq-mark-x {
+  width: 9px; height: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: red; font-size: 1.56rem; font-weight: 800; line-height: 1;
+}
 
 /* Badge do código de motivo (ex: "BC") — canto oposto ao número da placa
    (sq-slab-number, top-left), pra não competir por espaço. Pill com fundo
