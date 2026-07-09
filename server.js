@@ -1157,21 +1157,19 @@ const server = http.createServer((req, res) => {
   // pedida DE NOVO no cliente antes de chamar esta rota (mesmo padrão de
   // cfgSqlExcluirLinha).
   //
-  // Diferente de /admin/sql-excluir-linha, NÃO tem o caso especial de
-  // "operacoes_avaliadas" (que lá desfaz cada avaliação em cascata, ver
-  // db.desfazerAvaliacaoOperacao) — "Limpar Todas" nessa tabela é só um
-  // DELETE cru (desmarca todas as operações como avaliadas), sem apagar
-  // as avaliações/painéis vinculados nem devolvê-las à fila. Fazer o
-  // cascata completo linha a linha aqui seria bem mais lento (uma
-  // transação por linha) pra um botão que já é "apague tudo mesmo" — quem
-  // quiser limpar de verdade, limpa "Avaliações de Qualidade" e "Painéis
-  // de Avaliação" também.
+  // "operacoes_avaliadas" tem o MESMO caso especial de
+  // /admin/sql-excluir-linha — só que em lote: cada id vira uma chamada de
+  // db.desfazerAvaliacaoOperacao (apaga avaliacao_paineis +
+  // avaliacoes_qualidade + a própria marcação, ver comentário na função,
+  // db.js) e, se a operação não for de Modo de Teste, volta pra fila de
+  // avaliação pendente — exatamente como excluir cada linha uma por uma
+  // pelo botão "✕ Excluir", só que sem precisar clicar em cada uma.
   //
-  // Mesmo tratamento de FOREIGN KEY constraint da rota de linha única:
-  // se outra tabela ainda tiver linha dependente (ex.: limpar "Operações"
-  // com traços/avaliações vinculados ainda existindo), o SQLite recusa o
-  // DELETE inteiro (nada é apagado — não é uma exclusão parcial) e
-  // devolve mensagem amigável, não erro de servidor.
+  // Mesmo tratamento de FOREIGN KEY constraint da rota de linha única (pra
+  // qualquer OUTRA tabela do whitelist): se ainda houver linha dependente
+  // em outra tabela, o SQLite recusa o DELETE inteiro (nada é apagado —
+  // não é uma exclusão parcial) e devolve mensagem amigável, não erro de
+  // servidor.
   if (req.method === 'POST' && urlPath === '/admin/sql-limpar-tabela') {
     if (!sessao.requestTemSessaoValida(req)) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -1187,6 +1185,29 @@ const server = http.createServer((req, res) => {
         if (!info) throw new Error('Tabela desconhecida ou não permitida: ' + tabela);
 
         const wsClientId = queryParams.get('wsClientId') || '';
+
+        if (tabela === 'operacoes_avaliadas') {
+          const ids = db.prepare('SELECT id_operacao FROM operacoes_avaliadas').all().map(r => r.id_operacao);
+          const cascata = { avaliacao_paineis: 0, avaliacoes_qualidade: 0, operacoes_avaliadas: 0 };
+          ids.forEach(id => {
+            const r = db.desfazerAvaliacaoOperacao(id);
+            cascata.avaliacao_paineis    += r.avaliacaoPaineis;
+            cascata.avaliacoes_qualidade += r.avaliacoesQualidade;
+            cascata.operacoes_avaliadas  += r.operacoesAvaliadas;
+
+            // Mesma regra de sempre (ver POST /admin/sql-excluir-linha,
+            // acima): nunca reinsere operação de Modo de Teste na fila —
+            // ela não tem noção disso.
+            const operacao = db.prepare('SELECT modo_teste FROM operacoes WHERE id = ?').get(id);
+            if (operacao && !operacao.modo_teste) adicionarNaFilaNaoAvaliadas(id);
+          });
+
+          broadcastDadosSqlExcluidos({ tabela, limpezaTotal: true }, wsClientId);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, excluidas: cascata.operacoes_avaliadas, cascata }));
+          return;
+        }
 
         const resultado = db.prepare(`DELETE FROM "${tabela}"`).run();
 

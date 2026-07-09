@@ -1904,19 +1904,23 @@
     // Apaga TODAS as linhas da tabela selecionada de uma vez (botão "🧹
     // Limpar Todas") — mesmo padrão de segurança de cfgSqlExcluirLinha
     // (confirmação + senha de Administrador de novo), só que em lote.
-    // Diferente da exclusão de uma linha só, NÃO tem o tratamento especial
-    // de "operacoes_avaliadas" (ver comentário em POST
-    // /admin/sql-limpar-tabela, server.js) — é sempre um DELETE cru na
-    // tabela inteira.
+    // "operacoes_avaliadas" tem o MESMO tratamento especial de
+    // cfgSqlExcluirLinha: o servidor desfaz cada avaliação em cascata (ver
+    // POST /admin/sql-limpar-tabela, server.js) e devolve json.cascata —
+    // tratado abaixo pra montar a mensagem de sucesso certa.
     async function cfgSqlLimparTabela() {
       const select = document.getElementById('cfg-sql-tabela');
       const tabela = select?.value || '';
       if (!tabela) return;
       const labelTabela = select.options[select.selectedIndex]?.textContent || tabela;
+      const ehDesfazerAvaliacao = tabela === 'operacoes_avaliadas';
+      const mensagemConfirmacao = ehDesfazerAvaliacao
+        ? 'Isto vai desfazer TODAS as avaliações de qualidade registradas — as avaliações e os painéis vinculados também serão apagados, e todas as operações voltam a aparecer como pendentes na fila do Setor de Qualidade. Esta ação não pode ser desfeita. Continuar?'
+        : `Excluir permanentemente TODAS as linhas de "${labelTabela}"? Esta ação não pode ser desfeita.`;
 
       const confirmou = await LW.mostrarConfirmacao(
-        `Excluir permanentemente TODAS as linhas de "${labelTabela}"? Esta ação não pode ser desfeita.`,
-        { titulo: 'Limpar tabela inteira', textoConfirmar: 'Limpar Todas', tipo: 'perigo', icon: '🧹' }
+        mensagemConfirmacao,
+        { titulo: ehDesfazerAvaliacao ? 'Desfazer todas as avaliações de qualidade' : 'Limpar tabela inteira', textoConfirmar: 'Limpar Todas', tipo: 'perigo', icon: '🧹' }
       );
       if (!confirmou) return;
 
@@ -1935,7 +1939,16 @@
           const json = await res.json().catch(() => null);
           if (!res.ok || !json?.ok) throw new Error(json?.erro || 'Não foi possível limpar a tabela. Tente novamente.');
 
-          await LW.mostrarAlerta(`${json.excluidas} linha(s) excluída(s) de "${labelTabela}". A página será recarregada para atualizar todas as telas.`, { tipo: 'sucesso' });
+          // "operacoes_avaliadas" limpa em cascata (mesmo caso especial de
+          // cfgSqlExcluirLinha, só que em lote — ver POST
+          // /admin/sql-limpar-tabela, server.js): o servidor devolve
+          // json.cascata com o total de cada tabela afetada, e todas essas
+          // operações voltam pra fila de avaliação pendente.
+          const mensagemSucesso = json.cascata
+            ? `Limpeza desfez ${json.cascata.avaliacoes_qualidade} avaliação(ões): ${json.cascata.avaliacao_paineis} registro(s) de painéis e ${json.cascata.operacoes_avaliadas} marcação(ões) removidos. Todas essas operações voltam pra fila de avaliação pendente. A página será recarregada.`
+            : `${json.excluidas} linha(s) excluída(s) de "${labelTabela}". A página será recarregada para atualizar todas as telas.`;
+
+          await LW.mostrarAlerta(mensagemSucesso, { tipo: 'sucesso' });
           window.location.reload();
         } catch (e) {
           LW.mostrarAlerta(e.message, { tipo: 'erro' });
