@@ -1764,6 +1764,8 @@
           if (status) status.textContent = '';
           document.getElementById('cfg-sql-thead').innerHTML = '';
           document.getElementById('cfg-sql-tbody').innerHTML = '';
+          const btnLimpar = document.getElementById('cfg-sql-btn-limpar');
+          if (btnLimpar) btnLimpar.disabled = true;
           _cfgSqlDadosAtuais = null;
         }
       } catch (e) {
@@ -1778,11 +1780,13 @@
       const status = document.getElementById('cfg-sql-status');
       const thead = document.getElementById('cfg-sql-thead');
       const tbody = document.getElementById('cfg-sql-tbody');
+      const btnLimpar = document.getElementById('cfg-sql-btn-limpar');
       const tabela = select?.value || '';
 
       _cfgSqlDadosAtuais = null;
       thead.innerHTML = '';
       tbody.innerHTML = '';
+      if (btnLimpar) btnLimpar.disabled = !tabela;
 
       if (!tabela) { if (status) status.textContent = ''; return; }
 
@@ -1890,6 +1894,48 @@
           // apagada do banco até um F5 manual. Um reload garante que TODO
           // o site passe a refletir a exclusão, não só a própria aba.
           await LW.mostrarAlerta(mensagemSucesso, { tipo: 'sucesso' });
+          window.location.reload();
+        } catch (e) {
+          LW.mostrarAlerta(e.message, { tipo: 'erro' });
+        }
+      });
+    }
+
+    // Apaga TODAS as linhas da tabela selecionada de uma vez (botão "🧹
+    // Limpar Todas") — mesmo padrão de segurança de cfgSqlExcluirLinha
+    // (confirmação + senha de Administrador de novo), só que em lote.
+    // Diferente da exclusão de uma linha só, NÃO tem o tratamento especial
+    // de "operacoes_avaliadas" (ver comentário em POST
+    // /admin/sql-limpar-tabela, server.js) — é sempre um DELETE cru na
+    // tabela inteira.
+    async function cfgSqlLimparTabela() {
+      const select = document.getElementById('cfg-sql-tabela');
+      const tabela = select?.value || '';
+      if (!tabela) return;
+      const labelTabela = select.options[select.selectedIndex]?.textContent || tabela;
+
+      const confirmou = await LW.mostrarConfirmacao(
+        `Excluir permanentemente TODAS as linhas de "${labelTabela}"? Esta ação não pode ser desfeita.`,
+        { titulo: 'Limpar tabela inteira', textoConfirmar: 'Limpar Todas', tipo: 'perigo', icon: '🧹' }
+      );
+      if (!confirmou) return;
+
+      if (typeof AdminAuth === 'undefined') {
+        LW.mostrarAlerta('Não foi possível confirmar a senha de administrador nesta tela.', { tipo: 'erro' });
+        return;
+      }
+
+      AdminAuth.abrirModal(async function onSuccess() {
+        try {
+          const res = await fetch('/admin/sql-limpar-tabela?wsClientId=' + encodeURIComponent(LW.OP_ANDAMENTO_CLIENT_ID), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tabela }),
+          });
+          const json = await res.json().catch(() => null);
+          if (!res.ok || !json?.ok) throw new Error(json?.erro || 'Não foi possível limpar a tabela. Tente novamente.');
+
+          await LW.mostrarAlerta(`${json.excluidas} linha(s) excluída(s) de "${labelTabela}". A página será recarregada para atualizar todas as telas.`, { tipo: 'sucesso' });
           window.location.reload();
         } catch (e) {
           LW.mostrarAlerta(e.message, { tipo: 'erro' });

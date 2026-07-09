@@ -1150,6 +1150,61 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── POST /admin/sql-limpar-tabela: apaga TODAS as linhas de uma tabela
+  // do whitelist de uma vez (botão "🧹 Limpar Todas", ao lado do "↺
+  // Atualizar" — ver cfgSqlLimparTabela, app-core.js). Mesma exigência de
+  // sessão de administrador das rotas acima; a senha de Administrador é
+  // pedida DE NOVO no cliente antes de chamar esta rota (mesmo padrão de
+  // cfgSqlExcluirLinha).
+  //
+  // Diferente de /admin/sql-excluir-linha, NÃO tem o caso especial de
+  // "operacoes_avaliadas" (que lá desfaz cada avaliação em cascata, ver
+  // db.desfazerAvaliacaoOperacao) — "Limpar Todas" nessa tabela é só um
+  // DELETE cru (desmarca todas as operações como avaliadas), sem apagar
+  // as avaliações/painéis vinculados nem devolvê-las à fila. Fazer o
+  // cascata completo linha a linha aqui seria bem mais lento (uma
+  // transação por linha) pra um botão que já é "apague tudo mesmo" — quem
+  // quiser limpar de verdade, limpa "Avaliações de Qualidade" e "Painéis
+  // de Avaliação" também.
+  //
+  // Mesmo tratamento de FOREIGN KEY constraint da rota de linha única:
+  // se outra tabela ainda tiver linha dependente (ex.: limpar "Operações"
+  // com traços/avaliações vinculados ainda existindo), o SQLite recusa o
+  // DELETE inteiro (nada é apagado — não é uma exclusão parcial) e
+  // devolve mensagem amigável, não erro de servidor.
+  if (req.method === 'POST' && urlPath === '/admin/sql-limpar-tabela') {
+    if (!sessao.requestTemSessaoValida(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, erro: 'Sessão de administrador necessária ou expirada.' }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { tabela } = JSON.parse(body);
+        const info = TABELAS_SQL_ADMIN[tabela];
+        if (!info) throw new Error('Tabela desconhecida ou não permitida: ' + tabela);
+
+        const wsClientId = queryParams.get('wsClientId') || '';
+
+        const resultado = db.prepare(`DELETE FROM "${tabela}"`).run();
+
+        broadcastDadosSqlExcluidos({ tabela, limpezaTotal: true }, wsClientId);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, excluidas: resultado.changes }));
+      } catch (e) {
+        const mensagemAmigavel = /FOREIGN KEY constraint failed/i.test(e.message)
+          ? 'Não é possível limpar: existem registros em outras tabelas que dependem de linhas desta (ex.: usos, avaliações ou berços vinculados). Limpe primeiro as tabelas dependentes.'
+          : e.message;
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, erro: mensagemAmigavel }));
+      }
+    });
+    return;
+  }
+
   // ── GET /db/historico_edicoes.json: mesma ideia da rota de historico.json
   // acima — usado pelo "Backup de Dados" gerado no navegador
   // (gerarBackupDados(), em data.js), que ainda faz fetch('db/' + nome)
