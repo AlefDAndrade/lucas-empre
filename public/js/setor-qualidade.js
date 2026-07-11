@@ -3016,6 +3016,8 @@
       <div class="kpi-card"><div class="kpi-label">Total Registros</div><div class="kpi-value" style="font-size:1.8rem;">${fe.length}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Painéis Avaliados</div><div class="kpi-value green" style="font-size:1.8rem;">${fp.length}</div></div>
       <div class="kpi-card" data-tooltip="Aprovados de 2ª linha (marcados em azul) — já contam dentro da Taxa de Aprovação; aqui é só pra saber quantos desses aprovados são 2ª linha."><div class="kpi-label">Painéis 2ª Linha</div><div class="kpi-value" style="font-size:1.8rem;color:var(--sq-cor-azul)">${seg}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Painéis Aprovados</div><div class="kpi-value green" style="font-size:1.8rem;">${apr}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Painéis Reprovados</div><div class="kpi-value red" style="font-size:1.8rem;">${rep}</div></div>
       <div class="kpi-card"><div class="kpi-label">Taxa de Aprovação</div><div class="kpi-value accent" style="font-size:1.8rem;">${ar}%</div></div>
       <div class="kpi-card red"><div class="kpi-label">Taxa de Reprovação</div><div class="kpi-value red" style="font-size:1.8rem;">${rr}%</div></div>`;
 
@@ -3402,6 +3404,8 @@
       <div class="kpi-card"><div class="kpi-label">Total Registros</div><div class="kpi-value">\${fe.length}</div></div>
       <div class="kpi-card"><div class="kpi-label">Painéis Avaliados</div><div class="kpi-value green">\${fp.length}</div></div>
       <div class="kpi-card"><div class="kpi-label">Painéis 2ª Linha</div><div class="kpi-value" style="color:var(--sq-cor-azul)">\${seg}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Painéis Aprovados</div><div class="kpi-value green">\${apr}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Painéis Reprovados</div><div class="kpi-value red">\${rep}</div></div>
       <div class="kpi-card"><div class="kpi-label">Taxa de Aprovação</div><div class="kpi-value accent">\${ar}%</div></div>
       <div class="kpi-card"><div class="kpi-label">Taxa de Reprovação</div><div class="kpi-value red">\${rr}%</div></div>\`;
 
