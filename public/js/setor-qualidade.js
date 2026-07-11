@@ -1664,26 +1664,43 @@
     _aplicarModoBotoesForm(); // reflete no botão "Registrar" se ficou sem operação vinculada (ver comentário lá)
   }
 
+  // Seleciona no <select> de ID da Bateria (sq-batteryId) um valor que pode
+  // não existir entre as <option>s fixas do HTML (só 13 baterias
+  // hardcoded, ver page-setor-qualidade.html) — cadastro de baterias é
+  // dinâmico (LW.BATERIA_IDS, configurável em Registro de Baterias), então
+  // uma avaliação salva ou uma operação da fila podem referenciar uma
+  // bateria fora dessa lista fixa (bateria nova, cadastrada depois, ou só
+  // convenção de nome divergente: ex. "B5-7,5cm" em Registro de Baterias
+  // vs "B5-7.5" aqui). Sem checar isso, sel.value = bid que não bate com
+  // nenhuma <option> é ignorado silenciosamente pelo navegador — o select
+  // fica na primeira opção (ou vazio) sem nenhum aviso, e some com o ID
+  // que deveria estar lá. Usado tanto no prefill da fila
+  // (_prefillFromOperacao) quanto ao reabrir uma avaliação já registrada
+  // (_carregarAvaliacaoNoFormulario — Espelho/Histórico), que é onde esse
+  // problema apareceu de fato: bateria salva já tinha saído das <option>s
+  // fixas, editar pelo Espelho abria o campo vazio e a correção não dava
+  // pra salvar (registerEvaluation exige o campo preenchido).
+  function _selecionarBateriaNoForm(bid) {
+    if (!bid) return;
+    const sel = document.getElementById('sq-batteryId');
+    if (!sel) return;
+    const existe = Array.from(sel.options).some(o => o.value === bid);
+    if (!existe) {
+      const novaOpcao = document.createElement('option');
+      novaOpcao.value = bid;
+      novaOpcao.textContent = bid;
+      sel.appendChild(novaOpcao);
+    }
+    sel.value = bid;
+  }
+
   // Pré-preenche ID da Bateria, Turno, Tipo de Montagem e — se a operação
   // for Montagem Personalizada — a grade inteira, a partir dos dados reais
   // da operação escolhida na fila (ver GET /operacoes-nao-avaliadas,
   // server.js).
   function _prefillFromOperacao(op) {
     // ── ID da Bateria ──────────────────────────────────────────────────
-    if (op.id_bateria) {
-      const sel = document.getElementById('sq-batteryId');
-      const existe = Array.from(sel.options).some(o => o.value === op.id_bateria);
-      if (!existe) {
-        // Convenção de nome pode divergir entre os dois módulos (ex:
-        // "B5-7,5cm" em Registro de Baterias vs "B5-7.5" aqui) — em vez de
-        // deixar o campo errado ou vazio, injeta a opção real na hora.
-        const novaOpcao = document.createElement('option');
-        novaOpcao.value = op.id_bateria;
-        novaOpcao.textContent = op.id_bateria;
-        sel.appendChild(novaOpcao);
-      }
-      sel.value = op.id_bateria;
-    }
+    if (op.id_bateria) _selecionarBateriaNoForm(op.id_bateria);
 
     // ── Turno ────────────────────────────────────────────────────────
     // Compara só o dígito inicial: Registro de Baterias usa "1º TURNO"
@@ -2481,7 +2498,16 @@
     palletTypes = [item.montagem?.pallet1, item.montagem?.pallet2, item.montagem?.pallet3, item.montagem?.pallet4];
     slabConfig  = {};
     updateMountTypeDropdown();
-    document.getElementById('sq-batteryId').value   = item.batteryId || 'B1';
+    // bug: sq-batteryId é um <select> com só 13 <option>s fixas no HTML,
+    // mas o cadastro de baterias é dinâmico — uma avaliação salva pode
+    // referenciar uma bateria fora dessa lista. Atribuir .value direto
+    // (como antes) falha em silêncio quando não existe <option>
+    // correspondente: o campo fica vazio/errado e registerEvaluation
+    // recusa salvar a correção por "faltar" o ID da bateria, mesmo a
+    // avaliação já tendo uma. _selecionarBateriaNoForm injeta a <option>
+    // que falta antes de selecionar (mesma correção já usada em
+    // _prefillFromOperacao, acima).
+    _selecionarBateriaNoForm(item.batteryId || 'B1');
     document.getElementById('sq-turno').value        = item.turno    || '';
     document.getElementById('sq-temp').value         = item.tempInput || '';
     document.getElementById('sq-dtMontagem').value   = fmtDTL(item.dtMontagem);
@@ -3463,7 +3489,11 @@
   function fmtDTL(iso) { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toISOString().slice(0,16); }
 
   function applyFormData(d) {
-    document.getElementById('sq-batteryId').value    = d.batteryId || 'B1';
+    // Mesma correção de _carregarAvaliacaoNoFormulario (ver comentário lá):
+    // rascunho salvo pode referenciar uma bateria fora das <option>s fixas
+    // do HTML — sem isso, reabrir o rascunho perderia o ID da bateria em
+    // silêncio.
+    _selecionarBateriaNoForm(d.batteryId || 'B1');
     linkedOperacaoId = d.linkedOperacaoId || null;
     palletTypes = d.palletTypes  || ['','','',''];
     updateMountTypeDropdown();
