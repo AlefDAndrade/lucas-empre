@@ -699,6 +699,12 @@
     stackCounts = { stack1: n, stack2: n, stack3: n, stack4: n };
     _limparPlacasForaDoEscopo();
     _sincronizarColunasExtras();
+    // Reaplica por cima da contagem "cheia" que acabou de nascer — ver
+    // _removerPaineisNaoEnchidosDaGrade/_definirPaineisNaoEnchidos: sem
+    // isso, qualquer reset posterior (troca de Tipo de Montagem, de
+    // Espessura) devolveria pra grade os painéis que o operador já
+    // marcou como "não enchido" em Bateria Atual.
+    _removerPaineisNaoEnchidosDaGrade();
   }
 
   // Espelha extraStacks no DOM: cria a coluna do pallet (grade de placas
@@ -1159,8 +1165,16 @@
     // renderStacks), não filho dele — fica ao lado da placa.
     const badge = slab?.parentElement?.querySelector('.sq-slab-motivo');
     if (!badge) return;
-    const exigeMotivo = (slabState[id] || []).some(m => _corExigeMotivo(m.color));
+    const marcaQueExigeMotivo = (slabState[id] || []).find(m => _corExigeMotivo(m.color));
+    const exigeMotivo = !!marcaQueExigeMotivo;
     const codigo = slabMotivo[id];
+    // 2ª linha (azul, marca aprovada mesmo exigindo motivo — ver
+    // _corExigeMotivo) tem fundo/cor de texto PRÓPRIOS, diferentes do
+    // vermelho/branco padrão de reprovado — ver .sq-slab-motivo-2linha,
+    // setor-qualidade.css. "?" pendente continua na cor de alerta de
+    // sempre (--accent) independente disso, ver
+    // .sq-slab-motivo-pendente, que tem prioridade no CSS.
+    badge.classList.toggle('sq-slab-motivo-2linha', marcaQueExigeMotivo?.color === 'azul');
     badge.classList.toggle('sq-slab-motivo-pendente', exigeMotivo && !codigo);
     if (codigo) {
       badge.textContent = codigo;
@@ -1784,6 +1798,7 @@
       // pessoa escolher manualmente, não arrisca mapear errado.
     }
     updateMountTypeDropdown();
+    _definirPaineisNaoEnchidos(op); // precisa vir ANTES do reset — é ele quem reaplica a remoção (ver _resetStacksParaPadrao)
     _resetStacksParaPadrao();
     renderStacks();
     validateAllSlabs();
@@ -1834,6 +1849,79 @@
     if (!pallet) return null;
     const posicao = primeiraMetade ? bercoNum : bercoNum - metade;
     return { pallet, posicao };
+  }
+
+  // "🚫 Marcar Não Enchido" (Bateria Atual, ver bateria-atual.js) — grava
+  // o snapshot cru de op.bercos_visuais (ver bercosVisuaisPorOperacoes,
+  // db.js, e GET /operacoes-nao-avaliadas) em paineisNaoEnchidosAtual, pra
+  // _removerPaineisNaoEnchidosDaGrade (abaixo) reaplicar toda vez que a
+  // grade for resetada — troca de Tipo de Montagem/Espessura depois do
+  // prefill NÃO deve devolver os painéis "não enchidos" pra grade. Só
+  // GRAVA aqui; quem de fato remove da grade é
+  // _removerPaineisNaoEnchidosDaGrade, chamada dentro de
+  // _resetStacksParaPadrao (sempre nessa ordem: reset "enche" a grade de
+  // novo, remoção tira os "não enchidos" em cima do resultado).
+  function _definirPaineisNaoEnchidos(op) {
+    paineisNaoEnchidosAtual = Array.isArray(op?.bercos_visuais) ? op.bercos_visuais : [];
+  }
+
+  // Remove UMA posição de UM pallet BASE, deslocando quem ficou pra trás
+  // uma posição pra frente (fecha o buraco) — mesma mecânica de
+  // remoção usada em _moverPainel (linha de origem, ao mover uma placa
+  // pra outro pallet), só que sem adicionar a placa em lugar nenhum:
+  // aqui ela nem existe (painel "não enchido"), não é uma placa que
+  // mudou de pallet. Reduz stackCounts[sid] em 1.
+  function _removerPosicaoDoPallet(sid, posicao) {
+    const n = stackCounts[sid] || 0;
+    if (!posicao || posicao < 1 || posicao > n) return;
+    for (let i = posicao; i < n; i++) {
+      const de = `${sid}-${i + 1}`, para = `${sid}-${i}`;
+      if (slabState[de] !== undefined)  slabState[para]  = slabState[de];  else delete slabState[para];
+      if (slabMotivo[de] !== undefined) slabMotivo[para] = slabMotivo[de]; else delete slabMotivo[para];
+      if (slabMotivoDescricao[de] !== undefined) slabMotivoDescricao[para] = slabMotivoDescricao[de]; else delete slabMotivoDescricao[para];
+      if (slabConfig[de] !== undefined) slabConfig[para] = slabConfig[de]; else delete slabConfig[para];
+    }
+    delete slabState[`${sid}-${n}`];
+    delete slabMotivo[`${sid}-${n}`];
+    delete slabMotivoDescricao[`${sid}-${n}`];
+    delete slabConfig[`${sid}-${n}`];
+    stackCounts[sid] = n - 1;
+  }
+
+  // Aplica paineisNaoEnchidosAtual (ver _definirPaineisNaoEnchidos, acima)
+  // EM CIMA do stackCounts atual — cada lado de berço marcado como
+  // 'nao_enchido' vira 1 painel a menos no pallet correspondente (ver
+  // _paleteDoBerco): o painel nunca chegou a existir de verdade, não faz
+  // sentido pedir avaliação dele. Chamada SEMPRE dentro de
+  // _resetStacksParaPadrao — nunca direto — pra sobreviver a qualquer
+  // reset posterior da grade (troca de Tipo de Montagem, de Espessura),
+  // não só ao prefill inicial.
+  //
+  // Formato de cada item: {berco:'B3', ordem:3, estado_esquerda,
+  // estado_direita} — ver bercosVisuaisPorOperacoes (db.js). Lista vazia
+  // (operação sem nenhum berço marcado, ou capacidadeOperacaoAtual ainda
+  // não definida) não remove nada — mesmo comportamento de antes desta
+  // funcionalidade existir.
+  //
+  // IMPORTANTE: processa do MAIOR berço pro MENOR (sort desc) — cada
+  // remoção desloca as posições seguintes DAQUELE MESMO pallet uma casa
+  // pra trás (ver _removerPosicaoDoPallet); remover em ordem crescente
+  // bagunçaria o índice das remoções seguintes no mesmo pallet (a 2ª
+  // remoção "acertaria" a posição errada, já deslocada pela 1ª).
+  function _removerPaineisNaoEnchidosDaGrade() {
+    if (!paineisNaoEnchidosAtual.length || !capacidadeOperacaoAtual) return;
+    const remocoes = [];
+    paineisNaoEnchidosAtual.forEach(b => {
+      const bercoNum = parseInt(b.ordem) || parseInt(String(b.berco || '').replace(/^B/i, ''));
+      if (!bercoNum) return;
+      [['esquerda', 'esquerdo'], ['direita', 'direito']].forEach(([campo, lado]) => {
+        if (b[`estado_${campo}`] !== 'nao_enchido') return;
+        const destino = _paleteDoBerco(bercoNum, lado, capacidadeOperacaoAtual);
+        if (destino) remocoes.push({ bercoNum, ...destino });
+      });
+    });
+    remocoes.sort((a, b) => b.bercoNum - a.bercoNum);
+    remocoes.forEach(r => _removerPosicaoDoPallet(`stack${r.pallet}`, r.posicao));
   }
 
   // Caminho inverso: dado um dos 4 paletes BASE (1-4) e uma posição
@@ -2495,6 +2583,13 @@
     // campo — cai de volta pra sem numeração por berço (mesma regra de
     // dimensaoOperacaoAtual, acima).
     capacidadeOperacaoAtual = item.capacidadeOperacao || null;
+    // Este fluxo (reabrir avaliação já salva — Espelho/Histórico)
+    // reconstrói a grade inteira a partir dos PAINÉIS JÁ PERSISTIDOS
+    // (paineisDaAvaliacao, mais abaixo) — nunca deve reaplicar a remoção
+    // de "não enchidos" de uma sessão anterior de _iniciarForm que
+    // porventura ainda esteja em memória (autoSetThickness, logo abaixo,
+    // chama _resetStacksParaPadrao internamente).
+    paineisNaoEnchidosAtual = [];
     palletTypes = [item.montagem?.pallet1, item.montagem?.pallet2, item.montagem?.pallet3, item.montagem?.pallet4];
     slabConfig  = {};
     updateMountTypeDropdown();
@@ -2738,7 +2833,7 @@
           ? (panel.motivoDescricao || 'Outros (sem descrição)')
           : (_MOTIVO_POR_CODIGO[panel?.motivo] || panel?.motivo);
         const motivoHtml = panel?.motivo
-          ? `<span class="sq-mini-slab-motivo" title="${_escaparHtml(tituloMotivo)}">${_escaparHtml(panel.motivo)}</span>`
+          ? `<span class="sq-mini-slab-motivo${_linhaDoPainel(panel) === '2ª' ? ' sq-mini-slab-motivo-2linha' : ''}" title="${_escaparHtml(tituloMotivo)}">${_escaparHtml(panel.motivo)}</span>`
           : '';
         // Mesmo raciocínio de renderStacks (grade principal) — mostra o
         // berço de origem quando a avaliação salva tem
@@ -3544,6 +3639,11 @@
     // silêncio.
     _selecionarBateriaNoForm(d.batteryId || 'B1');
     linkedOperacaoId = d.linkedOperacaoId || null;
+    // Rascunhos não preservam capacidadeOperacaoAtual entre sessões (ver
+    // comentário na declaração da variável) — sem operação real recarregada,
+    // não faz sentido reaplicar remoção de painéis "não enchidos" de uma
+    // sessão anterior que porventura ainda esteja em memória.
+    paineisNaoEnchidosAtual = [];
     palletTypes = d.palletTypes  || ['','','',''];
     updateMountTypeDropdown();
     document.getElementById('sq-dailySeq').value     = d.dailySeq  || '1';
@@ -3657,6 +3757,7 @@
     linkedOperacaoId = null;
     dimensaoOperacaoAtual = null;
     capacidadeOperacaoAtual = null;
+    paineisNaoEnchidosAtual = [];
     _editandoAvaliacaoId = null;
     _editandoRegistradoEm = null;
     _editandoLinkedOperacaoId = null;
@@ -3721,6 +3822,19 @@
   // dimensaoOperacaoAtual (não é regressão desta mudança); a grade só
   // volta a numerar por berço quando a operação é recarregada.
   let capacidadeOperacaoAtual = null;
+
+  // Berços marcados "🚫 Não Enchido" (Bateria Atual, ver bateria-atual.js)
+  // da operação atualmente carregada — snapshot cru de op.bercos_visuais
+  // (ver GET /operacoes-nao-avaliadas), guardado aqui (não só aplicado uma
+  // vez no prefill) porque _resetStacksParaPadrao() é chamada de novo toda
+  // vez que o Tipo de Montagem muda (ver changeMountType) ou a Espessura
+  // muda (ver autoSetThickness) — sem guardar e REAPLICAR a cada reset, a
+  // 1ª troca de Tipo de Montagem depois do prefill devolveria os painéis
+  // "não enchidos" pra grade (bug real, pego por
+  // test/setor-qualidade-paineis-nao-enchidos.test.js). Mesmo padrão de
+  // "null até uma operação real ser carregada" de capacidadeOperacaoAtual,
+  // acima — resetado em clearForm() junto com o resto.
+  let paineisNaoEnchidosAtual = [];
 
   // Aceita tanto "15cm" (sem espaço — formato de bateria.label, ver
   // cfgAdicionarBateria, app-core.js) quanto "9,5 cm" (com espaço —
