@@ -2532,6 +2532,23 @@ td.mono {
   line-height: 1.4;
 }
 
+/* Dica quando o modo "🚫 Marcar Não Enchido" está ligado (ver
+   _modoMarcarNaoEnchido, bateria-atual.js) — mesmo texto pequeno de
+   .ba-dica, só com destaque de cor pra ficar óbvio que o clique nos
+   indicadores agora faz algo DIFERENTE do vazamento de sempre. */
+.ba-dica-nao-enchido {
+  color: var(--sq-cor-azul, var(--accent));
+  font-weight: 600;
+}
+
+/* Botão "🚫 Marcar Não Enchido" — liga/desliga o modo de clique dos
+   indicadores (ver _modoMarcarNaoEnchido, bateria-atual.js). Fica entre
+   o resumo e a dica; empilha bem em telas estreitas por já usar .btn
+   (mesma classe base do resto do sistema). */
+#ba-btn-nao-enchido {
+  margin-bottom: 8px;
+}
+
 /* Fileira única — os berços ficam lado a lado (1 2 3 4 5 6 7 8 ...), não
    mais em pares de 2 colunas. Em vez de rolar horizontalmente quando a
    bateria é grande, cada célula DIVIDE a largura disponível igualmente
@@ -2609,6 +2626,19 @@ td.mono {
   opacity: 1;
   color: var(--red);
   text-shadow: 0 0 6px var(--red);
+}
+
+/* Indicador marcado como "não enchido" (✕, ver botão "🚫 Marcar Não
+   Enchido" / _modoMarcarNaoEnchido, bateria-atual.js) — cor PRÓPRIA
+   (azul, mesma usada pra 2ª linha no Setor de Qualidade), de propósito
+   diferente do vermelho de "baixou/vazou": são conceitos diferentes
+   (vazamento observado vs painel que nunca existiu) e não podem ficar
+   visualmente parecidos. Sobrescreve .ba-dot-marcado (mesma
+   especificidade, mas definida depois) só na cor/sombra — o resto
+   (opacity:1, etc.) continua valendo dos dois. */
+.ba-dot.ba-dot-marcado.ba-dot-nao-enchido {
+  color: var(--sq-cor-azul, var(--blue));
+  text-shadow: 0 0 6px var(--sq-cor-azul, var(--blue));
 }
 
 .ba-vazio {

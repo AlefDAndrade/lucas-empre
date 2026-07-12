@@ -73,6 +73,18 @@
   // reconstruir o card (e "piscar" a tela) quando nada mudou de verdade.
   let _ultimaAssinatura = null;
 
+  // Modo "🚫 Marcar Não Enchido" — liga/desliga por um botão no card (ver
+  // _renderBateriaAtual). Enquanto ATIVO, clicar num indicador (•/●) marca
+  // aquele lado como 'nao_enchido' (vira "✕") em vez de 'baixou' (o
+  // vazamento de sempre, "●" preenchido) — os dois nunca se misturam no
+  // mesmo lado, é sempre um OU outro (ver POST /marcar-berco-andamento,
+  // que já desmarca qualquer um dos dois num clique de novo, seja qual for
+  // o modo atual do botão nesse segundo clique). Estado só LOCAL (não
+  // precisa sincronizar entre dispositivos como _bercosMarcados —
+  // cada computador decide o próprio modo de clique), por isso não é
+  // resetado por _sincronizarMarcacoes nem entra em _renderSeMudou.
+  let _modoMarcarNaoEnchido = false;
+
   // Cor por tipo de montagem de UM berço. As duas situações guardam o
   // tipo de um jeito DIFERENTE, então precisam de funções diferentes pra
   // resolver a cor:
@@ -115,11 +127,16 @@
     return Array.from({ length: capacidade }, () => dados.tipo_montagem || null);
   }
 
-  // Tooltip simplificado: só indica de qual lado é o indicador (Direito
-  // ou Esquerdo) — sem explicação de clique nem status de marcado, que
-  // já é visível pelo próprio estilo do indicador (ver .ba-dot-marcado).
-  function _tituloDot(marcado, lado) {
-    return lado === 'direita' ? 'Direito' : 'Esquerdo';
+  // Tooltip: sempre indica o lado (Direito/Esquerdo); se marcado, também
+  // diz COMO foi marcado — "baixou/vazou" (● preenchido, sempre existiu)
+  // ou "não enchido" (✕, ver _modoMarcarNaoEnchido) — os dois têm
+  // aparência bem diferente, mas o tooltip deixa explícito de qualquer
+  // jeito, sem depender só da forma do indicador.
+  function _tituloDot(estado, lado) {
+    const ladoTxt = lado === 'direita' ? 'Direito' : 'Esquerdo';
+    if (estado === 'nao_enchido') return `${ladoTxt} — Não enchido`;
+    if (estado === 'baixou') return `${ladoTxt} — Baixou/Vazou`;
+    return ladoTxt;
   }
 
   // Indica se ESTE dispositivo pode marcar os vazamentos agora — mesmo
@@ -160,9 +177,20 @@
         <strong>Bateria ${LW.escaparHtml(dados.id_bateria || '—')}</strong> — ${LW.escaparHtml(dados.tipo_montagem || '—')}
         ${dados.bercos_reais ? ` — ${dados.bercos_reais} berços` : ''}
       </div>`;
-    const dica = podeMarcar
-      ? `<div class="ba-dica">🖱️ Clique num indicador (•) para marcar que aquele lado do berço baixou ou vazou</div>`
-      : `<div class="ba-dica">🔒 Só o computador que está no controle desta operação pode marcar os vazamentos.</div>`;
+    // Botão "🚫 Marcar Não Enchido" — só aparece pra quem já pode marcar
+    // (mesma trava dos indicadores, ver podeMarcar); alternar o modo é só
+    // estado local (_modoMarcarNaoEnchido), não chama o servidor por si
+    // só — só o CLIQUE NUM INDICADOR chama (ver _baCliqueDot).
+    const botaoModo = podeMarcar
+      ? `<button type="button" id="ba-btn-nao-enchido" class="btn btn-sm ${_modoMarcarNaoEnchido ? 'btn-danger' : 'btn-ghost'}">
+          ${_modoMarcarNaoEnchido ? '✕ Marcando Não Enchido — clique p/ desligar' : '🚫 Marcar Não Enchido'}
+        </button>`
+      : '';
+    const dica = !podeMarcar
+      ? `<div class="ba-dica">🔒 Só o computador que está no controle desta operação pode marcar os vazamentos.</div>`
+      : _modoMarcarNaoEnchido
+        ? `<div class="ba-dica ba-dica-nao-enchido">✕ Clique num indicador para marcar aquele lado como <strong>não enchido</strong> — o painel correspondente sai da grade de avaliação da Qualidade.</div>`
+        : `<div class="ba-dica">🖱️ Clique num indicador (•) para marcar que aquele lado do berço baixou ou vazou</div>`;
     // Fileira única: 1 2 3 4 5 6 7 8 ... (ver .ba-grid no CSS — flex row
     // que DIVIDE a largura disponível igualmente entre os berços, ficando
     // mais fina ou mais grossa conforme a quantidade, sem gerar scroll —
@@ -173,30 +201,53 @@
       const numero = String(i + 1).padStart(2, '0');
       const berco = 'B' + (i + 1);
       const marcadoBerco = _bercosMarcados[berco] || {};
-      const dirMarcado = marcadoBerco.direita === 'baixou';
-      const esqMarcado = marcadoBerco.esquerda === 'baixou';
+      const estadoDir = marcadoBerco.direita || null; // 'baixou' | 'nao_enchido' | null
+      const estadoEsq = marcadoBerco.esquerda || null;
+      // "✕" (não enchido) tem prioridade visual sobre "●" (baixou) — na
+      // prática nunca deveriam coexistir no mesmo lado (POST
+      // /marcar-berco-andamento sempre limpa um antes de aplicar o
+      // outro), mas se algum dado antigo tiver os dois por algum motivo,
+      // não enchido é o mais "definitivo" dos dois (o painel nem existe
+      // pra avaliar) — melhor não esconder essa informação.
+      const dirNaoEnchido = estadoDir === 'nao_enchido';
+      const esqNaoEnchido = estadoEsq === 'nao_enchido';
+      const dirMarcado = estadoDir === 'baixou' || dirNaoEnchido;
+      const esqMarcado = estadoEsq === 'baixou' || esqNaoEnchido;
       return `
         <div class="ba-celula" data-berco="${berco}"
           style="background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-3)'};border:1px solid ${cor ? cor.borda : 'var(--border)'}">
-          <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}" data-berco="${berco}" data-lado="direita"
-            data-tooltip="${_tituloDot(dirMarcado, 'direita')}">•</span>
+          <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}${dirNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${berco}" data-lado="direita"
+            data-tooltip="${_tituloDot(estadoDir, 'direita')}">${dirNaoEnchido ? '✕' : '•'}</span>
           <span class="ba-numero">B${numero}</span>
-          <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}" data-berco="${berco}" data-lado="esquerda"
-            data-tooltip="${_tituloDot(esqMarcado, 'esquerda')}">•</span>
+          <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}${esqNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${berco}" data-lado="esquerda"
+            data-tooltip="${_tituloDot(estadoEsq, 'esquerda')}">${esqNaoEnchido ? '✕' : '•'}</span>
         </div>`;
     }).join('')}</div>`;
 
-    el.innerHTML = resumo + dica + grid;
+    el.innerHTML = resumo + botaoModo + dica + grid;
+
+    if (podeMarcar) {
+      const btnModo = $('ba-btn-nao-enchido');
+      if (btnModo) {
+        btnModo.addEventListener('click', () => {
+          _modoMarcarNaoEnchido = !_modoMarcarNaoEnchido;
+          _renderBateriaAtual(_dadosAtuais); // redesenha na hora (botão, dica e cursor dos indicadores mudam com o modo) — não passa por _renderSeMudou de propósito, é só estado local, não precisa da checagem de assinatura
+        });
+      }
+    }
 
     // Sem dono, os indicadores nem recebem listener de clique — trava já
     // na origem, não só no CSS (que só cuida da aparência/cursor).
     if (!podeMarcar) return;
 
     // Cada indicador marca/desmarca seu PRÓPRIO lado — independente do
-    // outro indicador do mesmo berço (ver _baCliqueDot, abaixo).
+    // outro indicador do mesmo berço (ver _baCliqueDot, abaixo). O modo
+    // atual (_modoMarcarNaoEnchido) decide qual estado aplicar quando o
+    // lado ainda estiver 'okay' — mesmo indicador, mesmo clique, resultado
+    // diferente conforme o botão ligado no momento do clique.
     el.querySelectorAll('.ba-dot').forEach(dot => {
       dot.addEventListener('click', () => {
-        _baCliqueDot(dot.getAttribute('data-berco'), dot.getAttribute('data-lado'), dot);
+        _baCliqueDot(dot.getAttribute('data-berco'), dot.getAttribute('data-lado'), dot, _modoMarcarNaoEnchido ? 'nao_enchido' : 'baixou');
       });
     });
   }
@@ -206,26 +257,31 @@
   // visualmente se a chamada falhar (ex: a operação foi encerrada por
   // outra pessoa bem nesse instante — ver POST /marcar-berco-andamento,
   // server.js). O outro lado do mesmo berço nunca é tocado aqui.
-  async function _baCliqueDot(berco, lado, dotEl) {
+  //
+  // estadoDesejado: 'baixou' (padrão, vazamento) ou 'nao_enchido' (modo
+  // "🚫 Marcar Não Enchido" ligado, ver _modoMarcarNaoEnchido) — só é
+  // usado se o lado ainda estiver 'okay'; se já tiver QUALQUER marcação
+  // (baixou OU nao_enchido), o clique sempre desmarca (volta a 'okay'),
+  // nunca troca uma marcação por outra — mesma regra do servidor (ver
+  // POST /marcar-berco-andamento).
+  async function _baCliqueDot(berco, lado, dotEl, estadoDesejado) {
     if (!berco || !lado) return;
     const marcadoBerco = _bercosMarcados[berco] || {};
-    const estavaMarcado = marcadoBerco[lado] === 'baixou';
-    const novoMarcado = !estavaMarcado;
+    const estadoAtual = marcadoBerco[lado] || null; // 'baixou' | 'nao_enchido' | null
+    const estavaMarcado = estadoAtual === 'baixou' || estadoAtual === 'nao_enchido';
+    const novoEstado = estavaMarcado ? null : estadoDesejado;
 
     // Otimista: já atualiza o indicador antes da resposta do servidor.
     const novoBerco = { ...marcadoBerco };
-    if (novoMarcado) novoBerco[lado] = 'baixou'; else delete novoBerco[lado];
+    if (novoEstado) novoBerco[lado] = novoEstado; else delete novoBerco[lado];
     if (Object.keys(novoBerco).length) _bercosMarcados[berco] = novoBerco;
     else delete _bercosMarcados[berco];
 
-    dotEl.classList.toggle('ba-dot-marcado', novoMarcado);
-    dotEl.setAttribute('data-tooltip', _tituloDot(novoMarcado, lado));
-    const celulaEl = dotEl.closest('.ba-celula');
-    const numEl = celulaEl && celulaEl.querySelector('.ba-numero');
-    if (numEl) {
-      const algumMarcado = Object.keys(_bercosMarcados[berco] || {}).length > 0;
-      numEl.textContent = numEl.textContent.replace(' ⚠️', '');
-    }
+    const ehNaoEnchido = novoEstado === 'nao_enchido';
+    dotEl.classList.toggle('ba-dot-marcado', !!novoEstado);
+    dotEl.classList.toggle('ba-dot-nao-enchido', ehNaoEnchido);
+    dotEl.textContent = ehNaoEnchido ? '✕' : '•';
+    dotEl.setAttribute('data-tooltip', _tituloDot(novoEstado, lado));
 
     try {
       // A rota agora exige dispositivo autorizado + ser o dono da
@@ -234,14 +290,14 @@
       const res = await fetch('/marcar-berco-andamento?deviceId=' + encodeURIComponent(LW.getDeviceId()), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ berco, lado }),
+        body: JSON.stringify({ berco, lado, estado: estadoDesejado }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.erro || 'Falha ao marcar berço.');
     } catch (e) {
       // Desfaz o otimismo — volta pro estado de antes do clique.
       if (estavaMarcado) {
         const b = { ..._bercosMarcados[berco] };
-        b[lado] = 'baixou';
+        b[lado] = estadoAtual;
         _bercosMarcados[berco] = b;
       } else if (_bercosMarcados[berco]) {
         delete _bercosMarcados[berco][lado];

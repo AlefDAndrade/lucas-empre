@@ -851,6 +851,30 @@ function relatorioBercos() {
 module.exports.criarBercosVisuaisIniciais = criarBercosVisuaisIniciais;
 module.exports.todosOsBercosVisuais = todosOsBercosVisuais;
 module.exports.substituirBercosVisuais = substituirBercosVisuais;
+
+/**
+ * Berços visuais de um CONJUNTO específico de operações — usado por
+ * GET /operacoes-nao-avaliadas (ver lib/rotas/qualidade.js) pra saber
+ * quais berços foram marcados "não enchido" (estado_esquerda/
+ * estado_direita === 'nao_enchido', ver POST /marcar-berco-andamento)
+ * ANTES da operação ser registrada, e refletir isso na grade do Setor de
+ * Qualidade (painel correspondente nem entra na contagem — ver
+ * _paineisNaoEnchidosDaOperacao, setor-qualidade.js). Diferente de
+ * todosOsBercosVisuais (backup, traz a tabela inteira): aqui só as
+ * operações pedidas, e devolve um MAPA por id_operacao (mais direto pro
+ * front cruzar com a lista da fila) em vez de array.
+ */
+function bercosVisuaisPorOperacoes(ids) {
+  const lista = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  if (!lista.length) return {};
+  const placeholders = lista.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT id_operacao, bercos FROM bercos_visuais WHERE id_operacao IN (${placeholders})`).all(...lista);
+  const mapa = {};
+  rows.forEach(r => { mapa[r.id_operacao] = JSON.parse(r.bercos); });
+  return mapa;
+}
+module.exports.bercosVisuaisPorOperacoes = bercosVisuaisPorOperacoes;
+
 /**
  * Correlação Traço × Berço — para cada USO de traço com berço_inicio/fim
  * preenchidos (ver traco_usos: berco_inicio/berco_finalizacao — o range
