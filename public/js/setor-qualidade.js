@@ -2908,6 +2908,43 @@
     return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${Math.min(h, 320)}" preserveAspectRatio="xMidYMid meet">${rows}</svg>`;
   }
 
+  // Ranking de "Principais Motivos" (🔷 Motivos — 2ª Linha / 🔴 Motivos —
+  // Reprovação) — mesmo estilo visual (lista de cards, não barra) do
+  // ranking "🎯 Defeitos por Posição" acima, só que agrupado por CÓDIGO DE
+  // MOTIVO (slabMotivo/MOTIVOS_DEFEITO) em vez de posição no pallet.
+  // Painéis SEM motivo (aprovado 1ª linha — nunca exige motivo, ver
+  // _corExigeMotivo) não entram aqui: já são filtrados por quem chama
+  // (paineisFiltrados, abaixo). corBarra é só a cor do número à direita —
+  // azul pro ranking de 2ª linha, vermelho pro de reprovação — mesma
+  // convenção de cor usada no resto do dashboard (donut de classificações,
+  // KPIs).
+  function _rankingMotivosHTML(paineisFiltrados, corBarra) {
+    const porMotivo = {};
+    paineisFiltrados.forEach(p => {
+      const codigo = p.motivo || 'SM'; // "SM" = Sem Motivo — não deveria acontecer (motivo é obrigatório pra essas cores), mas evita sumir do ranking se algum registro legado não tiver
+      if (!porMotivo[codigo]) porMotivo[codigo] = 0;
+      porMotivo[codigo]++;
+    });
+    const total = paineisFiltrados.length;
+    const rnk = Object.entries(porMotivo)
+      .map(([codigo, n]) => ({
+        codigo,
+        nome: codigo === 'SM' ? 'Sem motivo registrado' : (_MOTIVO_POR_CODIGO[codigo] || codigo),
+        n,
+        pct: total ? (n / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.n - a.n || a.nome.localeCompare(b.nome))
+      .slice(0, 10);
+    if (!rnk.length) {
+      return '<div style="color:var(--text-3);text-align:center;padding:20px;font-size:.82rem;">Nenhum painel nesta classificação no período.</div>';
+    }
+    return '<div style="display:flex;flex-direction:column;gap:8px;">' + rnk.map(r => `
+      <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;display:flex;justify-content:space-between;align-items:center;font-size:.8rem;" data-tooltip="${_escaparAtributo(r.nome)}">
+        <span><strong>${_escaparHtml(r.codigo)}</strong> — ${_escaparHtml(r.nome)}</span>
+        <span style="font-family:var(--font-mono);color:${corBarra};font-weight:700;">${r.n} <span style="color:var(--text-3);font-weight:400;">(${r.pct.toFixed(0)}%)</span></span>
+      </div>`).join('') + '</div>';
+  }
+
   // Dispersão (scatter) + linha de tendência opcional — "⏳ Tempo de
   // Pega × Refugo". points: [{x, y, label}]; trendPoints: [{x,y},{x,y}]
   // (reta) ou null.
@@ -3068,6 +3105,14 @@
         <span><strong>${r.batteryId}</strong> · P${r.pallet} · Pos ${r.posicao}</span>
         <span style="font-family:var(--font-mono);color:${cor};font-weight:700;">${r.taxa.toFixed(0)}% <span style="color:var(--text-3);font-weight:400;">(${r.d}/${r.N})</span></span></div>`;
     }).join('') + '</div>' : '<div style="color:var(--text-3);text-align:center;padding:20px;font-size:.82rem;">Nenhum ponto de recorrência significativo (D≥3 e taxa≥30%).</div>';
+
+    /* Principais Motivos — 2ª Linha (azul) / Reprovação (vermelho) —
+       mesmo filtro de período/exclusão já aplicado em fp (linha ~3006);
+       aqui só separa por resultado+linha antes de passar pro ranking. */
+    document.getElementById('sq-chart-motivos-azul').innerHTML =
+      _rankingMotivosHTML(fp.filter(p => _linhaDoPainel(p) === '2ª'), 'var(--sq-cor-azul)');
+    document.getElementById('sq-chart-motivos-vermelho').innerHTML =
+      _rankingMotivosHTML(fp.filter(p => p.resultado === 'reprovado'), 'var(--red)');
 
     /* Baterias com mais refugo */
     const br={};fe.forEach(e=>{const n=d.paineis.filter(p=>p.avaliacaoId===e.id&&p.resultado==='reprovado').length;if(n)br[e.batteryId]=(br[e.batteryId]||0)+n;});
