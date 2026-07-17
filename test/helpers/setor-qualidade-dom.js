@@ -90,6 +90,16 @@ function montarTela(opcoes = {}) {
   novoDom.window.LW = {
     BATERIA_IDS: [],
     PALETES_CONFIG_DEFAULT: { direitoPrimeira: 4, direitoSegunda: 2, esquerdoPrimeira: 3, esquerdoSegunda: 1 },
+    // "Ordem dos Paletes" (ver LW.PALETES_ORDEM, data.js real) — este
+    // harness isolado não roda data.js/loadConfig() de verdade, então
+    // simula o caso "config já carregado" direto: waitConfig() aqui
+    // sempre executa a callback NA HORA (síncrono), nunca fica pendurado
+    // esperando nada — os testes deste harness não testam a corrida
+    // contra loadConfig() (ver test/paletes-ordem-race-condition.test.js
+    // pra isso, que roda contra o app de verdade via JSDOM.fromURL).
+    PALETES_ORDEM_DEFAULT: { stack1: 2, stack2: 1, stack3: 3, stack4: 4 },
+    PALETES_ORDEM: { stack1: 2, stack2: 1, stack3: 3, stack4: 4 },
+    waitConfig: (fn) => fn(),
   };
 
   // Stub de fetch: só as rotas que os fluxos testados realmente chamam.

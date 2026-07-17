@@ -871,12 +871,38 @@
   // ordem diferente do default. Pallets extras (ver _criarColunaPallet,
   // abaixo) não entram aqui — eles sempre nascem depois dos 4 fixos,
   // não fazem parte desta configuração.
+  //
+  // RACE CONDITION corrigida aqui (ver conversa que motivou a mudança —
+  // "preciso sair e entrar de novo pra ordem aparecer certa"): esta
+  // função é chamada em init(), que roda assim que a página Setor de
+  // Qualidade é aberta pela 1ª vez na sessão — SEM esperar loadConfig()
+  // (data.js) terminar de buscar config.json (é assíncrono, um fetch de
+  // verdade). Se a página abrisse rápido o bastante (ex: F5 que já
+  // restaura direto nesta tela), esta função rodava ANTES de
+  // LW.PALETES_ORDEM estar pronto, aplicava o default, e como só
+  // executa 1x por sessão (ver window._sqInit, app-core.js), a ordem
+  // errada ficava presa até a próxima sessão nova (logout+login —
+  // começa no Menu, dá tempo do config carregar antes da pessoa clicar
+  // em Setor de Qualidade). LW.waitConfig() (data.js) já existia pronto
+  // pra isso, só nunca tinha sido usado.
   function _aplicarOrdemPaletes() {
-    const ordem = (typeof LW !== 'undefined' && LW.PALETES_ORDEM) ? LW.PALETES_ORDEM : { stack1: 2, stack2: 1, stack3: 3, stack4: 4 };
-    Object.entries(ordem).forEach(([sid, posicao]) => {
-      const col = document.querySelector(`.sq-pallet-col[data-pallet-id="${sid}"]`);
-      if (col) col.style.order = String(posicao);
-    });
+    const aplicar = () => {
+      const ordem = (typeof LW !== 'undefined' && LW.PALETES_ORDEM) ? LW.PALETES_ORDEM : { stack1: 2, stack2: 1, stack3: 3, stack4: 4 };
+      Object.entries(ordem).forEach(([sid, posicao]) => {
+        const col = document.querySelector(`.sq-pallet-col[data-pallet-id="${sid}"]`);
+        if (col) col.style.order = String(posicao);
+      });
+    };
+    // typeof LW.waitConfig — defensivo: harnesses de teste isolados (ver
+    // test/helpers/setor-qualidade-dom.js) montam um LW mínimo, sem
+    // waitConfig. Sem ele disponível, aplica direto (mesmo comportamento
+    // de antes desta correção) — só o app de verdade (data.js) tem
+    // waitConfig de verdade, e é lá que a corrida importa.
+    if (typeof LW !== 'undefined' && typeof LW.waitConfig === 'function') {
+      LW.waitConfig(aplicar);
+    } else {
+      aplicar();
+    }
   }
 
   // Mesma estrutura das 4 colunas de pallet originais (ver
@@ -4461,6 +4487,7 @@
     clearModalPlates, confirmPalletModal,
     calcularMontagemDoRegistro: _montagemDoRegistro,
     getExpectedType,
+    aplicarOrdemPaletes: _aplicarOrdemPaletes,
     init() {
       _carregarOpcoesMontagem();
       carregarAvaliacoesQualidade();

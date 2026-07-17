@@ -286,6 +286,17 @@
       if (pageId === 'setor-qualidade' && !window._sqInit) {
         window._sqInit = true;
         SQ.init();
+      } else if (pageId === 'setor-qualidade') {
+        // "Ordem dos Paletes" (Configurações → Paletes) precisa reaplicar
+        // TODA VEZ que a tela reabre, não só na 1ª vez (voltou — ver
+        // conversa que motivou a mudança: SQ.init() só roda 1x por
+        // sessão, e uma corrida contra loadConfig() podia deixar a
+        // ordem errada travada até logout+login — ver
+        // _aplicarOrdemPaletes(), setor-qualidade.js). Reaplicar aqui
+        // também cobre o caso (raro hoje, já que salvar sempre recarrega
+        // a página, mas deixa a tela sempre consistente de qualquer
+        // forma) de o config mudar sem um reload completo no meio.
+        SQ.aplicarOrdemPaletes();
       }
 
       // Manutenção — mesmo padrão de guarda "só uma vez, na 1ª vez que
