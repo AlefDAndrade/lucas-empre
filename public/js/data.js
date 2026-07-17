@@ -350,7 +350,7 @@ function _paletesOrdemValida(cfg) {
 async function loadConfig() {
   if (_configReady) return;
   try {
-    const res = await fetch('db/config.json');
+    const res = await fetch('db/config.json', { cache: 'no-store' });
     if (!res.ok) throw new Error('config.json não encontrado');
     const cfg = await res.json();
 

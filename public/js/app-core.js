@@ -2834,6 +2834,15 @@
           return;
         }
       }
+      // Diagnóstico (voltou — ver conversa que motivou a mudança: reportado
+      // que a ordem arrastada não persiste em alguns casos, mas não
+      // reproduzido em testes automatizados até agora). Se acontecer de
+      // novo, confira no Console do navegador (F12) se o valor logado aqui
+      // já sai ERRADO (bug seria antes de chegar no servidor, na captura
+      // do arraste) ou CERTO (bug seria no servidor/leitura de volta) —
+      // ajuda a apontar pro lugar certo. Seguro de deixar em produção: só
+      // console.log, sem custo de performance nem dado sensível.
+      if (paletesOrdem) console.log('[LW] cfgSalvar: paletesOrdem que vai ser enviado a /salvar-config:', JSON.stringify(paletesOrdem));
 
       // Nova estrutura: dimensão e berços ficam dentro de cada bateria
       // Reconstruímos DIMENSAO_OPTS a partir das baterias (para retrocompatibilidade)
@@ -2859,7 +2868,7 @@
         // _montagemDaUIParaConfig acima — não dá pra confiar só no
         // `...cfgAtual` pra isto, porque tipos_montagem não é herdado
         // dele, é reconstruído do zero a partir de _cfgDados.montagens.)
-        const resAtual = await fetch('/db/config.json');
+        const resAtual = await fetch('/db/config.json', { cache: 'no-store' });
         const cfgAtual = resAtual.ok ? await resAtual.json() : {};
 
         cfg = {

@@ -166,7 +166,7 @@
     const sel = document.getElementById('sq-mountType');
     if (!sel) return;
     try {
-      const res = await fetch('/db/config.json');
+      const res = await fetch('/db/config.json', { cache: 'no-store' });
       if (!res.ok) throw new Error('Falha ao buscar config.json');
       const cfg = await res.json();
       const migrou = _migrarCombinacoesParaTiposMontagem(cfg);

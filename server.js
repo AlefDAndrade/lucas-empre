@@ -729,7 +729,24 @@ const server = http.createServer((req, res) => {
 
   fs.readFile(caminhoResolvido, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(caminhoResolvido)] || 'text/plain' });
+    const headers = { 'Content-Type': MIME[path.extname(caminhoResolvido)] || 'text/plain' };
+    // ─── /db/*.json NUNCA pode ser servido do cache do navegador ────────
+    // Sem cabeçalho de cache nenhum (situação de antes desta mudança), o
+    // navegador é livre pra decidir sozinho por quanto tempo confiar numa
+    // cópia antiga — na prática, isso fazia mudanças salvas em
+    // Configurações (ex: reordenar Paletes) não aparecerem nem com F5,
+    // só depois de logout+login (que por acaso força uma navegação nova
+    // o bastante pra descartar a cópia em cache). O service worker (ver
+    // public/service-worker.js) já EXCLUI '/db/' da sua própria camada de
+    // cache de propósito, com o mesmo raciocínio — mas isso não impede o
+    // cache HTTP nativo do navegador, uma camada totalmente separada, de
+    // guardar a resposta por conta própria. `no-store` fecha as duas
+    // pontas: nunca guarda, então nunca serve stale, pra qualquer
+    // arquivo debaixo de /db/ (config.json, usuarios.json não fica aqui
+    // — fica em private/ —, mas historico.json e afins também se
+    // beneficiam da mesma garantia).
+    if (urlPath.startsWith('/db/')) headers['Cache-Control'] = 'no-store';
+    res.writeHead(200, headers);
     res.end(data);
   });
 
