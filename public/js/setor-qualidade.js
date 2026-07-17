@@ -812,7 +812,10 @@
     // Espessura) devolveria pra grade os painéis que o operador já
     // marcou como "não enchido" em Bateria Atual.
     _removerPaineisNaoEnchidosDaGrade();
+<<<<<<< HEAD
     _preencherMarcasDeIdentificacao();
+=======
+>>>>>>> ba26b4fed70f3360d97e5ca0434311d6d5404118
   }
 
   // Espelha extraStacks no DOM: cria a coluna do pallet (grade de placas
