@@ -311,6 +311,11 @@
     data_inicio: null, data_fim: null,
     id_bateria: new Set(), turno: new Set(),
     dimensao: new Set(), tipo_montagem: new Set(), atraso: new Set(),
+    // Busca livre por ID da Operação (ver #reg-busca-id) — string simples,
+    // não Set, porque é 1 termo de texto, não multi-seleção; comparação é
+    // "contém" (case-insensitive), não igualdade exata, pra permitir
+    // colar/digitar só um pedaço do ID (ex: o timestamp final).
+    busca_id: '',
   };
 
   // Modo de edição do Registro de Baterias — enquanto ativo, clicar numa
@@ -707,6 +712,13 @@
       el.addEventListener('change', _onDataRegistro);
     });
 
+    const elBusca = document.getElementById('reg-busca-id');
+    if (elBusca) {
+      elBusca.value = _filtrosRegistro.busca_id || '';
+      elBusca.removeEventListener('input', _onBuscaIdRegistro);
+      elBusca.addEventListener('input', _onBuscaIdRegistro);
+    }
+
     // Detecta tipos de placa extras (ex: 3p) antes de montar o menu de colunas,
     // para que eles já apareçam na lista de checkboxes na primeira renderização.
     _garantirColunasDinamicasTipo(s.data);
@@ -717,6 +729,19 @@
   function _onDataRegistro(e) {
     _filtrosRegistro[e.target.id === 'reg-data-inicio' ? 'data_inicio' : 'data_fim'] = e.target.value || null;
     renderRegistro();
+  }
+
+  // Debounce leve (200ms) pra não re-renderizar a tabela inteira a cada
+  // tecla digitada — mesmo padrão de UX de outros campos de busca livre
+  // do sistema, sem introduzir dependência nova.
+  let _debounceBuscaIdRegistro = null;
+  function _onBuscaIdRegistro(e) {
+    const valor = e.target.value || '';
+    clearTimeout(_debounceBuscaIdRegistro);
+    _debounceBuscaIdRegistro = setTimeout(() => {
+      _filtrosRegistro.busca_id = valor.trim();
+      renderRegistro();
+    }, 200);
   }
 
   // Cor do badge "Tipo de Montagem" — busca a cor de verdade vinculada ao
@@ -739,6 +764,13 @@
     if (f.dimensao.size) data = data.filter(b => f.dimensao.has(b.dimensao));
     if (f.tipo_montagem.size) data = data.filter(b => f.tipo_montagem.has(b.tipo_montagem));
     if (f.atraso.size) data = data.filter(b => f.atraso.has(b.houve_atraso));
+    // Busca livre por ID da Operação (campo #reg-busca-id) — "contém",
+    // case-insensitive, pra aceitar tanto o ID completo (ex: "op_1719...")
+    // quanto só um pedaço dele.
+    if (f.busca_id) {
+      const termo = f.busca_id.toLowerCase();
+      data = data.filter(b => (b.id || '').toLowerCase().includes(termo));
+    }
 
     if (_ordenacaoRegistro.col) {
       data = [...data].sort((a, b) => _compararOrdenacao(
@@ -804,6 +836,7 @@
         <td data-col="dimensao">${b.dimensao || '—'}</td>
         <td data-col="capacidade">${b.capacidade || '—'}</td>
         <td data-col="id_bateria">${LW.escaparHtml(b.id_bateria || '—')}</td>
+        <td data-col="id_operacao" class="mono">${LW.escaparHtml(b.id || '—')}</td>
         <td data-col="inicio" class="mono">${b.inicio ? LW.formatTime(b.inicio) : '—'}</td>
         <td data-col="fim" class="mono">${b.fim ? LW.formatTime(b.fim) : '—'}</td>
         <td data-col="desemplaque" class="mono">${LW.formatDateTime(b.desemplaque || LW.calcularDesemplaque(b.fim))}</td>
@@ -824,6 +857,7 @@
         <td data-col="m2_2psp">${(b.m2_total || 0).toFixed(2)}</td>
         <td data-col="bercos_reais">${b.bercos_reais || '—'}</td>
         <td data-col="placas_cimenticia">${b.placas_cimenticia || 0}</td>
+        <td data-col="operador_nome">${b.operador_nome ? LW.escaparHtml(b.operador_nome) : '—'}</td>
       </tr>`;
     }).join('');
 
@@ -845,6 +879,7 @@
     { key: 'dimensao', label: 'Dimensão' },
     { key: 'capacidade', label: 'Cap. Berços' },
     { key: 'id_bateria', label: 'ID Bateria' },
+    { key: 'id_operacao', label: 'ID Operação' },
     { key: 'inicio', label: 'Início' },
     { key: 'fim', label: 'Fim' },
     { key: 'desemplaque', label: 'Previsão Desemplaque' },
@@ -861,6 +896,7 @@
     { key: 'm2_2psp', label: 'm² (Total)' },
     { key: 'bercos_reais', label: 'Berços Reais' },
     { key: 'placas_cimenticia', label: 'Placas Cimenticia' },
+    { key: 'operador_nome', label: 'Registrado por' },
   ];
 
   // Cópia mutável: ganha entradas extras quando tipos de placa novos (3p, 4p, ...)
@@ -877,6 +913,7 @@
       case 'dimensao':         return b.dimensao || '';
       case 'capacidade':       return Number(b.capacidade) || 0;
       case 'id_bateria':       return b.id_bateria || '';
+      case 'id_operacao':      return b.id || '';
       case 'inicio':           return b.inicio || '';
       case 'fim':              return b.fim || '';
       case 'desemplaque':      return b.desemplaque || LW.calcularDesemplaque(b.fim) || '';
@@ -893,6 +930,7 @@
       case 'm2_2psp':          return Number(b.m2_total) || 0;
       case 'bercos_reais':     return Number(b.bercos_reais) || 0;
       case 'placas_cimenticia':return Number(b.placas_cimenticia) || 0;
+      case 'operador_nome':    return b.operador_nome || '';
       default:
         if (col.startsWith('paineis_')) return Number((b.paineis_por_tipo || {})[col.replace('paineis_', '')]) || 0;
         if (col.startsWith('m2_'))      return Number((b.m2_por_tipo || {})[col.replace('m2_', '')]) || 0;
@@ -1038,8 +1076,15 @@
     const abrir = menu.style.display === 'none';
     if (abrir) {
       const rect = btn.getBoundingClientRect();
+      const LARGURA_MENU = 240; // mesma largura fixa de .col-menu, ver styles.css
+      // Em telas estreitas (celular), o botão "⚙ Colunas" fica perto da
+      // borda direita (empurrado por margin-left:auto no grupo de
+      // botões) — abrir o menu sempre "pra direita" a partir do botão
+      // (comportamento de sempre) cortava ele na borda da tela. Limita
+      // a posição pra caber inteiro, com uma folga de 8px.
+      const maxLeft = window.innerWidth - LARGURA_MENU - 8;
+      menu.style.left = Math.max(8, Math.min(rect.left, maxLeft)) + 'px';
       menu.style.top = (rect.bottom + 8) + 'px';
-      menu.style.left = rect.left + 'px';
     }
     menu.style.display = abrir ? 'block' : 'none';
     btn.setAttribute('aria-expanded', String(abrir));

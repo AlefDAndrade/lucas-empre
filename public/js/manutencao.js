@@ -435,13 +435,13 @@
         reader.onload = function(e) {
           const base64Data = e.target.result;
           // ALTERAÇÃO: Não comprime mais o PDF com GZIP
-          container.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--man-orange); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--man-red); font-size:24px;"></i><span style="font-size:12px;">${esc(file.name)}</span></div>`;
+          container.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--accent); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--red); font-size:24px;"></i><span style="font-size:12px;">${esc(file.name)}</span></div>`;
           container.dataset.filename = file.name;
           container.dataset.base64 = base64Data; // Armazena o dado sem compressão
         };
       } else {
         const compressed = await compressImage(file);
-        container.innerHTML = `<img src="${compressed}" style="max-width:60px; max-height:60px; border-radius:4px; border:1px solid var(--man-border-color); object-fit:cover;">`;
+        container.innerHTML = `<img src="${compressed}" style="max-width:60px; max-height:60px; border-radius:4px; border:1px solid var(--border); object-fit:cover;">`;
       }
     }
   }
@@ -506,13 +506,16 @@
     document.querySelectorAll('.man-tag-anomalia').forEach(el => el.classList.toggle('active', tiposSelecionados.includes(el.dataset.type)));
   }
 
+  // Só reflete a mudança do dropdown "Aguardando peças?" na pílula "Peça"
+  // do assistente (mostra/esconde/habilita) — não força navegação pra lá;
+  // quem decide qual etapa fica visível agora é sempre
+  // _manAplicarStepAtual() (chamado por dentro daqui).
   function toggleSupervisorSection() {
     const el = document.getElementById('man-manAguardandoPecas');
-    const section = document.getElementById('man-supervisorSection');
-    if (!el || !section) return;
+    if (!el) return;
     const aguardando = el.value === 'Sim';
-    section.style.display = aguardando ? 'block' : 'none';
     if (aguardando) _atualizarGateAcompanhamento();
+    _manAplicarStepAtual();
   }
 
   function novoChamado() {
@@ -527,10 +530,6 @@
     if (aceiteInfo) aceiteInfo.textContent = '';
     document.getElementById('man-manId').value = '';
     document.getElementById('man-manEtiquetaFechada').value = 'false';
-    const tech = document.getElementById('man-techSection');
-    if (tech) { tech.classList.remove('open'); tech.style.display = 'none'; }
-    const sup = document.getElementById('man-supervisorSection');
-    if (sup) sup.style.display = 'none';
     _setSecaoAberturaDetalhesEditavel(true);
     document.getElementById('man-manForm').reset();
     const data = document.getElementById('man-manData');
@@ -539,9 +538,6 @@
     document.getElementById('man-manTipos').value = '[]';
     document.getElementById('man-manTempoGasto').value = '';
     document.getElementById('man-supTempoGasto').value = '';
-    document.getElementById('man-btnFecharEtiqueta').style.display = 'none';
-    const btnSalvarNovo = document.getElementById('man-btnSalvarManutencao');
-    if (btnSalvarNovo) btnSalvarNovo.style.display = 'inline-block';
     document.getElementById('man-manEmpresaExternaRow').style.display = 'none';
     document.getElementById('man-manTipoEtiqueta').value = 'Azul';
     prioridadeSelecionada = ''; tiposSelecionados = [];
@@ -555,6 +551,24 @@
         else if (hora >= 14 && hora < 22) turnoSelect.value = '2º TURNO';
         else turnoSelect.value = '3º TURNO';
     }
+
+    // Observador — preenche sozinho com quem está logado agora (mesma
+    // fonte usada em outras telas do sistema, ver LW.nomeDeQuemEstaLogado).
+    // Só um ponto de partida, continua editável — quem abriu o chamado
+    // pode não ser a mesma pessoa que está relatando a anomalia (ex:
+    // alguém abrindo em nome de outro operador).
+    const observadorInput = document.getElementById('man-manObservador');
+    if (observadorInput) {
+        const meuNome = typeof LW !== 'undefined' && LW.nomeDeQuemEstaLogado ? LW.nomeDeQuemEstaLogado() : null;
+        observadorInput.value = meuNome || '';
+    }
+
+    // Chamado novo (ainda sem ID salvo) — só a etapa "Abertura" faz
+    // sentido; as outras (Execução/Peça/Fechamento) ficam desabilitadas
+    // no assistente até o chamado existir de verdade (ver
+    // _manAplicarStepAtual).
+    _manStepAtual = 'abertura';
+    _manAplicarStepAtual();
 
     if (card) card.scrollIntoView({ behavior: 'smooth' });
   }
@@ -605,20 +619,13 @@
     } else if (display) display.value = '';
   }
 
+  // Situação virou "Concluído"? Pré-preenche Fim (Data/Hora) se ainda
+  // estiver vazio, igual sempre fez — só que agora, em vez de mostrar um
+  // botão fixo, atualiza o conteúdo da etapa "Fechamento" do assistente
+  // (ver _manRenderizarFechamento) pra refletir que já dá pra fechar.
   function aoMudarSituacao() {
     const situacao = document.getElementById('man-manSituacao')?.value;
-    const etiquetaFechada = document.getElementById('man-manEtiquetaFechada')?.value === 'true';
-    const btnFechar = document.getElementById('man-btnFecharEtiqueta');
-    // Mesma checagem de permissão de editarManutencao() (linha ~882) e do
-    // reset do formulário (linha ~298) — sem isso, mudar a Situação pra
-    // "Concluído" reexibia o botão pra QUALQUER perfil, mesmo um
-    // Encarregado (só tem 'manutencao-chamado', não 'manutencao'
-    // completa) — o clique acabava dando erro do servidor (que já
-    // bloqueia certinho), mas a experiência ficava confusa: botão
-    // aparecendo pra quem nunca poderia usá-lo de verdade.
-    const podeFechar = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
-    if (situacao === 'Concluido' && !etiquetaFechada && podeFechar && btnFechar) {
-      btnFechar.style.display = 'inline-block';
+    if (situacao === 'Concluido') {
       const dataFim = document.getElementById('man-manDataFim');
       const horaFim = document.getElementById('man-manHoraFim');
       if (dataFim && !dataFim.value) {
@@ -627,7 +634,12 @@
         if (horaFim) horaFim.value = agora.toLocaleTimeString('pt-BR', { hour12: false });
         calcularTempoGasto();
       }
-    } else if (btnFechar) btnFechar.style.display = 'none';
+    }
+    // Reflete a mudança de situação no chamado em memória (usado por
+    // _manRenderizarFechamento pra decidir o que mostrar) mesmo antes de
+    // salvar — só localmente, o servidor só vê isso depois do "Salvar".
+    if (_chamadoEmEdicao) _chamadoEmEdicao.situacao = situacao;
+    _manAplicarStepAtual();
   }
 
   async function salvarManutencao() {
@@ -1035,99 +1047,99 @@
 
     function exibirImagem(src, titulo) {
       if (!src || src === '' || src === 'null' || src === 'undefined') {
-        return `<div style="margin-top:4px; font-size:12px; color:var(--man-text-secondary); opacity:0.6;">Nenhum anexo.</div>`;
+        return `<div style="margin-top:4px; font-size:12px; color:var(--text-2); opacity:0.6;">Nenhum anexo.</div>`;
       }
       
       // Verifica se é um PDF comprimido (legado) ou normal
       if (src.startsWith('pdfgz:')) {
         const decompressedBase64 = decompressPDF(src);
-        return `<div style="margin-top:4px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--man-text-secondary);">
-          <i class="fas fa-file-pdf" style="color:var(--man-red); font-size:20px;"></i>
+        return `<div style="margin-top:4px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-2);">
+          <i class="fas fa-file-pdf" style="color:var(--red); font-size:20px;"></i>
           <span>PDF anexado</span>
-          <a href="${decompressedBase64}" target="_blank" style="color:var(--man-blue); text-decoration:underline; margin-left:8px;">Abrir PDF</a>
+          <a href="${decompressedBase64}" target="_blank" style="color:var(--blue); text-decoration:underline; margin-left:8px;">Abrir PDF</a>
         </div>`;
       }
       // Verifica se é um PDF Base64 padrão
       if (src.startsWith('data:application/pdf;base64,')) {
-        return `<div style="margin-top:4px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--man-text-secondary);">
-          <i class="fas fa-file-pdf" style="color:var(--man-red); font-size:20px;"></i>
+        return `<div style="margin-top:4px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-2);">
+          <i class="fas fa-file-pdf" style="color:var(--red); font-size:20px;"></i>
           <span>PDF anexado</span>
-          <a href="${src}" target="_blank" style="color:var(--man-blue); text-decoration:underline; margin-left:8px;">Abrir PDF</a>
+          <a href="${src}" target="_blank" style="color:var(--blue); text-decoration:underline; margin-left:8px;">Abrir PDF</a>
         </div>`;
       }
       if (src.startsWith('PDF:')) {
-        return `<div style="margin-top:4px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--man-text-secondary);"><i class="fas fa-file-pdf" style="color:var(--man-red); font-size:20px;"></i> ${esc(src.replace('PDF: ', ''))}</div>`;
+        return `<div style="margin-top:4px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-2);"><i class="fas fa-file-pdf" style="color:var(--red); font-size:20px;"></i> ${esc(src.replace('PDF: ', ''))}</div>`;
       }
       return `
         <div style="margin-top:8px; display:flex; flex-direction:column; gap:4px;">
-          <span style="font-size:12px; color:var(--man-text-secondary);">${titulo}:</span>
-          <img src="${src}" style="max-width:100%; max-height:150px; object-fit:cover; border-radius:6px; border:1px solid var(--man-border-color); cursor:pointer;" onclick="window.open(this.src, '_blank')">
+          <span style="font-size:12px; color:var(--text-2);">${titulo}:</span>
+          <img src="${src}" style="max-width:100%; max-height:150px; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer;" onclick="window.open(this.src, '_blank')">
         </div>
       `;
     }
 
     let html = `
       <div style="display:flex; flex-direction:column; gap:16px; padding:8px 0;">
-        <div style="border-bottom:1px solid var(--man-border-color); padding-bottom:12px;">
-          <h3 style="color:var(--man-orange); margin-bottom:4px;"><i class="fas fa-clipboard-list"></i> Chamado #${esc(chamado.id)}</h3>
-          <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--man-text-secondary);">
+        <div style="border-bottom:1px solid var(--border); padding-bottom:12px;">
+          <h3 style="color:var(--accent); margin-bottom:4px;"><i class="fas fa-clipboard-list"></i> Chamado #${esc(chamado.id)}</h3>
+          <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-2);">
             <span><i class="fas fa-industry"></i> ${esc(chamado.maquina)}</span>
             <span><i class="fas fa-building"></i> ${esc(chamado.setor)}</span>
           </div>
         </div>
 
-        <div style="background:rgba(255,92,108,0.08); border-left:4px solid var(--man-red); padding:12px; border-radius:6px;">
-          <div style="display:flex; justify-content:space-between; color:var(--man-text-secondary); font-size:12px; margin-bottom:4px;">
-            <span><i class="fas fa-user" style="color:var(--man-red);"></i> Abertura (Operador)</span>
+        <div style="background:var(--red-dim); border-left:4px solid var(--red); padding:12px; border-radius:6px;">
+          <div style="display:flex; justify-content:space-between; color:var(--text-2); font-size:12px; margin-bottom:4px;">
+            <span><i class="fas fa-user" style="color:var(--red);"></i> Abertura (Operador)</span>
             <span>${esc(chamado.data)}</span>
           </div>
-          <div style="color:var(--man-text-primary);"><strong>${esc(chamado.observador)}</strong> - ${esc(chamado.anomalia)}</div>
-          <div style="font-size:12px; color:var(--man-text-secondary); margin-top:2px;">Prioridade: <span style="color:${chamado.prioridade === 'ALTA' ? 'var(--man-red)' : chamado.prioridade === 'MÉDIA' ? 'var(--man-yellow)' : 'var(--man-green)'}; font-weight:600;">${esc(chamado.prioridade)}</span> | Etiqueta: ${esc(chamado.tipoEtiqueta)} | Turno: <strong>${esc(chamado.turno)}</strong></div>
+          <div style="color:var(--text);"><strong>${esc(chamado.observador)}</strong> - ${esc(chamado.anomalia)}</div>
+          <div style="font-size:12px; color:var(--text-2); margin-top:2px;">Prioridade: <span style="color:${chamado.prioridade === 'ALTA' ? 'var(--red)' : chamado.prioridade === 'MÉDIA' ? 'var(--accent)' : 'var(--green)'}; font-weight:600;">${esc(chamado.prioridade)}</span> | Etiqueta: ${esc(chamado.tipoEtiqueta)} | Turno: <strong>${esc(chamado.turno)}</strong></div>
           ${exibirImagem(chamado.fotoOperador, 'Anexo do problema')}
         </div>
 
-        <div style="background:rgba(245,130,31,0.08); border-left:4px solid var(--man-orange); padding:12px; border-radius:6px;">
-          <div style="display:flex; justify-content:space-between; color:var(--man-text-secondary); font-size:12px; margin-bottom:4px;">
-            <span><i class="fas fa-hard-hat" style="color:var(--man-orange);"></i> Execução (Manutenção)</span>
+        <div style="background:var(--accent-dim); border-left:4px solid var(--accent); padding:12px; border-radius:6px;">
+          <div style="display:flex; justify-content:space-between; color:var(--text-2); font-size:12px; margin-bottom:4px;">
+            <span><i class="fas fa-hard-hat" style="color:var(--accent);"></i> Execução (Manutenção)</span>
             <span>${chamado.dataInicio ? esc(chamado.dataInicio) : 'Não iniciado'}</span>
           </div>
-          <div style="color:var(--man-text-primary);"><strong>Responsável:</strong> ${esc(chamado.responsavel || 'Não atribuído')}</div>
-          <div style="font-size:12px; color:var(--man-text-secondary); margin-top:2px;">
+          <div style="color:var(--text);"><strong>Responsável:</strong> ${esc(chamado.responsavel || 'Não atribuído')}</div>
+          <div style="font-size:12px; color:var(--text-2); margin-top:2px;">
             <span><i class="fas fa-hourglass-half"></i> ${formatarTempo(chamado.tempoGasto)}</span>
             <span style="margin-left:12px;">Status: <span class="man-badge ${chamado.situacao === 'Concluido' ? 'man-badge-green' : chamado.situacao === 'Em Manutencao' ? 'man-badge-blue' : 'man-badge-gray'}">${esc(chamado.situacao)}</span></span>
           </div>
-          <div style="font-size:12px; color:var(--man-text-secondary); margin-top:4px;">
+          <div style="font-size:12px; color:var(--text-2); margin-top:4px;">
             <i class="fas fa-tools"></i> ${esc(chamado.rotina || 'Nenhuma rotina registrada')}
           </div>
-          <div style="font-size:12px; color:var(--man-text-secondary); margin-top:4px;">
+          <div style="font-size:12px; color:var(--text-2); margin-top:4px;">
             <strong>Custo Mão de Obra:</strong> R$ ${chamado.custoMaoObra ? chamado.custoMaoObra.toFixed(2) : '0,00'}<br>
-            <strong style="color:var(--man-orange);">Custo Total:</strong> <span style="color:var(--man-orange); font-weight:600;">R$ ${(chamado.custoPecas + chamado.custoMaoObra).toFixed(2)}</span>
+            <strong style="color:var(--accent);">Custo Total:</strong> <span style="color:var(--accent); font-weight:600;">R$ ${(chamado.custoPecas + chamado.custoMaoObra).toFixed(2)}</span>
           </div>
           ${exibirImagem(chamado.fotoTecnico, 'Anexo do serviço')}
         </div>
 
-        <div style="background:rgba(77,141,255,0.08); border-left:4px solid var(--man-blue); padding:12px; border-radius:6px;">
-          <div style="display:flex; justify-content:space-between; color:var(--man-text-secondary); font-size:12px; margin-bottom:4px;">
-            <span><i class="fas fa-user-shield" style="color:var(--man-blue);"></i> Supervisão</span>
+        <div style="background:var(--blue-dim); border-left:4px solid var(--blue); padding:12px; border-radius:6px;">
+          <div style="display:flex; justify-content:space-between; color:var(--text-2); font-size:12px; margin-bottom:4px;">
+            <span><i class="fas fa-user-shield" style="color:var(--blue);"></i> Supervisão</span>
             <span>${chamado.supDataInicio ? esc(chamado.supDataInicio) : 'Não atuado'}</span>
           </div>
-          <div style="font-size:12px; color:var(--man-text-secondary);">
+          <div style="font-size:12px; color:var(--text-2);">
             <strong>Status da Compra:</strong> <span class="man-badge ${chamado.statusCompra === 'Peça recebida' ? 'man-badge-green' : chamado.statusCompra ? 'man-badge-yellow' : 'man-badge-gray'}">${esc(chamado.statusCompra || 'N/A')}</span>
           </div>
-          <div style="font-size:12px; color:var(--man-text-secondary); margin-top:4px;">
+          <div style="font-size:12px; color:var(--text-2); margin-top:4px;">
             <strong>Custo Peças:</strong> R$ ${chamado.custoPecas ? chamado.custoPecas.toFixed(2) : '0,00'}<br>
             <i class="fas fa-truck"></i> ${esc(chamado.fornecedor || 'Sem fornecedor')}
           </div>
-          ${chamado.obsSupervisor ? `<div style="font-size:12px; color:var(--man-text-secondary); margin-top:4px;"><i class="fas fa-sticky-note"></i> ${esc(chamado.obsSupervisor)}</div>` : ''}
+          ${chamado.obsSupervisor ? `<div style="font-size:12px; color:var(--text-2); margin-top:4px;"><i class="fas fa-sticky-note"></i> ${esc(chamado.obsSupervisor)}</div>` : ''}
         </div>
 
-        <div style="background:rgba(46,211,163,0.08); border-left:4px solid var(--man-green); padding:12px; border-radius:6px;">
-          <div style="display:flex; justify-content:space-between; color:var(--man-text-secondary); font-size:12px; margin-bottom:4px;">
-            <span><i class="fas fa-check-circle" style="color:var(--man-green);"></i> Fechamento</span>
+        <div style="background:var(--green-dim); border-left:4px solid var(--green); padding:12px; border-radius:6px;">
+          <div style="display:flex; justify-content:space-between; color:var(--text-2); font-size:12px; margin-bottom:4px;">
+            <span><i class="fas fa-check-circle" style="color:var(--green);"></i> Fechamento</span>
             <span>${chamado.etiquetaFechada ? esc(chamado.dataFim) : 'Em aberto'}</span>
           </div>
-          <div style="color:var(--man-text-primary); font-weight:600;">
-            ${chamado.etiquetaFechada ? '<i class="fas fa-lock" style="color:var(--man-green);"></i> Etiqueta Fechada' : '<i class="fas fa-unlock" style="color:var(--man-red);"></i> Etiqueta Aberta'}
+          <div style="color:var(--text); font-weight:600;">
+            ${chamado.etiquetaFechada ? '<i class="fas fa-lock" style="color:var(--green);"></i> Etiqueta Fechada' : '<i class="fas fa-unlock" style="color:var(--red);"></i> Etiqueta Aberta'}
           </div>
         </div>
       </div>
@@ -1138,6 +1150,133 @@
   }
 
   function fecharModalHistorico() { document.getElementById('man-modalHistorico').style.display = 'none'; }
+
+  // ============================================================
+  // BOARD KANBAN — Chamados Corretivos (ver conversa que motivou a troca
+  // do modelo de tabela única: falta de clareza de quem precisa agir).
+  // ============================================================
+
+  // Em qual coluna do board este chamado cai — SEMPRE derivado do estado
+  // atual (nunca um campo salvo à parte), mesma filosofia de
+  // _construirPassosTrajetoria(). Ordem de checagem importa: um chamado
+  // pode "tecnicamente" estar aguardando peça E já concluído ao mesmo
+  // tempo (dados antigos) — fechado/concluído sempre vence.
+  function _corretivaColuna(m) {
+    if (m.recusaResultado === 'Aceita' || m.etiquetaFechada) return 'concluido';
+    if (m.situacao === 'Concluido') return 'fechamento';
+    if ((m.aguardandoPecas || '') === 'Sim' && m.statusCompra !== 'Peça recebida') return 'peca';
+    if (m.aceito === 'Sim') return 'execucao';
+    return 'aceite';
+  }
+
+  const MAN_COLUNAS_CORRETIVA = [
+    { id: 'aceite', titulo: 'Aguardando Aceite', icone: 'fa-hand-paper' },
+    { id: 'execucao', titulo: 'Em Execução', icone: 'fa-hard-hat' },
+    { id: 'peca', titulo: 'Aguardando Peça', icone: 'fa-boxes' },
+    { id: 'fechamento', titulo: 'Aguardando Fechamento', icone: 'fa-lock-open' },
+    { id: 'concluido', titulo: 'Concluído', icone: 'fa-check-circle' },
+  ];
+
+  // "De quem é a vez" neste chamado, pro perfil ATUALMENTE logado — vira
+  // o rótulo de destaque no cartão (Ideia 1 da conversa: fila "sua vez",
+  // encaixada dentro do board em vez de uma aba separada). Retorna null
+  // quando não há nada pendente de decisão (ex: já em execução normal,
+  // sem pedido de peça, sem estar pronto pra fechar ainda).
+  function _acaoPendenteCard(m) {
+    if (m.etiquetaFechada || m.recusaResultado === 'Aceita') return null;
+    if (m.recusaPendente === 'Sim') {
+      return _podeAceitarPedidoPecaAtual()
+        ? { texto: 'Sua vez: revisar recusa', urgente: true }
+        : { texto: 'Aguardando revisão da recusa', urgente: false };
+    }
+    if (m.aceito !== 'Sim') {
+      return _podeAceitarChamadoAtual()
+        ? { texto: 'Sua vez: aceitar chamado', urgente: true }
+        : { texto: 'Aguardando aceite da Manutenção', urgente: false };
+    }
+    if ((m.aguardandoPecas || '') === 'Sim' && m.pedidoPecaAceito !== 'Sim' && m.statusCompra !== 'Peça recebida') {
+      return _podeAceitarPedidoPecaAtual()
+        ? { texto: 'Sua vez: aceitar pedido de peça', urgente: true }
+        : { texto: 'Aguardando aceite da Supervisão', urgente: false };
+    }
+    if (m.situacao === 'Concluido' && !m.etiquetaFechada) {
+      const podeFechar = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
+      return podeFechar
+        ? { texto: 'Sua vez: fechar etiqueta', urgente: true }
+        : { texto: 'Aguardando fechamento', urgente: false };
+    }
+    return null;
+  }
+
+  function _corPrioridade(p) {
+    return p === 'ALTA' ? 'var(--red)' : p === 'MÉDIA' ? 'var(--accent)' : 'var(--green)';
+  }
+
+  function _renderizarCartaoCorretiva(m) {
+    const acao = _acaoPendenteCard(m);
+    const anomaliaTexto = esc(m.anomalia || 'Sem descrição.');
+    const podeAberturaRow = _podeEditarAberturaChamadoAtual(m);
+    const iconeAbrir = podeAberturaRow ? 'fa-edit' : 'fa-folder-open';
+    const tituloAbrir = podeAberturaRow ? 'Editar' : 'Abrir chamado';
+    const _podeEditarManut = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
+    const deleteIcon = (!m.etiquetaFechada && _podeEditarManut)
+      ? `<i class="fas fa-trash-alt" title="Excluir" onclick="event.stopPropagation(); excluirManutencao('${m.id}')"></i>` : '';
+    const miniTrajetoria = _renderizarTrajetoria(_construirPassosTrajetoria(m));
+    return `<div class="man-kanban-card" onclick="editarManutencao('${m.id}')"
+        onmouseenter="_mostrarPreviewTrajetoria(event,'${m.id}')" onmousemove="_mostrarPreviewTrajetoria(event,'${m.id}')" onmouseleave="_esconderPreviewTrajetoria()"
+        title="Segure Ctrl + passe o mouse pra pré-visualizar a trajetória">
+      <div class="man-kanban-card-head">
+        <span><i class="fas fa-hashtag"></i> ${esc(m.id)}</span>
+        <span class="dot" style="background:${_corPrioridade(m.prioridade || 'BAIXA')}" title="Prioridade ${esc(m.prioridade || '-')}"></span>
+      </div>
+      <div class="man-kanban-card-maquina">${esc(m.maquina || '-')}</div>
+      <div class="man-kanban-card-setor">${esc(m.setor || '-')} · ${esc(m.turno || '-')}</div>
+      <div class="man-kanban-card-anomalia">${anomaliaTexto}</div>
+      ${acao ? `<div class="man-kanban-card-cta ${acao.urgente ? 'urgente' : 'aguardando'}">${esc(acao.texto)}</div>` : ''}
+      <div class="man-kanban-card-footer">
+        ${miniTrajetoria}
+        <span class="man-kanban-card-acoes" onclick="event.stopPropagation();">
+          <i class="fas fa-eye" title="Ver trajetória completa" onclick="abrirHistorico('${m.id}')"></i>
+          <i class="fas ${iconeAbrir}" title="${tituloAbrir}" onclick="editarManutencao('${m.id}')"></i>
+          ${deleteIcon}
+        </span>
+      </div>
+    </div>`;
+  }
+
+  // Só uma fase do acordeão aberta por vez (mesma sensação de um <select>
+  // nativo — ver conversa). Guardado fora da função de render pra
+  // sobreviver a um re-render (ex: depois de salvar um chamado, a fase
+  // que a pessoa tinha aberto continua aberta).
+  let _manFaseAberta = null;
+
+  function _manToggleFase(faseId) {
+    _manFaseAberta = (_manFaseAberta === faseId) ? null : faseId;
+    renderCorretiva();
+  }
+
+  // Badge de Status/Supervisão da tabela de consulta — mesma lógica visual
+  // que a tabela original sempre teve (ver histórico do arquivo).
+  function _badgesLinhaCorretiva(m) {
+    const situacao = m.situacao || 'Aguardando';
+    const sc = situacao === 'Concluido' ? 'man-badge-green'
+      : situacao === 'Em Manutencao' ? 'man-badge-blue'
+      : situacao === 'Recusado' ? 'man-badge-red'
+      : 'man-badge-gray';
+    let supClass = 'man-badge-green', supText = '✅ OK';
+    if ((m.aguardandoPecas || '') === 'Sim') {
+      if (m.pedidoPecaAceito !== 'Sim') { supText = 'Pedido de peça (aguardando aceite)'; supClass = 'man-badge-yellow'; }
+      else if (m.statusCompra) {
+        supText = m.statusCompra;
+        if (m.statusCompra === 'Em Análise') supClass = 'man-badge-yellow';
+        else if (m.statusCompra === 'Cotação em andamento') supClass = 'man-badge-orange';
+        else if (m.statusCompra === 'Pedido efetuado') supClass = 'man-badge-blue';
+        else if (m.statusCompra === 'Peça em transporte') supClass = 'man-badge-purple';
+        else if (m.statusCompra === 'Peça recebida') supClass = 'man-badge-green';
+      } else { supText = 'Sob Supervisão'; supClass = 'man-badge-orange'; }
+    }
+    return { situacao, sc, supClass, supText };
+  }
 
   function renderCorretiva() {
     try {
@@ -1158,120 +1297,193 @@
       if (filtroStatus) dados = dados.filter(m => (m.situacao || '') === filtroStatus);
       if (filtroEtiqueta) dados = dados.filter(m => (m.tipoEtiqueta || '') === filtroEtiqueta);
 
-      const total = dados.length;
-      const totalPages = Math.ceil(total / ITEMS_PER_PAGE) || 1;
-      if (pageCorretiva >= totalPages) pageCorretiva = totalPages - 1;
-      if (pageCorretiva < 0) pageCorretiva = 0;
+      // ── ACORDEÃO (topo) ──────────────────────────────────────────
+      const acc = document.getElementById('man-corretivaAccordion');
+      if (acc) {
+        const porFase = {};
+        MAN_COLUNAS_CORRETIVA.forEach(c => { porFase[c.id] = []; });
+        dados.forEach(m => { const f = _corretivaColuna(m); (porFase[f] || porFase.aceite).push(m); });
 
-      const start = pageCorretiva * ITEMS_PER_PAGE;
-      const pageData = dados.slice(start, start + ITEMS_PER_PAGE);
+        acc.innerHTML = MAN_COLUNAS_CORRETIVA.map(fase => {
+          const itens = porFase[fase.id] || [];
+          const pendentes = itens.filter(m => !!_acaoPendenteCard(m)?.urgente).length;
+          const aberta = _manFaseAberta === fase.id;
+          const corpo = itens.length
+            ? itens.map(_renderizarCartaoCorretiva).join('')
+            : `<div class="man-accordion-fase-vazia">Nenhum chamado nesta fase.</div>`;
+          return `<div class="man-accordion-fase ${aberta ? 'aberta' : ''}" data-fase="${fase.id}">
+            <button type="button" class="man-accordion-fase-head" aria-expanded="${aberta}" onclick="_manToggleFase('${fase.id}')">
+              <i class="fas ${fase.icone}"></i> ${fase.titulo}
+              <span class="count ${pendentes > 0 ? 'tem-pendencia' : ''}">${pendentes > 0 ? pendentes + ' pendente' + (pendentes > 1 ? 's' : '') + ' · ' : ''}${itens.length} no total</span>
+              <i class="fas fa-chevron-down chevron"></i>
+            </button>
+            <div class="man-accordion-fase-corpo">${aberta ? corpo : ''}</div>
+          </div>`;
+        }).join('');
+      }
 
+      // ── TABELA DE CONSULTA (rodapé) — só visualização, sem editar.
+      // Clique na linha abre a trajetória (abrirHistorico), não o
+      // formulário/assistente — quem quer agir usa o acordeão acima.
       const tbody = document.getElementById('man-corretivaTableBody');
-      if(pageData.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--man-text-secondary);">Nenhum chamado encontrado.</td></tr>`;
-      } else {
-        tbody.innerHTML = pageData.map(m => {
-          const situacao = m.situacao || 'Aguardando';
-          const sc = situacao === 'Concluido' ? 'man-badge-green'
-            : situacao === 'Em Manutencao' ? 'man-badge-blue'
-            : situacao === 'Recusado' ? 'man-badge-red'
-            : 'man-badge-gray';
+      if (tbody) {
+        tbody.innerHTML = dados.length ? dados.map(m => {
+          const { situacao, sc, supClass, supText } = _badgesLinhaCorretiva(m);
           const prioridade = m.prioridade || 'BAIXA';
-          const pc = prioridade === 'ALTA' ? 'var(--man-red)' : prioridade === 'MÉDIA' ? 'var(--man-yellow)' : 'var(--man-green)';
           const tipo = m.tipoManutencao || '-';
-          const tpc = tipo === 'Elétrica' ? 'var(--man-yellow)' : 'var(--man-blue)';
+          const tpc = tipo === 'Elétrica' ? 'var(--accent)' : 'var(--blue)';
           const etiqueta = m.tipoEtiqueta || 'Azul';
-          const etiquetaCor = etiqueta === 'Azul' ? 'var(--man-blue)' : 'var(--man-red)';
+          const etiquetaCor = etiqueta === 'Azul' ? 'var(--blue)' : 'var(--red)';
           const etiquetaEmoji = etiqueta === 'Azul' ? '🔵' : '🔴';
-          let supClass = 'man-badge-green'; 
-          let supText = '✅ OK';
-          if ((m.aguardandoPecas || '') === 'Sim') {
-              if (m.pedidoPecaAceito !== 'Sim') {
-                  // Ainda não passou pelo aceite de Supervisão/Encarregado/
-                  // Admin — os campos de Acompanhamento nem aparecem pra
-                  // preencher status_compra ainda (ver conversa que
-                  // motivou o fluxo de aceite).
-                  supText = 'Pedido de peça (aguardando aceite)';
-                  supClass = 'man-badge-yellow';
-              } else if (m.statusCompra) {
-                  supText = m.statusCompra;
-                  if (m.statusCompra === 'Em Análise') supClass = 'man-badge-yellow';
-                  else if (m.statusCompra === 'Cotação em andamento') supClass = 'man-badge-orange';
-                  else if (m.statusCompra === 'Pedido efetuado') supClass = 'man-badge-blue';
-                  else if (m.statusCompra === 'Peça em transporte') supClass = 'man-badge-purple';
-                  else if (m.statusCompra === 'Peça recebida') supClass = 'man-badge-green';
-              } else {
-                  supText = 'Sob Supervisão';
-                  supClass = 'man-badge-orange';
-              }
-          }
-          const fechadoIcon = m.etiquetaFechada ? '<i class="fas fa-lock"></i>' : '';
-          // Ícone que indica "ainda não foi aceito" (ou "tem recusa
-          // pendente de revisão", mais urgente) — visível pra todo mundo,
-          // ao lado do número do chamado (ver conversa que motivou o
-          // fluxo de aceite/recusa: ajuda a bater o olho na lista).
-          const aceiteIcon = m.etiquetaFechada ? ''
-            : m.recusaPendente === 'Sim'
-              ? '<i class="fas fa-exclamation-triangle" title="Recusa pendente de revisão" style="color:var(--man-red);"></i>'
-              : m.aceito !== 'Sim'
-                ? '<i class="fas fa-hourglass-half" title="Aguardando aceite" style="color:var(--man-yellow);"></i>'
-                : '';
-          const _podeEditarManut = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
-          // Antes só aparecia com situacao === 'Aguardando' — um chamado que
-          // já estava "Em Manutencao" (alguém começou a mexer, mas ainda não
-          // fechou) ficava sem jeito de excluir na tela, mesmo pra quem tem
-          // permissão total de 'manutencao' (ex: Administrador). O backend
-          // (POST /manutencao/excluir-corretiva) nunca teve essa trava por
-          // situação — só verifica a permissão de área — então a regra era
-          // só uma limitação visual, sem motivo de negócio por trás. Agora
-          // qualquer chamado ainda ABERTO (não fechado) pode ser excluído.
-          const deleteIcon = (!m.etiquetaFechada && _podeEditarManut)
-            ? `<span style="cursor:pointer;" onclick="excluirManutencao('${m.id}')"><i class="fas fa-trash-alt"></i></span>` 
-            : '';
-          // Um único ícone de "abrir" o chamado, pra todo mundo — quem
-          // pode editar Abertura/Detalhes (quem abriu, Admin, Supervisão,
-          // Encarregado) vê um lápis; quem só pode ver o relatório e
-          // aceitar (ex: perfil Manutenção, se não foi quem abriu) vê uma
-          // pasta — mas os dois chamam a MESMA função, que decide o que
-          // fica editável (ver editarManutencao()). Pedido do usuário: sem
-          // botão de "editar" pra quem não tem esse direito.
-          const podeAberturaRow = _podeEditarAberturaChamadoAtual(m);
-          const iconeAbrir = podeAberturaRow ? 'fa-edit' : 'fa-folder-open';
-          const tituloAbrir = podeAberturaRow ? 'Editar' : 'Abrir chamado';
-
-          return `<tr style="cursor:pointer;" onclick="abrirHistorico('${m.id}')" onmouseenter="_mostrarPreviewTrajetoria(event,'${m.id}')" onmousemove="_mostrarPreviewTrajetoria(event,'${m.id}')" onmouseleave="_esconderPreviewTrajetoria()" title="Ver trajetória do chamado (segure Ctrl + passe o mouse pra pré-visualizar aqui mesmo)">
-            <td data-label="Nº"><strong>${esc(m.id)}</strong> ${fechadoIcon} ${aceiteIcon}</td>
+          const fechadoIcon = m.etiquetaFechada ? '<i class="fas fa-lock" title="Etiqueta fechada"></i>' : '';
+          return `<tr style="cursor:pointer;" onclick="abrirHistorico('${m.id}')" title="Ver trajetória do chamado">
+            <td data-label="Nº"><strong>${esc(m.id)}</strong> ${fechadoIcon}</td>
             <td data-label="Máquina">${esc(m.maquina || '-')}</td>
             <td data-label="Setor">${esc(m.setor || '-')}</td>
             <td data-label="Turno"><strong>${esc(m.turno || '-')}</strong></td>
             <td data-label="Observador">${esc(m.observador || '-')}</td>
             <td data-label="Tipo"><span style="color:${tpc};">${esc(tipo)}</span></td>
-            <td data-label="Prioridade"><span style="color:${pc};">${esc(prioridade)}</span></td>
+            <td data-label="Prioridade"><span style="color:${_corPrioridade(prioridade)};">${esc(prioridade)}</span></td>
             <td data-label="Etiqueta"><span style="color:${etiquetaCor}; font-weight:600;">${etiquetaEmoji} ${esc(etiqueta)}</span></td>
             <td data-label="Status"><span class="man-badge ${sc}">${esc(situacao)}</span></td>
             <td data-label="Supervisão"><span class="man-badge ${supClass}">${esc(supText)}</span></td>
-            <td data-label="Ações" style="justify-content:flex-end;" onclick="event.stopPropagation();"><div class="man-actions-table"><span style="cursor:pointer;" title="${tituloAbrir}" onclick="editarManutencao('${m.id}')"><i class="fas ${iconeAbrir}"></i></span>${deleteIcon}</div></td>
           </tr>`;
-        }).join('');
+        }).join('') : `<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--text-2);">Nenhum chamado encontrado.</td></tr>`;
       }
-
-      const pagDiv = document.getElementById('man-pagCorretiva');
-      pagDiv.innerHTML = `
-        <button onclick="changePageCorretiva(-1)" ${pageCorretiva === 0 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>
-        <span>${pageCorretiva + 1} / ${totalPages}</span>
-        <button onclick="changePageCorretiva(1)" ${pageCorretiva === totalPages - 1 ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>
-      `;
     } catch (error) {
-      console.error("Erro ao renderizar a tabela corretiva:", error);
-      const tbody = document.getElementById('man-corretivaTableBody');
-      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--man-red);">Erro ao carregar a lista.</td></tr>`;
+      console.error("Erro ao renderizar a área de corretiva:", error);
+      const acc = document.getElementById('man-corretivaAccordion');
+      if (acc) acc.innerHTML = `<div style="color:var(--red); padding:20px;">Erro ao carregar os chamados.</div>`;
     }
   }
 
-  function changePageCorretiva(delta) {
-    pageCorretiva += delta;
-    renderCorretiva();
+  // ============================================================
+  // ASSISTENTE POR ETAPAS — formulário do chamado (ver conversa que
+  // motivou a troca: formulário único com tudo visível ao mesmo tempo).
+  // Cada etapa reaproveita o MESMO HTML/campos/lógica de sempre — só
+  // muda qual zona fica visível (_manAplicarStepAtual) e a navegação
+  // entre elas (_manIrParaStep). "Aceite" não é uma etapa própria: mora
+  // dentro de "Execução", que já trazia embutida a caixa de Aceitar/
+  // Recusar (ver _atualizarGateExecucao) — dividir isso em mais uma
+  // etapa só adicionaria um clique sem separar responsabilidades de
+  // verdade (quem aceita é o mesmo público que depois executa).
+  // ============================================================
+  let _manStepAtual = 'abertura';
+
+  const MAN_ZONAS_ETAPA = {
+    abertura: 'man-zonaAbertura',
+    execucao: 'man-techSection',
+    peca: 'man-supervisorSection',
+    fechamento: 'man-zonaFechamento',
+  };
+
+  function _manIrParaStep(step) {
+    if (!MAN_ZONAS_ETAPA[step]) return;
+    const pill = document.querySelector(`.man-wizard-step[data-step="${step}"]`);
+    if (pill && pill.disabled) return; // etapa ainda não disponível — ignora clique
+    _manStepAtual = step;
+    _manAplicarStepAtual();
   }
+
+  // Decide em qual etapa o assistente deve ABRIR — sempre a etapa onde a
+  // próxima ação relevante está (mesmo raciocínio de _acaoPendenteCard(),
+  // agora aplicado dentro do próprio formulário). Chamado novo (m null)
+  // sempre abre em "Abertura".
+  function _manDefinirStepInicial(m) {
+    if (!m) { _manStepAtual = 'abertura'; return; }
+    if (m.recusaResultado === 'Aceita') { _manStepAtual = 'execucao'; return; } // mostra o desfecho da recusa
+    if (m.recusaPendente === 'Sim') { _manStepAtual = 'execucao'; return; }
+    if (m.aceito !== 'Sim') { _manStepAtual = 'execucao'; return; }
+    if (m.situacao === 'Concluido' && !m.etiquetaFechada) { _manStepAtual = 'fechamento'; return; }
+    if ((m.aguardandoPecas || '') === 'Sim' && m.pedidoPecaAceito !== 'Sim') { _manStepAtual = 'peca'; return; }
+    _manStepAtual = 'execucao';
+  }
+
+  // Mostra só a zona da etapa atual, esconde as outras; habilita/desabilita
+  // as pílulas de navegação conforme faz sentido pro chamado atual; marca
+  // com check (.feito) as etapas já concluídas, pra dar noção de
+  // progresso sem precisar abrir cada uma. Chamada sempre que o estado
+  // muda (novoChamado, editarManutencao, aceitar/recusar, etc.) — única
+  // fonte de verdade de "o que está visível agora".
+  // "Salvar Chamado" só faz sentido — e só aparece — na etapa que a
+  // pessoa está vendo AGORA, e só se ela tem o quê editar ali (ver
+  // conversa: "os botões ficam aparecendo o tempo todo" — antes, a
+  // visibilidade era calculada 1x ao abrir o chamado, usando "tem algo
+  // editável em QUALQUER seção", e nunca era recalculada ao trocar de
+  // etapa — então o botão continuava visível mesmo em etapas onde não
+  // havia nada pra salvar ali). "Fechamento" nunca mostra Salvar: quem
+  // fecha usa o botão próprio dessa etapa (abrirModalFechamento).
+  function _manPodeSalvarNaEtapaAtual() {
+    const m = _chamadoEmEdicao;
+    if (!m) return _manStepAtual === 'abertura'; // chamado novo: só "Abertura" existe
+    switch (_manStepAtual) {
+      case 'abertura': return _podeEditarAberturaChamadoAtual(m);
+      case 'execucao': return m.aceito === 'Sim' && _podeAceitarChamadoAtual();
+      case 'peca': return m.pedidoPecaAceito === 'Sim' && _podeAceitarPedidoPecaAtual();
+      default: return false; // 'fechamento'
+    }
+  }
+
+  function _manAplicarStepAtual() {
+    const m = _chamadoEmEdicao;
+    Object.entries(MAN_ZONAS_ETAPA).forEach(([step, elId]) => {
+      const el = document.getElementById(elId);
+      if (el) el.style.display = (step === _manStepAtual) ? 'block' : 'none';
+    });
+    if (_manStepAtual === 'fechamento') _manRenderizarFechamento(m);
+
+    const btnSalvar = document.getElementById('man-btnSalvarManutencao');
+    if (btnSalvar) btnSalvar.style.display = _manPodeSalvarNaEtapaAtual() ? 'inline-block' : 'none';
+
+    const temAguardandoPecas = document.getElementById('man-manAguardandoPecas')?.value === 'Sim';
+    const pillPeca = document.getElementById('man-wizardStepPeca');
+    if (pillPeca) pillPeca.style.display = (m && temAguardandoPecas) ? '' : 'none';
+
+    document.querySelectorAll('.man-wizard-step').forEach(btn => {
+      const step = btn.dataset.step;
+      const disponivel = !!m || step === 'abertura'; // chamado novo: só "Abertura" navegável
+      btn.disabled = !disponivel || (step === 'peca' && !temAguardandoPecas);
+      btn.classList.toggle('active', step === _manStepAtual);
+      const feito = m && (
+        (step === 'abertura') ||
+        (step === 'execucao' && m.aceito === 'Sim') ||
+        (step === 'peca' && m.pedidoPecaAceito === 'Sim') ||
+        (step === 'fechamento' && !!m.etiquetaFechada)
+      );
+      btn.classList.toggle('feito', !!feito);
+    });
+  }
+
+  // Conteúdo da 4ª etapa (Fechamento) — 3 estados possíveis: ainda não dá
+  // pra fechar (situação diferente de Concluído), pronto pra fechar
+  // (resumo + botão, reaproveita o MESMO modal de confirmação de sempre —
+  // abrirModalFechamento/confirmarFechamento — só mudou de onde o botão é
+  // acionado), ou já fechado (confirmação final, read-only).
+  function _manRenderizarFechamento(m) {
+    const alvo = document.getElementById('man-fechamentoConteudo');
+    if (!alvo) return;
+    if (!m) {
+      alvo.innerHTML = `<div class="man-fechamento-aviso"><i class="fas fa-info-circle"></i> Salve o chamado antes de fechá-lo.</div>`;
+      return;
+    }
+    if (m.etiquetaFechada) {
+      alvo.innerHTML = `<div class="man-fechamento-ok"><i class="fas fa-lock"></i> Etiqueta fechada em ${esc(m.dataFim || '')}. Este chamado não pode mais ser editado.</div>`;
+      return;
+    }
+    if (m.situacao !== 'Concluido') {
+      alvo.innerHTML = `<div class="man-fechamento-aviso"><i class="fas fa-info-circle"></i> Marque a Situação como "Concluído" na etapa <a href="#" onclick="_manIrParaStep('execucao'); return false;" style="color:var(--accent);">Execução</a> antes de poder fechar este chamado.</div>`;
+      return;
+    }
+    const _podeFecharChamado = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
+    alvo.innerHTML = `
+      <div class="man-fechamento-resumo">
+        <p style="color:var(--text-2); font-size:13px; margin-bottom:12px;"><i class="fas fa-check-circle" style="color:var(--green);"></i> Situação Concluído — pronto pra fechar a etiqueta. Confira o resumo antes de confirmar.</p>
+        ${_podeFecharChamado
+          ? `<button type="button" class="man-btn man-btn-warning" onclick="abrirModalFechamento()"><i class="fas fa-lock"></i> Fechar Chamado</button>`
+          : `<div class="man-fechamento-aviso"><i class="fas fa-lock"></i> Seu perfil não pode fechar chamados de manutenção.</div>`}
+      </div>`;
+  }
+
 
   function editarManutencao(id) {
     try {
@@ -1302,19 +1514,28 @@
       if (execEl) execEl.value = m.tipoExecucao || 'Interno';
       toggleEmpresaExterna();
       document.getElementById('man-manEmpresaExterna').value = m.empresaExterna || '';
-      document.getElementById('man-manResponsavel').value = m.responsavel || '';
+      // Responsável Técnico — preenche sozinho com quem ACEITOU o chamado
+      // (m.aceitoPor, gravado no servidor no momento do aceite — ver
+      // nomeDeQuemAceita(), lib/rotas/manutencao.js — não dá pra
+      // falsificar mandando outro nome pelo corpo da requisição). Só
+      // como PONTO DE PARTIDA: se a pessoa já tiver digitado um nome
+      // diferente aqui (ex: quem aceitou não foi quem executou de
+      // verdade) e salvo, m.responsavel deixa de estar vazio e o campo
+      // passa a carregar ESSE valor — nunca sobrescreve o que já foi
+      // digitado e salvo.
+      document.getElementById('man-manResponsavel').value = m.responsavel || (m.aceito === 'Sim' ? (m.aceitoPor || '') : '');
       
       if (m.fotoOperador) {
           const preview = document.getElementById('man-fotoOperadorPreview');
           preview.style.display = 'block';
           if (m.fotoOperador.startsWith('pdfgz:') || m.fotoOperador.startsWith('data:application/pdf')) {
-              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--man-orange); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--man-red); font-size:24px;"></i><span style="font-size:12px;">PDF anexado</span></div>`;
+              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--accent); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--red); font-size:24px;"></i><span style="font-size:12px;">PDF anexado</span></div>`;
               preview.dataset.base64 = m.fotoOperador;
           } else if (m.fotoOperador.startsWith('PDF:')) {
-              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--man-orange); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--man-red); font-size:24px;"></i><span style="font-size:12px;">${esc(m.fotoOperador.replace('PDF: ', ''))}</span></div>`;
+              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--accent); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--red); font-size:24px;"></i><span style="font-size:12px;">${esc(m.fotoOperador.replace('PDF: ', ''))}</span></div>`;
               preview.dataset.filename = m.fotoOperador.replace('PDF: ', '');
           } else {
-              preview.innerHTML = `<img src="${m.fotoOperador}" style="max-width:60px; max-height:60px; border-radius:4px; border:1px solid var(--man-border-color); object-fit:cover;">`;
+              preview.innerHTML = `<img src="${m.fotoOperador}" style="max-width:60px; max-height:60px; border-radius:4px; border:1px solid var(--border); object-fit:cover;">`;
           }
           document.getElementById('man-btnRemoverFotoOp').style.display = 'inline';
       }
@@ -1323,13 +1544,13 @@
           const preview = document.getElementById('man-fotoTecnicoPreview');
           preview.style.display = 'block';
           if (m.fotoTecnico.startsWith('pdfgz:') || m.fotoTecnico.startsWith('data:application/pdf')) {
-              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--man-orange); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--man-red); font-size:24px;"></i><span style="font-size:12px;">PDF anexado</span></div>`;
+              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--accent); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--red); font-size:24px;"></i><span style="font-size:12px;">PDF anexado</span></div>`;
               preview.dataset.base64 = m.fotoTecnico;
           } else if (m.fotoTecnico.startsWith('PDF:')) {
-              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--man-orange); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--man-red); font-size:24px;"></i><span style="font-size:12px;">${esc(m.fotoTecnico.replace('PDF: ', ''))}</span></div>`;
+              preview.innerHTML = `<div style="display:flex; align-items:center; gap:8px; padding:4px 12px; border:1px solid var(--accent); border-radius:4px;"><i class="fas fa-file-pdf" style="color:var(--red); font-size:24px;"></i><span style="font-size:12px;">${esc(m.fotoTecnico.replace('PDF: ', ''))}</span></div>`;
               preview.dataset.filename = m.fotoTecnico.replace('PDF: ', '');
           } else {
-              preview.innerHTML = `<img src="${m.fotoTecnico}" style="max-width:60px; max-height:60px; border-radius:4px; border:1px solid var(--man-border-color); object-fit:cover;">`;
+              preview.innerHTML = `<img src="${m.fotoTecnico}" style="max-width:60px; max-height:60px; border-radius:4px; border:1px solid var(--border); object-fit:cover;">`;
           }
           document.getElementById('man-btnRemoverFotoTec').style.display = 'inline';
       }
@@ -1341,11 +1562,10 @@
       document.querySelectorAll('.man-tag-anomalia').forEach(el => el.classList.toggle('active', tiposSelecionados.includes(el.dataset.type)));
       _setSecaoAberturaDetalhesEditavel(podeAbertura);
 
-      // Seção 3 (Execução) — sempre visível a partir daqui (chamado já
-      // existe); _atualizarGateExecucao() decide, com base em m.aceito,
-      // se mostra a caixa "Aceitar Chamado" ou os campos de verdade.
-      const tech = document.getElementById('man-techSection');
-      if (tech) { tech.classList.add('open'); tech.style.display = 'block'; }
+      // Seção 3 (Execução) — _atualizarGateExecucao() decide, com base em
+      // m.aceito, se mostra a caixa "Aceitar Chamado" ou os campos de
+      // verdade; a VISIBILIDADE da seção em si (esta etapa está na tela
+      // agora ou não) é decidida por _manAplicarStepAtual(), mais abaixo.
       document.getElementById('man-manDataInicio').value = m.dataInicio || '';
       document.getElementById('man-manHoraInicio').value = m.horaInicio || '';
       document.getElementById('man-manDataFim').value = m.dataFim || '';
@@ -1360,14 +1580,12 @@
       document.getElementById('man-manCustoMaoObra').value = m.custoMaoObra || '';
       _atualizarGateExecucao();
 
-      // Seção 4 (Acompanhamento) — mesma ideia: mostra a seção se tiver
-      // pedido de peça (ou custo já lançado, pra não esconder dado
-      // histórico), e _atualizarGateAcompanhamento() decide dentro dela
-      // se mostra a caixa "Aceitar Pedido de Peça" ou os campos de
-      // verdade, com base em m.pedidoPecaAceito.
+      // Seção 4 (Acompanhamento/"Peça") — carrega os dados se houver
+      // pedido de peça (ou custo já lançado, pra não perder dado
+      // histórico); a VISIBILIDADE de fato é decidida por
+      // _manAplicarStepAtual(), mais abaixo (a pílula "Peça" só aparece
+      // habilitada quando isso se aplica).
       if (m.aguardandoPecas === 'Sim' || (m.custoPecas && m.custoPecas > 0)) {
-          const sup = document.getElementById('man-supervisorSection');
-          if (sup) sup.style.display = 'block';
           document.getElementById('man-supDataInicio').value = m.supDataInicio || '';
           document.getElementById('man-supHoraInicio').value = m.supHoraInicio || '';
           document.getElementById('man-supDataFim').value = m.supDataFim || '';
@@ -1377,12 +1595,15 @@
           document.getElementById('man-manPrevisaoChegada').value = m.previsaoChegada || '';
           document.getElementById('man-manFornecedor').value = m.fornecedor || '';
           document.getElementById('man-manCustoPecas').value = m.custoPecas || '';
-          document.getElementById('man-manRespSupervisor').value = m.respSupervisor || '';
+          // Responsável pela Análise — mesma lógica do Responsável
+          // Técnico, acima: preenche sozinho com quem ACEITOU o pedido
+          // de peça (m.pedidoPecaAceitoPor, gravado no servidor), só
+          // como ponto de partida — se alguém já digitou e salvou outro
+          // nome aqui, m.respSupervisor deixa de estar vazio e passa a
+          // valer esse.
+          document.getElementById('man-manRespSupervisor').value = m.respSupervisor || (m.pedidoPecaAceito === 'Sim' ? (m.pedidoPecaAceitoPor || '') : '');
           document.getElementById('man-manObsSupervisor').value = m.obsSupervisor || '';
           _atualizarGateAcompanhamento();
-      } else {
-          const sup = document.getElementById('man-supervisorSection');
-          if (sup) sup.style.display = 'none';
       }
 
       // Info de quem/quando aceitou (chamado e, se aplicável, pedido de
@@ -1399,18 +1620,8 @@
         aceiteInfo.textContent = partes.join(' · ');
       }
 
-      // Botão "Salvar Chamado" só aparece pra quem tem ALGO editável
-      // nesta tela — Abertura/Detalhes, OU Execução (se já aceito), OU
-      // Acompanhamento (se pedido de peça já aceito). Puro espectador
-      // (ex: perfil sem nenhum desses acessos, olhando um chamado que
-      // não abriu) não vê botão de salvar nenhum.
-      const podeExecucao = m.aceito === 'Sim' && _podeAceitarChamadoAtual();
-      const podeAcompanhamento = m.pedidoPecaAceito === 'Sim' && _podeAceitarPedidoPecaAtual();
-      const btnSalvar = document.getElementById('man-btnSalvarManutencao');
-      if (btnSalvar) btnSalvar.style.display = (podeAbertura || podeExecucao || podeAcompanhamento) ? 'inline-block' : 'none';
-
-      const _podeFecharChamado = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
-      document.getElementById('man-btnFecharEtiqueta').style.display = (m.situacao === 'Concluido' && !m.etiquetaFechada && _podeFecharChamado) ? 'inline-block' : 'none';
+      _manDefinirStepInicial(m);
+      _manAplicarStepAtual();
       if (card) card.scrollIntoView({ behavior: 'smooth' });
     } catch (error) {
       toast('Erro ao carregar dados.', 'error');
@@ -1499,10 +1710,10 @@
 
     if(conflito && msg) {
       const horarioSugerido = calcularProximoHorarioDisponivel(data, hora, setor, maquina);
-      msg.innerHTML = `<i class="fas fa-times-circle" style="color:var(--man-red);"></i> <span style="color:var(--man-red);">Sugestão ocupada!</span> Próximo horário disponível: <strong>${data} às ${horarioSugerido}</strong>.`;
+      msg.innerHTML = `<i class="fas fa-times-circle" style="color:var(--red);"></i> <span style="color:var(--red);">Sugestão ocupada!</span> Próximo horário disponível: <strong>${data} às ${horarioSugerido}</strong>.`;
       return false;
     } else if (msg) { 
-      msg.innerHTML = '<i class="fas fa-check-circle" style="color:var(--man-green);"></i> <span style="color:var(--man-green);">Sugestão disponível!</span>'; 
+      msg.innerHTML = '<i class="fas fa-check-circle" style="color:var(--green);"></i> <span style="color:var(--green);">Sugestão disponível!</span>'; 
       return true; 
     }
     return true;
@@ -1590,7 +1801,7 @@
     let htmlPlanejamento = '';
     if (a.status === 'Aprovado' && a.dataInicioEstimado) {
         htmlPlanejamento = `
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; color:var(--man-text-secondary); margin-top:4px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; color:var(--text-2); margin-top:4px;">
                 <span><strong>Início Previsto:</strong> ${esc(a.dataInicioEstimado)} ${esc(a.horaInicioEstimado)}</span>
                 <span><strong>Fim Previsto:</strong> ${esc(a.dataFimEstimado)} ${esc(a.horaFimEstimado)}</span>
                 <span><strong>Responsável pela Aprovação:</strong> ${esc(a.justificativa ? a.justificativa.split('Aprovado por ')[1]?.split('.')[0] || 'Não informado' : 'Não informado')}</span>
@@ -1603,21 +1814,21 @@
     if (a.execucao || a.status === 'Em Execucao' || a.status === 'Concluido' || a.status === 'Nao Executado') {
         const exec = a.execucao || {};
         const tempoGasto = exec.tempoGasto ? formatarTempo(exec.tempoGasto) : 'Não registrado';
-        const motivoNao = exec.motivoNaoExecutado ? `<div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;"><strong>Motivo da não execução:</strong> ${esc(exec.motivoNaoExecutado)}</div>` : '';
-        const observacoesExec = exec.observacoes ? `<div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;"><strong>Observações da execução:</strong> ${esc(exec.observacoes)}</div>` : '';
+        const motivoNao = exec.motivoNaoExecutado ? `<div style="font-size:13px; color:var(--text-2); margin-top:4px;"><strong>Motivo da não execução:</strong> ${esc(exec.motivoNaoExecutado)}</div>` : '';
+        const observacoesExec = exec.observacoes ? `<div style="font-size:13px; color:var(--text-2); margin-top:4px;"><strong>Observações da execução:</strong> ${esc(exec.observacoes)}</div>` : '';
 
         htmlExecucao = `
-            <div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;">
+            <div style="font-size:13px; color:var(--text-2); margin-top:4px;">
                 <strong>Status da Execução:</strong> <span class="man-badge ${statusClass}">${esc(a.status)}</span>
             </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; color:var(--man-text-secondary); margin-top:4px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; color:var(--text-2); margin-top:4px;">
                 <span><strong>Início Real:</strong> ${a.execucaoDataInicio ? esc(a.execucaoDataInicio) + ' ' + esc(a.execucaoHoraInicio) : 'Não iniciado'}</span>
                 <span><strong>Fim Real:</strong> ${exec.dataFim ? esc(exec.dataFim) + ' ' + esc(exec.horaFim) : 'Não finalizado'}</span>
                 <span><strong>Tempo Gasto:</strong> ${tempoGasto}</span>
                 <span><strong>Responsável pela Execução:</strong> ${esc(exec.tecnicoResponsavel || 'Não atribuído')}</span>
                 <span><strong>Tipo de Execução:</strong> ${esc(exec.tipoExecucao || 'N/A')}</span>
             </div>
-            ${exec.tipoExecucao === 'Externo' ? `<div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;"><strong>Empresa Externa:</strong> ${esc(exec.empresaExterna)}</div>` : ''}
+            ${exec.tipoExecucao === 'Externo' ? `<div style="font-size:13px; color:var(--text-2); margin-top:4px;"><strong>Empresa Externa:</strong> ${esc(exec.empresaExterna)}</div>` : ''}
             ${motivoNao}
             ${observacoesExec}
         `;
@@ -1626,40 +1837,40 @@
     const body = document.getElementById('man-detalhesProgramadaBody');
     if (body) {
         body.innerHTML = `
-            <div style="margin-bottom:16px; border-bottom:1px solid var(--man-border-color); padding-bottom:12px;">
-                <h3 style="color:var(--man-orange); margin-bottom:6px;"><i class="fas fa-calendar-alt"></i> Solicitação #${esc(a.id)}</h3>
-                <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--man-text-secondary);">
+            <div style="margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+                <h3 style="color:var(--accent); margin-bottom:6px;"><i class="fas fa-calendar-alt"></i> Solicitação #${esc(a.id)}</h3>
+                <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-2);">
                     <span><strong>Solicitante:</strong> ${esc(a.solicitante)}</span>
                     <span><strong>Data Programada:</strong> ${esc(a.data)}</span>
                 </div>
             </div>
 
-            <div style="margin-bottom:16px; border-bottom:1px solid var(--man-border-color); padding-bottom:12px;">
-                <h4 style="color:var(--man-red); margin-bottom:4px;"><i class="fas fa-file-alt"></i> 1. Dados da Solicitação</h4>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; color:var(--man-text-secondary);">
+            <div style="margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+                <h4 style="color:var(--red); margin-bottom:4px;"><i class="fas fa-file-alt"></i> 1. Dados da Solicitação</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:13px; color:var(--text-2);">
                     <span><strong>Setor:</strong> ${esc(a.setor)}</span>
                     <span><strong>Máquina:</strong> ${esc(a.maquina)}</span>
                     <span><strong>Turno:</strong> <strong>${esc(a.turno)}</strong></span>
                     <span><strong>Tipo:</strong> ${esc(a.tipo)}</span>
                     <span><strong>Sugestão de Horário:</strong> ${esc(a.hora || '-')}</span>
                 </div>
-                <div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;">
+                <div style="font-size:13px; color:var(--text-2); margin-top:4px;">
                     <strong>Observações do Solicitante:</strong> ${esc(a.observacoes || '-')}
                 </div>
             </div>
 
-            <div style="margin-bottom:16px; border-bottom:1px solid var(--man-border-color); padding-bottom:12px;">
-                <h4 style="color:var(--man-blue); margin-bottom:4px;"><i class="fas fa-calendar-check"></i> 2. Status e Planejamento</h4>
-                <div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;">
+            <div style="margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+                <h4 style="color:var(--blue); margin-bottom:4px;"><i class="fas fa-calendar-check"></i> 2. Status e Planejamento</h4>
+                <div style="font-size:13px; color:var(--text-2); margin-top:4px;">
                     <strong>Status Atual:</strong> <span class="man-badge ${statusClass}">${esc(a.status)}</span>
                 </div>
                 ${htmlPlanejamento}
-                ${a.justificativa && a.status !== 'Aprovado' ? `<div style="font-size:13px; color:var(--man-text-secondary); margin-top:4px;"><strong>Justificativa:</strong> ${esc(a.justificativa)}</div>` : ''}
+                ${a.justificativa && a.status !== 'Aprovado' ? `<div style="font-size:13px; color:var(--text-2); margin-top:4px;"><strong>Justificativa:</strong> ${esc(a.justificativa)}</div>` : ''}
             </div>
 
             ${(a.status === 'Em Execucao' || a.status === 'Concluido' || a.status === 'Nao Executado') ? `
-                <div style="margin-bottom:16px; border-bottom:1px solid var(--man-border-color); padding-bottom:12px;">
-                    <h4 style="color:var(--man-green); margin-bottom:4px;"><i class="fas fa-tools"></i> 3. Execução</h4>
+                <div style="margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+                    <h4 style="color:var(--green); margin-bottom:4px;"><i class="fas fa-tools"></i> 3. Execução</h4>
                     ${htmlExecucao}
                 </div>
             ` : ''}
@@ -1898,7 +2109,7 @@
     const pageData = agendamentos.slice(start, start + ITEMS_PER_PAGE);
 
     const tbody = document.getElementById('man-programadaTableBody');
-    if(pageData.length === 0) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--man-text-secondary);">Nenhuma manutenção programada.</td></tr>`; } 
+    if(pageData.length === 0) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-2);">Nenhuma manutenção programada.</td></tr>`; } 
     else {
       tbody.innerHTML = pageData.map(a => {
         const sc = a.status === 'Aprovado' ? 'man-badge-green' : a.status === 'Reprovado' ? 'man-badge-red' : a.status === 'Nao Executado' ? 'man-badge-purple' : a.status === 'Em Execucao' ? 'man-badge-orange' : 'man-badge-yellow';
@@ -1912,14 +2123,14 @@
         } else if(a.status === 'Em Execucao') {
           acoes += `<button class="man-btn man-btn-warning" style="padding:2px 8px; font-size:11px; margin-right:4px;" onclick="abrirModalFinalizar('${a.id}')"><i class="fas fa-flag-checkered"></i></button>`;
         } else {
-          acoes += `<span style="font-size:12px; color:var(--man-text-secondary);">${esc(a.justificativa || '-')}</span>`;
+          acoes += `<span style="font-size:12px; color:var(--text-2);">${esc(a.justificativa || '-')}</span>`;
         }
         if(_podeEditarManutProg && (a.status === 'Aprovado' || a.status === 'Pendente')) {
-          acoes += `<button class="man-btn man-btn-primary" style="padding:2px 8px; font-size:11px; margin-right:4px; background:var(--man-blue);" onclick="abrirModalInicio('${a.id}')"><i class="fas fa-play"></i></button>`;
+          acoes += `<button class="man-btn man-btn-primary" style="padding:2px 8px; font-size:11px; margin-right:4px; background:var(--blue);" onclick="abrirModalInicio('${a.id}')"><i class="fas fa-play"></i></button>`;
         }
 
         const deleteIcon = (_podeEditarManutProg && a.status === 'Pendente')
-          ? `<span style="color:var(--man-red); cursor:pointer; margin-left:8px;" onclick="excluirAgendamento('${a.id}')"><i class="fas fa-trash-alt"></i></span>` 
+          ? `<span style="color:var(--red); cursor:pointer; margin-left:8px;" onclick="excluirAgendamento('${a.id}')"><i class="fas fa-trash-alt"></i></span>` 
           : '';
 
         let estimadoDisplay = '-';
@@ -1955,6 +2166,16 @@
   // 5. DASHBOARD (Visão Executiva)
   // ============================================================
   let chartInstance = null;
+
+  // Canvas (Chart.js) não entende var(--xxx) — só aceita cor já resolvida
+  // (hex/rgb literal). Lê o valor ATUAL da variável global do tema (mesma
+  // que o resto da SPA usa — ver styles.css), pra o gráfico acompanhar o
+  // tema escolhido (claro/escuro/lightwall) em vez de uma cor fixa
+  // exclusiva desta página. Mesmo padrão já usado em setor-qualidade.js.
+  function _corTema(nomeVar, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(nomeVar).trim();
+    return v || fallback;
+  }
 
   function renderDashboard() {
     const totalAbertos = manutencoes.filter(m => !m.etiquetaFechada).length;
@@ -1996,7 +2217,7 @@
         const mediaMin = data.total / data.count;
         const mediaHoras = mediaMin / 60;
         const horasFormatadas = mediaHoras.toFixed(1);
-        mttrHtml += `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--man-border-soft); font-size:14px; color:var(--man-text-secondary);"><span>${esc(maq)}</span><span style="color:var(--man-orange); font-weight:600;">${horasFormatadas} h</span></div>`;
+        mttrHtml += `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:14px; color:var(--text-2);"><span>${esc(maq)}</span><span style="color:var(--accent); font-weight:600;">${horasFormatadas} h</span></div>`;
       }
     }
     document.getElementById('man-mttrContainer').innerHTML = mttrHtml || 'Nenhum dado de MTTR disponível.';
@@ -2013,13 +2234,16 @@
 
     if (chartInstance) chartInstance.destroy();
     const ctx = document.getElementById('man-chartManutencao').getContext('2d');
+    const corVermelho = _corTema('--red', '#ef4444');
+    const corVerde = _corTema('--green', '#10b981');
+    const corTextoEixo = _corTema('--text-2', '#9aa3b2');
     chartInstance = new Chart(ctx, {
       type: 'bar', data: { labels: labels, datasets: [
-          { label: 'Abertos', data: abertos, backgroundColor: 'rgba(255, 92, 108, 0.7)', borderColor: '#ff5c6c', borderWidth: 1 },
-          { label: 'Fechados', data: fechados, backgroundColor: 'rgba(46, 211, 163, 0.7)', borderColor: '#2ed3a3', borderWidth: 1 }
+          { label: 'Abertos', data: abertos, backgroundColor: corVermelho + 'b3', borderColor: corVermelho, borderWidth: 1 },
+          { label: 'Fechados', data: fechados, backgroundColor: corVerde + 'b3', borderColor: corVerde, borderWidth: 1 }
         ]
       },
-      options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { color: '#a0b8d0' } } }, scales: { x: { ticks: { color: '#a0b8d0' }, grid: { color: 'rgba(255,255,255,0.05)' } }, y: { ticks: { color: '#a0b8d0' }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true } } }
+      options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { color: corTextoEixo } } }, scales: { x: { ticks: { color: corTextoEixo }, grid: { color: 'rgba(255,255,255,0.05)' } }, y: { ticks: { color: corTextoEixo }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true } } }
     });
   }
 
@@ -2132,7 +2356,6 @@
     calcularTempoExecucao,
     calcularTempoGasto,
     calcularTempoSupervisao,
-    changePageCorretiva,
     changePageProgramada,
     confirmarAprovacao,
     confirmarFechamento,
@@ -2174,6 +2397,8 @@
   // mesmo não fazendo parte da API pública em MAN.
   window._mostrarPreviewTrajetoria = _mostrarPreviewTrajetoria;
   window._esconderPreviewTrajetoria = _esconderPreviewTrajetoria;
+  window._manIrParaStep = _manIrParaStep;
+  window._manToggleFase = _manToggleFase;
   window.abrirModalFechamento = MAN.abrirModalFechamento;
   window.abrirModalFinalizar = MAN.abrirModalFinalizar;
   window.abrirModalInicio = MAN.abrirModalInicio;
@@ -2191,7 +2416,6 @@
   window.calcularTempoExecucao = MAN.calcularTempoExecucao;
   window.calcularTempoGasto = MAN.calcularTempoGasto;
   window.calcularTempoSupervisao = MAN.calcularTempoSupervisao;
-  window.changePageCorretiva = MAN.changePageCorretiva;
   window.changePageProgramada = MAN.changePageProgramada;
   window.confirmarAprovacao = MAN.confirmarAprovacao;
   window.confirmarFechamento = MAN.confirmarFechamento;

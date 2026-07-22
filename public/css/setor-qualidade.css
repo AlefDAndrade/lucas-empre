@@ -1025,6 +1025,17 @@
   color: var(--sq-cor-cinza);
 }
 
+/* Botão de forma "Borracha" — clique numa placa (com ela selecionada)
+   limpa TODAS as marcas daquela placa de uma vez (ver conversa que
+   motivou a mudança: tirar o gesto de toque longo no celular, trocar
+   por uma ferramenta selecionável igual cor/forma já são). Mesma
+   family de ícone neutro do "X" — também não usa a cor escolhida na
+   paleta (ver .sq-btn-color-disabled, mesma regra do "X", abaixo). */
+.sq-btn-shape.eraser i {
+  font-size: .8rem;
+  color: var(--sq-cor-cinza);
+}
+
 /* Botão "I" — Indicador de qualidade (toggleIndicadorAtivo, ver
    setor-qualidade.js). Fica FORA do grupo .sq-btn-shape de propósito
    (não conta pro contador de atalhos Ctrl+nº nem ganha o badge numerado
@@ -1054,9 +1065,10 @@
   color: #fff;
 }
 
-/* Paleta de cor desabilitada enquanto a forma "X" está selecionada — X
-   nunca usa a cor escolhida (é sempre --sq-cor-cinza, ver
-   COR_NAO_PREENCHIDO em setor-qualidade.js). */
+/* Paleta de cor desabilitada enquanto "X" ou "Borracha" está
+   selecionada — nenhuma das duas usa a cor escolhida (X é sempre
+   --sq-cor-cinza, ver COR_NAO_PREENCHIDO; Borracha nem grava marca
+   nenhuma, não faz sentido nenhuma cor "valer" pra ela). */
 .sq-btn-color-disabled {
   opacity: .3;
   pointer-events: none;
@@ -1299,7 +1311,14 @@
 /* Placa individual */
 .sq-slab-stack {
   display: flex;
-  flex-direction: column;
+  /* B1 é a base física do palete (primeira placa carregada) — fica embaixo
+     na tela; berços maiores (B2, B3...) vão sendo empilhados por cima,
+     igual a pilha de verdade. Ver conversa que motivou isso: antes B1
+     aparecia no topo e ia numerando pra baixo, o oposto de como o palete
+     é fisicamente montado. A ordem dos elementos no DOM (e portanto de
+     _stackIds()/drag-and-drop, que trabalham por id, não por posição na
+     tela) continua igual — só a ORDEM VISUAL inverte. */
+  flex-direction: column-reverse;
   gap: 2px;
   width: 100%;
   margin-bottom: 8px;
@@ -2002,6 +2021,15 @@
   .sq-pallet-col,
   .sq-info-col {
     min-width: calc(50% - 6px);
+  }
+
+  /* Espelho Visual (Dashboard → avaliação em miniatura): 4 mini-paletes
+     em 2x2 ficavam bem espremidos num celular de verdade (cada um já
+     tem padding próprio, ver .sq-mini-pallet) — 1 coluna larga lê
+     melhor, mesmo custando mais rolagem vertical. */
+  .sq-mini-stacks {
+    grid-template-columns: 1fr;
+    padding: 0;
   }
 }
 

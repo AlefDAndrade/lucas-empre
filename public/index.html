@@ -222,11 +222,11 @@
     <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 <!-- ============ PAGE: MENU ============ -->
     <main class="main active" id="page-menu">
-      <div style="padding:40px 32px">
-        <div style="margin-bottom:40px">
-          <h1 style="font-size:2.6rem;margin-bottom:6px">Sistema de <span style="color:var(--accent)">Injeção</span>
+      <div class="menu-page-wrap">
+        <div class="menu-page-header">
+          <h1 class="menu-page-title">Sistema de <span style="color:var(--accent)">Injeção</span>
           </h1>
-          <p style="color:var(--text-3);font-size:.9rem;text-transform:uppercase;letter-spacing:.08em">Lightwall SC —
+          <p class="menu-page-subtitle">Lightwall SC —
             Controle de produção industrial</p>
         </div>
         <div class="menu-grid">
@@ -378,7 +378,7 @@
 
       </div>
     </div>
-
+
 <!-- ============ PAGE: OPERAÇÃO ============ -->
 <main class="main" id="page-operacao">
   <div class="page-header" style="position:relative">
@@ -417,13 +417,12 @@
       <div class="op-layout-grid">
         <!-- Coluna Esquerda: Informações Operacionais (~60%) -->
         <div class="op-info-column">
-          <div class="card"
-            style="padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
-            <div style="display:flex; align-items:center; gap:16px">
+          <div class="card op-status-card">
+            <div class="op-status-left">
               <div id="status-banner"><span class="badge badge-gray">⬤ Aguardando início</span></div>
 
               <!-- Trigger Buttons for Floating Panels -->
-              <div style="display:flex; gap:8px; border-left:1px solid var(--border); padding-left:16px">
+              <div class="op-status-triggers">
                 <div style="position:relative">
                   <button class="btn btn-ghost btn-sm" onclick="LWOp.togglePopover('popover-pendencias', event)">
                     ⚠️ Pendências <span id="pendencia-badge-count"></span>
@@ -448,7 +447,7 @@
               </div>
             </div>
 
-            <div style="display:flex;align-items:center;gap:24px">
+            <div class="op-status-timers">
               <div>
                 <div
                   style="font-size:.65rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px">
@@ -466,7 +465,7 @@
 
           <div class="card">
             <div class="card-title">Identificação da Bateria</div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+            <div class="op-grid-identificacao">
               <div class="form-group">
                 <label class="form-label">Data <span class="required">*</span></label>
                 <input class="form-input auto-filled" id="op-data-val" readonly value="" style="color:var(--accent)">
@@ -524,7 +523,7 @@
 
           <div class="card">
             <div class="card-title">Controle de Injeção</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;align-items:end">
+            <div class="op-grid-controle">
               <div class="form-group">
                 <label class="form-label">Início da Injeção</label>
                 <div style="display:flex;gap:8px">
@@ -568,8 +567,7 @@
           </div>
 
           <div class="card">
-            <div id="op-cards-paineis"
-              style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;text-align:center">
+            <div id="op-cards-paineis" class="op-grid-paineis">
               <div>
                 <div
                   style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
@@ -672,7 +670,7 @@
           <!-- T1 -->
           <div class="card" style="border-top:3px solid var(--accent)">
             <div class="card-title">1º Turno</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="turnos-kpi-mini-grid">
               <div>
                 <div class="kpi-label">Baterias</div>
                 <div class="kpi-value accent" id="t1-baterias">—</div>
@@ -704,7 +702,7 @@
           <!-- T2 -->
           <div class="card" style="border-top:3px solid var(--blue)">
             <div class="card-title">2º Turno</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="turnos-kpi-mini-grid">
               <div>
                 <div class="kpi-label">Baterias</div>
                 <div class="kpi-value blue" id="t2-baterias">—</div>
@@ -736,7 +734,7 @@
           <!-- T3 -->
           <div class="card" style="border-top:3px solid var(--green)">
             <div class="card-title">3º Turno</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="turnos-kpi-mini-grid">
               <div>
                 <div class="kpi-label">Baterias</div>
                 <div class="kpi-value green" id="t3-baterias">—</div>
@@ -817,7 +815,9 @@
               <option value="hoje">📅 Hoje</option>
               <option value="todos" selected>Todos</option>
             </select>
-            <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <input class="form-input" type="text" id="reg-busca-id" placeholder="🔍 Buscar por ID da Operação"
+                title="Filtra a tabela pelo ID da operação (aceita busca parcial)" style="width:220px">
               <span style="font-size:.78rem;color:var(--text-3)" id="reg-count"></span>
               <button class="btn btn-ghost btn-sm" id="btn-limpar-filtros-registro" style="display:none"
                 onclick="limparTodosFiltros('filtros-registro')">✕ Limpar Todos</button>
@@ -869,6 +869,8 @@
                 <th data-col="dimensao">Dimensão</th>
                 <th data-col="capacidade">Cap. Berços</th> <!-- Nova -->
                 <th data-col="id_bateria">ID Bateria</th>
+                <th data-col="id_operacao">ID Operação</th> <!-- Nova -->
+
                 <th data-col="inicio">Início</th>
                 <th data-col="fim">Fim</th>
                 <th data-col="desemplaque">Previsão Desemplaque</th>
@@ -885,11 +887,12 @@
                 <th data-col="m2_2psp">m² (Total)</th> <!-- Atualizada -->
                 <th data-col="bercos_reais">Berços Reais</th> <!-- Nova -->
                 <th data-col="placas_cimenticia">Placas Cimenticia</th>
+                <th data-col="operador_nome">Registrado por</th> <!-- Nova -->
               </tr>
             </thead>
             <tbody id="registro-tbody">
               <tr>
-                <td colspan="20" style="text-align:center;color:var(--text-3);padding:30px">Carregando...</td>
+                <td colspan="22" style="text-align:center;color:var(--text-3);padding:30px">Carregando...</td>
               </tr>
             </tbody>
           </table>
@@ -934,7 +937,7 @@
                 style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer;margin:0">
               ⚙️ Apenas com reajustes
             </label>
-            <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
               <span style="font-size:.78rem;color:var(--text-3)" id="rel-count"></span>
               <button class="btn btn-ghost btn-sm" id="btn-limpar-filtros-relatorio" style="display:none"
                 onclick="limparTodosFiltros('filtros-relatorio')">✕ Limpar Todos</button>
@@ -1011,6 +1014,21 @@
             <span style="color:var(--text-3);font-size:.85rem">até</span>
             <input class="form-input" type="date" id="rb-data-fim" style="width:150px" title="Data fim">
             <button class="btn btn-ghost btn-sm" id="btn-rb-filtrar">Filtrar</button>
+            <!-- Populados em JS a partir dos dados carregados (ver
+                 _popularSelect(), relatorio-bercos.js) — só mostram tipos
+                 de montagem/baterias que de fato aparecem nos registros. -->
+            <select class="form-input form-select" id="rb-tipo-montagem" style="width:170px" title="Tipo de Montagem">
+              <option value="">Todas as montagens</option>
+            </select>
+            <select class="form-input form-select" id="rb-tipo-bateria" style="width:150px" title="Bateria">
+              <option value="">Todas as baterias</option>
+            </select>
+            <select class="form-input form-select" id="rb-vazamento" style="width:160px" title="Vazamento">
+              <option value="">Vazamento: todos</option>
+              <option value="com">Com vazamento</option>
+              <option value="sem">Sem vazamento</option>
+            </select>
+            <input class="form-input" type="text" id="rb-id-operacao" placeholder="ID da Operação…" style="width:150px" title="Buscar pelo ID da operação">
             <button class="btn btn-ghost btn-sm" id="btn-rb-limpar">✕ Limpar</button>
             <button class="btn btn-ghost btn-sm" id="btn-rb-modo-visual" title="Mostra o desenho de cada berço, colorido conforme o tipo de montagem, em vez da tabela">🎨 Modo Visual</button>
             <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
@@ -1083,7 +1101,7 @@
         <div id="ab-content">
 
           <!-- ═══ KPIs PRINCIPAIS ═══ -->
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
+          <div class="kpi-grid" style="margin-bottom:16px">
             <div class="kpi-card red" data-tooltip="Soma de todos os lados de berço (Esquerda + Direita) marcados como 'baixou' (Vazou) no período filtrado.">
               <div class="kpi-label">Total de Vazamentos</div>
               <div class="kpi-value red" id="ab-kpi-total" style="font-size:1.9rem">—</div>
@@ -1106,7 +1124,7 @@
             </div>
           </div>
 
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+          <div class="kpi-grid" style="margin-bottom:20px">
             <div class="kpi-card" data-tooltip="Bateria (equipamento) com mais ocorrências de vazamento no período.">
               <div class="kpi-label">🔋 Bateria Mais Problemática</div>
               <div class="kpi-value" id="ab-kpi-bateria-top" style="font-size:1.3rem">—</div>
@@ -1162,7 +1180,7 @@
           </div>
 
           <!-- ═══ MONTAGEM + BATERIA ═══ -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+          <div class="grid-2 mb-4">
             <div class="card">
               <div class="card-title" style="margin-bottom:12px">🔩 Vazamento por Tipo de Montagem</div>
               <canvas id="ab-chart-montagem" style="width:100%;height:170px;display:block"></canvas>
@@ -1190,7 +1208,7 @@
           </div>
 
           <!-- ═══ TRAÇO × BERÇO: PIORES CASOS + REFERÊNCIA ═══ -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+          <div class="grid-2 mb-4">
             <div class="card">
               <div class="card-title" style="margin-bottom:4px;color:var(--red)">🔴 Piores Casos</div>
               <div style="font-size:.72rem;color:var(--text-3);margin-bottom:10px">Traços com mais vazamento nos berços que encheram</div>
@@ -1381,7 +1399,7 @@
         <div id="qt-alertas" style="margin-bottom:16px;display:flex;flex-direction:column;gap:8px"></div>
 
         <!-- ── KPIs LINHA 1: Taxa + Total + Média + Receita estável/instável ── -->
-        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px">
+        <div class="qt-kpi-grid-6">
           <!-- Taxa de acerto -->
           <div class="card" style="padding:16px;grid-column:span 2">
             <div
@@ -1445,7 +1463,7 @@
         </div>
 
         <!-- ── KPIs LINHA 2: Insumo mais ajustado + maior desvio + Distribuição donut ── -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="kpi-grid" style="margin-bottom:16px">
           <div class="card" id="qt-card-insumo-mais-ajustado" style="padding:16px;border-left:3px solid #ef4444;cursor:help">
             <div
               style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">
@@ -1489,6 +1507,37 @@
           </div>
         </div>
 
+        <!-- ── INDICADORES DE PROCESSO: Densidade · Flow · Berços por Traço ── -->
+        <div class="kpi-grid" style="margin-bottom:16px">
+          <div class="card" id="qt-card-media-densidade" style="padding:16px;cursor:help">
+            <div
+              style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">
+              Densidade Média</div>
+            <div id="qt-media-densidade"
+              style="font-size:2.2rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1.1">
+              —</div>
+            <div id="qt-media-densidade-sub" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+          <div class="card" id="qt-card-media-flow" style="padding:16px;cursor:help">
+            <div
+              style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">
+              Flow Médio</div>
+            <div id="qt-media-flow"
+              style="font-size:2.2rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1.1">
+              —</div>
+            <div id="qt-media-flow-sub" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+          <div class="card" id="qt-card-media-bercos-traco" style="padding:16px;cursor:help">
+            <div
+              style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:6px">
+              Berços Enchidos / Traço</div>
+            <div id="qt-media-bercos-traco"
+              style="font-size:2.2rem;font-weight:800;color:var(--accent);font-family:var(--font-mono);line-height:1.1">
+              —</div>
+            <div id="qt-media-bercos-traco-sub" style="font-size:.72rem;color:var(--text-3);margin-top:4px">—</div>
+          </div>
+        </div>
+
         <!-- ── INSIGHTS AUTOMÁTICOS ── -->
         <div class="card" style="padding:18px 20px;margin-bottom:16px;border-left:3px solid var(--accent)">
           <div
@@ -1500,7 +1549,7 @@
         </div>
 
         <!-- ── RANKING MATERIAIS + ESTABILIDADE RECEITAS ── -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="grid-2 mb-4">
           <div class="card" style="padding:20px">
             <div
               style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">
@@ -1523,7 +1572,7 @@
         <div class="card" style="padding:20px;margin-bottom:16px">
           <div
             style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">
-            📐 Controle Estatístico por Insumo — Média · Mediana · Desvio Padrão · CV</div>
+            📐 Controle Estatístico por Insumo e Parâmetro de Processo (Densidade/Flow) — Média · Mediana · Desvio Padrão · CV</div>
           <div id="qt-cep-tabela" style="overflow-x:auto">
             <div style="color:var(--text-3);font-size:.84rem">Calculando estatísticas...</div>
           </div>
@@ -1541,7 +1590,7 @@
         </div>
 
         <!-- ── TENDÊNCIAS + EVOLUÇÃO ── -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="grid-2 mb-4">
           <div class="card" style="padding:20px">
             <div
               style="font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);margin-bottom:14px">
@@ -1615,7 +1664,7 @@
         <div id="oee-content">
 
           <!-- KPIs principais -->
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
+          <div class="kpi-grid" style="margin-bottom:20px">
             <div class="kpi-card" data-tooltip="Disponibilidade = tempo real produzindo ÷ 420 min (7h), por turno.&#10;As 7h vêm de: turno de 9h − 1h de descanso − 1h de lavagem programada (2× 30 min).">
               <div class="kpi-label">Disponibilidade</div>
               <div class="kpi-value" id="oee-kpi-disp" style="font-size:1.7rem">—</div>
@@ -1780,7 +1829,7 @@
         </div>
 
       </div><!-- .page-body -->
-    </main>
+    </main>
 <!-- ============ PAGE: ANÁLISE OPERACIONAL ============ -->
     <main class="main" id="page-analise-operacional">
       <div class="page-header">
@@ -1820,7 +1869,7 @@
         <div id="ao-content">
 
           <!-- ═══ KPIs PRINCIPAIS ═══ -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr) 2fr;gap:16px;margin-bottom:20px">
+          <div class="ao-kpi-grid">
 
             <!-- Coluna 1: Produção -->
             <div style="display:flex;flex-direction:column-reverse;gap:12px">
@@ -1920,7 +1969,7 @@
           </div>
 
           <!-- ═══ 2 COLUNAS: Motivos + Correlações ═══ -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+          <div class="grid-2 mb-4">
 
             <!-- Motivos de Atraso -->
             <div class="card">
@@ -1964,7 +2013,7 @@
           </div>
 
           <!-- ═══ PRODUTIVIDADE ═══ -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+          <div class="grid-2 mb-4">
 
             <div class="card">
               <div class="card-title" style="margin-bottom:12px">📦 m² Produzido por Bateria (Top 8)</div>
@@ -2004,7 +2053,7 @@
         <div id="parada-toast" class="parada-toast" style="display:none"></div>
 
         <!-- Layout: formulário + KPIs -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
+        <div class="paradas-layout-grid">
 
           <!-- Formulário de registro -->
           <div class="card" id="parada-form-card" style="padding:20px 24px">
@@ -2013,7 +2062,7 @@
               <button id="btn-cancelar-edicao-parada" class="btn btn-ghost btn-sm" style="display:none" onclick="LWParadas.cancelarEdicao()">✕ Cancelar edição</button>
             </div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div class="paradas-form-datas">
               <div class="form-group" style="margin:0">
                 <label class="form-label">Início da Parada</label>
                 <input class="form-input" type="datetime-local" id="parada-inicio">
@@ -2053,7 +2102,7 @@
 
           <!-- KPIs -->
           <div style="display:flex;flex-direction:column;gap:12px">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="kpi-grid" style="margin-bottom:0">
               <div class="kpi-card">
                 <div class="kpi-label">Total de Paradas</div>
                 <div class="kpi-value" id="parada-kpi-total">—</div>
@@ -2145,7 +2194,7 @@
         </div>
 
       </div><!-- .page-body -->
-    </main><!-- #page-paradas -->
+    </main><!-- #page-paradas -->
 <!-- ============ PAGE: SETOR DE QUALIDADE ============ -->
     <main class="main" id="page-setor-qualidade">
       <div class="page-header">
@@ -2416,6 +2465,7 @@
               <button class="sq-btn-shape circle active"   onclick="SQ.selectShape(this,'circle')"><span class="sq-shape-circle"></span></button>
               <button class="sq-btn-shape dash"            onclick="SQ.selectShape(this,'dash')"><span class="sq-shape-dash"></span></button>
               <button class="sq-btn-shape x"                onclick="SQ.selectShape(this,'x')" title="Painel não preenchido — sempre sozinha, cor vermelha fixa"><span class="sq-shape-x">×</span></button>
+              <button class="sq-btn-shape eraser"           onclick="SQ.selectShape(this,'eraser')" title="Borracha — selecione e clique numa placa pra apagar TODAS as marcas dela de uma vez"><i class="fas fa-eraser"></i></button>
               <div class="sq-tools-sep"></div>
               <button class="sq-btn-indicador active" onclick="SQ.toggleIndicadorAtivo(this)" title="Indicador de qualidade — ATIVADO (padrão): a próxima marca clicada é a marca de STATUS de verdade (aprovado/2ª linha/reprovado). Desative só pra corrigir/adicionar manualmente uma marca de identidade (tipo de montagem), sem que ela conte como avaliação.">I</button>
               <div class="sq-tools-sep"></div>
@@ -2424,7 +2474,7 @@
               <div class="sq-tools-sep"></div>
               <span class="sq-tools-hint" title="Funciona em qualquer lugar da tela de Avaliação, menos com o foco num campo de texto."><i class="fas fa-keyboard"></i> Atalhos: nº = cor · Ctrl+nº = forma</span>
               <div class="sq-tools-sep"></div>
-              <span class="sq-tools-hint" title="Clique normal sempre adiciona uma marca (até 6 por placa). Pra apagar, segure o toque ou clique com o botão direito — remove uma marca da cor/forma selecionada ali em cima."><i class="fas fa-eraser"></i> Apagar: toque longo / clique direito</span>
+              <span class="sq-tools-hint" title="Selecione a Borracha (na Forma, acima) e clique numa placa pra apagar TODAS as marcas dela de uma vez. No computador, clique com o botão direito ainda apaga só a marca da cor/forma selecionada ali em cima."><i class="fas fa-eraser"></i> Apagar: selecione a Borracha e clique na placa</span>
               <div class="sq-tools-sep"></div>
 
               <!-- Referência visual dos marcadores — mesmo padrão do botão
@@ -2633,6 +2683,20 @@
                 <option value="3° TURNO">3° Turno</option>
               </select>
             </div>
+            <!-- Período por Data/Hora de DESMOLDAGEM (voltou — ver
+                 conversa que motivou a mudança: "Data/Hora" da tabela
+                 abaixo e este filtro passaram a usar a mesma data, ver
+                 _dataReferenciaAvaliacao(), setor-qualidade.js — antes
+                 era a data de REGISTRO no sistema, que pode ser bem
+                 depois da bateria já ter saído da forma). -->
+            <div class="form-group">
+              <label class="form-label">Desmoldagem de</label>
+              <input class="form-input" type="date" id="sq-hist-start" onchange="SQ.renderHistory()" style="width:150px;">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Desmoldagem até</label>
+              <input class="form-input" type="date" id="sq-hist-end" onchange="SQ.renderHistory()" style="width:150px;">
+            </div>
           </div>
           <div>
             <div class="sq-empty" id="sq-hist-empty"><i class="fas fa-database"></i>Nenhum registro ainda.</div>
@@ -2640,7 +2704,7 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Data/Hora</th><th>Bateria</th>
+                    <th>Desmoldagem</th><th>Bateria</th>
                     <th style="background:var(--sq-tipo-sp);color:#fff;">P1</th>
                     <th style="background:var(--sq-tipo-2p);color:#fff;">P2</th>
                     <th style="background:var(--sq-tipo-3t);color:#fff;">P3</th>
@@ -2719,7 +2783,7 @@
        (ver .sq-topbar/.sq-nav, page-setor-qualidade.html). -->
   <div class="man-topbar man-no-print">
     <div class="man-brand">
-      <div style="width:4px; height:24px; background:var(--man-orange); border-radius:2px;"></div>
+      <div style="width:4px; height:24px; background:var(--accent); border-radius:2px;"></div>
       Gestão de Manutenção
     </div>
     <div class="man-actions">
@@ -2769,19 +2833,46 @@
       <button class="man-btn man-btn-outline" onclick="limparFiltrosCorretiva()"><i class="fas fa-undo-alt"></i> Limpar</button>
     </div>
 
+    <!-- PAINEL DE CHAMADOS — acordeão de fases (ver conversa: "kanban pra
+         cima" + "cada card vira tipo um select"). Fica ANTES do
+         formulário de propósito — é a primeira coisa que a pessoa vê ao
+         entrar na aba, pra bater o olho no que está pendente antes de
+         abrir qualquer chamado específico. Clicar num cartão dentro de
+         uma fase aberta ainda abre o mesmo formulário/assistente de
+         sempre (editarManutencao) — a área de ação continua sendo aqui;
+         a tabela lá embaixo é só consulta. -->
+    <div class="man-card">
+      <div class="man-card-title"><i class="fas fa-wrench"></i> Painel de Chamados Corretivos</div>
+      <div class="man-kanban-accordion" id="man-corretivaAccordion"></div>
+    </div>
+
     <!-- FORMULÁRIO -->
     <div id="man-formCard" class="man-card" style="display: none;">
       <div class="man-card-title">
         <span id="man-formTitle"><i class="fas fa-edit"></i> Registro de Solicitação</span>
-        <span id="man-formIdDisplay" style="color:var(--man-text-muted); font-family: 'JetBrains Mono'; font-size:12px;"></span>
-        <span id="man-formAceiteInfo" style="color:var(--man-text-muted); font-size:12px; margin-left:8px;"></span>
+        <span id="man-formIdDisplay" style="color:var(--text-3); font-family: 'JetBrains Mono'; font-size:12px;"></span>
+        <span id="man-formAceiteInfo" style="color:var(--text-3); font-size:12px; margin-left:8px;"></span>
       </div>
       <form id="man-manForm" class="man-form-paper" onsubmit="return false;">
         <input type="hidden" id="man-manId"><input type="hidden" id="man-manEtiquetaFechada" value="false">
 
+        <!-- NAVEGAÇÃO DO ASSISTENTE — troca de qual das 4 zonas abaixo
+             fica visível (ver _manIrParaStep()/_manAplicarStepAtual(),
+             manutencao.js). Pílulas desabilitadas = etapa ainda não faz
+             sentido agora (ex: chamado novo, ainda não salvo; ou "Peça",
+             quando ninguém marcou "Aguardando peças? = Sim"). -->
+        <div class="man-wizard-nav man-no-print" id="man-wizardNav">
+          <button type="button" class="man-wizard-step" data-step="abertura" onclick="_manIrParaStep('abertura')"><span class="num">1</span> Abertura</button>
+          <button type="button" class="man-wizard-step" data-step="execucao" onclick="_manIrParaStep('execucao')"><span class="num">2</span> Execução</button>
+          <button type="button" class="man-wizard-step" data-step="peca" id="man-wizardStepPeca" onclick="_manIrParaStep('peca')" style="display:none;"><span class="num">3</span> Peça</button>
+          <button type="button" class="man-wizard-step" data-step="fechamento" onclick="_manIrParaStep('fechamento')"><span class="num">4</span> Fechamento</button>
+        </div>
+
+        <div id="man-zonaAbertura">
+
         <!-- SEÇÃO 1: ABERTURA -->
-        <div style="background:rgba(255,92,108,0.05); border-left:4px solid var(--man-red); padding:10px 0; margin:0;">
-          <div style="padding:0 16px 8px 16px; color:var(--man-red); font-weight:600;"><i class="fas fa-user"></i> 1. Abertura do Chamado</div>
+        <div style="background:var(--red-dim); border-left:4px solid var(--red); padding:10px 0; margin:0;">
+          <div style="padding:0 16px 8px 16px; color:var(--red); font-weight:600;"><i class="fas fa-user"></i> 1. Abertura do Chamado</div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-building"></i> Setor</div><div class="man-form-field"><input type="text" id="man-manSetor" placeholder="Ex: Injetora"></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-industry"></i> Máquina</div><div class="man-form-field"><input type="text" id="man-manMaquina" placeholder="Ex: M01"></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-clock"></i> Turno</div>
@@ -2798,8 +2889,8 @@
         </div>
 
         <!-- SEÇÃO 2: DETALHES DO PROBLEMA -->
-        <div style="background:rgba(77,141,255,0.05); border-left:4px solid var(--man-blue); padding:10px 0; margin:0;">
-          <div style="padding:0 16px 8px 16px; color:var(--man-blue); font-weight:600;"><i class="fas fa-exclamation-triangle"></i> 2. Detalhes do Problema</div>
+        <div style="background:var(--blue-dim); border-left:4px solid var(--blue); padding:10px 0; margin:0;">
+          <div style="padding:0 16px 8px 16px; color:var(--blue); font-weight:600;"><i class="fas fa-exclamation-triangle"></i> 2. Detalhes do Problema</div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-file-alt"></i> Anomalia</div><div class="man-form-field"><textarea id="man-manAnomalia" placeholder="Descreva o problema..."></textarea></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-map-pin"></i> Local</div><div class="man-form-field"><input type="text" id="man-manLocal" placeholder="Ex: EM FRENTE AO PAINEL"></div></div>
           <div class="man-form-row">
@@ -2833,28 +2924,29 @@
             <div class="man-form-label"><i class="fas fa-tag"></i> Tipo de Etiqueta</div>
             <div class="man-form-field">
               <select id="man-manTipoEtiqueta">
-                <option value="Azul"><i class="fas fa-circle" style="color:var(--man-blue);"></i> Azul (Autônoma)</option>
-                <option value="Vermelho"><i class="fas fa-circle" style="color:var(--man-red);"></i> Vermelho (Técnica)</option>
+                <option value="Azul"><i class="fas fa-circle" style="color:var(--blue);"></i> Azul (Autônoma)</option>
+                <option value="Vermelho"><i class="fas fa-circle" style="color:var(--red);"></i> Vermelho (Técnica)</option>
               </select>
             </div>
           </div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-camera"></i> Foto / Documento</div><div class="man-form-field"><div class="man-upload-area"><input type="file" id="man-manFotoOperador" accept="image/*,.pdf" disabled onchange="previewArquivo(this, 'man-fotoOperadorPreview', 'man-btnRemoverFotoOp')"><div id="man-fotoOperadorPreview" style="display:none;"></div><button id="man-btnRemoverFotoOp" style="display:none;" onclick="removerArquivo('man-manFotoOperador', 'man-fotoOperadorPreview', 'man-btnRemoverFotoOp')">Remover</button></div><span class="man-upload-hint">Upload ainda não é funcional nesta etapa — só a interface está pronta.</span></div></div></div>
         </div>
+        <!-- /man-zonaAbertura -->
 
         <!-- SEÇÃO 3: EXECUÇÃO (MANUTENÇÃO) -->
         <div id="man-techSection">
-          <div style="background:rgba(245,130,31,0.05); border-left:4px solid var(--man-orange); padding:10px 0; margin:0;">
-            <div style="padding:0 16px 8px 16px; color:var(--man-orange); font-weight:600;"><i class="fas fa-hard-hat"></i> 3. Execução (Manutenção)</div>
-            <div id="man-aceitarChamadoBox" style="display:none; margin:0 16px 12px 16px; padding:14px; border:1px dashed var(--man-orange); border-radius:6px; background:rgba(245,130,31,0.08);">
+          <div style="background:var(--accent-dim); border-left:4px solid var(--accent); padding:10px 0; margin:0;">
+            <div style="padding:0 16px 8px 16px; color:var(--accent); font-weight:600;"><i class="fas fa-hard-hat"></i> 3. Execução (Manutenção)</div>
+            <div id="man-aceitarChamadoBox" style="display:none; margin:0 16px 12px 16px; padding:14px; border:1px dashed var(--accent); border-radius:6px; background:var(--accent-dim);">
               <div id="man-aceitarChamadoNormal">
-                <p style="margin:0 0 10px 0; color:var(--man-text-secondary); font-size:13px;"><i class="fas fa-info-circle"></i> <span id="man-aceitarChamadoTexto">Este chamado ainda não foi aceito. Os campos de execução só aparecem depois que alguém aceitar.</span></p>
+                <p style="margin:0 0 10px 0; color:var(--text-2); font-size:13px;"><i class="fas fa-info-circle"></i> <span id="man-aceitarChamadoTexto">Este chamado ainda não foi aceito. Os campos de execução só aparecem depois que alguém aceitar.</span></p>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                   <button type="button" id="man-btnAceitarChamado" class="man-btn man-btn-warning" onclick="aceitarChamado()"><i class="fas fa-hand-paper"></i> Aceitar Chamado</button>
-                  <button type="button" id="man-btnRecusarChamado" class="man-btn man-btn-outline" style="border-color:var(--man-red); color:var(--man-red);" onclick="abrirModalRecusaChamado()"><i class="fas fa-times-circle"></i> Recusar Chamado</button>
+                  <button type="button" id="man-btnRecusarChamado" class="man-btn man-btn-outline" style="border-color:var(--red); color:var(--red);" onclick="abrirModalRecusaChamado()"><i class="fas fa-times-circle"></i> Recusar Chamado</button>
                 </div>
               </div>
               <div id="man-recusaPendenteBox" style="display:none;">
-                <p style="margin:0 0 10px 0; color:var(--man-text-secondary); font-size:13px;"><i class="fas fa-exclamation-triangle" style="color:var(--man-red);"></i> Recusa solicitada por <strong id="man-recusaInfoSolicitante"></strong>: <em id="man-recusaInfoMotivo"></em></p>
+                <p style="margin:0 0 10px 0; color:var(--text-2); font-size:13px;"><i class="fas fa-exclamation-triangle" style="color:var(--red);"></i> Recusa solicitada por <strong id="man-recusaInfoSolicitante"></strong>: <em id="man-recusaInfoMotivo"></em></p>
                 <div id="man-recusaBotoesRevisor" style="display:none; gap:10px; flex-wrap:wrap;">
                   <button type="button" class="man-btn man-btn-danger" onclick="responderRecusaChamado(true)"><i class="fas fa-lock"></i> Aceitar Recusa (encerra o chamado)</button>
                   <button type="button" class="man-btn man-btn-outline" onclick="responderRecusaChamado(false)"><i class="fas fa-undo-alt"></i> Negar Recusa (volta pra Manutenção)</button>
@@ -2864,7 +2956,7 @@
             <div id="man-techCampos">
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-play"></i> Início (Data/Hora)</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-manDataInicio" onchange="calcularTempoGasto()"><label>Hora</label><input type="time" id="man-manHoraInicio" onchange="calcularTempoGasto()"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-stop"></i> Fim (Data/Hora)</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-manDataFim" onchange="calcularTempoGasto()"><label>Hora</label><input type="time" id="man-manHoraFim" onchange="calcularTempoGasto()"></div></div>
-            <div class="man-form-row"><div class="man-form-label"><i class="fas fa-hourglass-half"></i> Tempo gasto</div><div class="man-form-field"><input type="text" id="man-manTempoGasto" readonly placeholder="Calculado automaticamente" style="color:var(--man-orange); font-weight:600;"></div></div>
+            <div class="man-form-row"><div class="man-form-label"><i class="fas fa-hourglass-half"></i> Tempo gasto</div><div class="man-form-field"><input type="text" id="man-manTempoGasto" readonly placeholder="Calculado automaticamente" style="color:var(--accent); font-weight:600;"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-user-cog"></i> Responsável pela Execução</div>
               <div class="man-form-field">
                 <select id="man-manTipoExecucao" onchange="toggleEmpresaExterna()">
@@ -2881,24 +2973,24 @@
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-tools"></i> Peças avariadas</div><div class="man-form-field"><input type="text" id="man-manPecasAvariadas" placeholder="Ex: Válvulas"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-shopping-cart"></i> Peças a comprar</div><div class="man-form-field"><input type="text" id="man-manPecasComprar" placeholder="Ex: Conector em L"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-clipboard-list"></i> Rotina executada</div><div class="man-form-field"><textarea id="man-manRotina" placeholder="Descreva o procedimento..."></textarea></div></div>
-            <div class="man-form-row"><div class="man-form-label"><i class="fas fa-camera-retro"></i> Foto / Documento do Serviço</div><div class="man-form-field"><div class="man-upload-area"><input type="file" id="man-manFotoTecnico" accept="image/*,.pdf" disabled onchange="previewArquivo(this, 'man-fotoTecnicoPreview', 'man-btnRemoverFotoTec')"><div id="man-fotoTecnicoPreview" style="display:none;"></div><button id="man-btnRemoverFotoTec" style="display:none;" onclick="removerArquivo('man-manFotoTecnico', 'man-fotoTecnicoPreview', 'man-btnRemoverFotoTec')">Remover</button></div><span class="man-upload-hint">Upload ainda não é funcional nesta etapa — só a interface está pronta.</span></div></div></div>
+            <div class="man-form-row"><div class="man-form-label"><i class="fas fa-camera-retro"></i> Foto / Documento do Serviço</div><div class="man-form-field"><div class="man-upload-area"><input type="file" id="man-manFotoTecnico" accept="image/*,.pdf" disabled onchange="previewArquivo(this, 'man-fotoTecnicoPreview', 'man-btnRemoverFotoTec')"><div id="man-fotoTecnicoPreview" style="display:none;"></div><button id="man-btnRemoverFotoTec" style="display:none;" onclick="removerArquivo('man-manFotoTecnico', 'man-fotoTecnicoPreview', 'man-btnRemoverFotoTec')">Remover</button></div><span class="man-upload-hint">Upload ainda não é funcional nesta etapa — só a interface está pronta.</span></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-user-clock"></i> Custo Mão de Obra (R$)</div><div class="man-form-field"><input type="number" id="man-manCustoMaoObra" step="0.01" placeholder="0,00"></div></div>
             </div>
           </div>
         </div>
 
-        <!-- SEÇÃO 4: ACOMPANHAMENTO DA SUPERVISÃO -->
+        <!-- SEÇÃO 4: ACOMPANHAMENTO DA SUPERVISÃO ("Peça" no assistente) -->
         <div id="man-supervisorSection">
-          <div style="background:rgba(46,211,163,0.05); border-left:4px solid var(--man-green); padding:10px 0; margin:0;">
-            <div style="padding:0 16px 8px 16px; color:var(--man-green); font-weight:600;"><i class="fas fa-user-shield"></i> 4. Acompanhamento (Supervisão)</div>
-            <div id="man-aceitarPedidoPecaBox" style="display:none; margin:0 16px 12px 16px; padding:14px; border:1px dashed var(--man-green); border-radius:6px; background:rgba(46,211,163,0.08);">
-              <p style="margin:0 0 10px 0; color:var(--man-text-secondary); font-size:13px;"><i class="fas fa-info-circle"></i> <span id="man-aceitarPedidoPecaTexto">Há um pedido de peça pendente. Os campos de acompanhamento só aparecem depois que Supervisão, Encarregado ou Administrador aceitarem o pedido.</span></p>
+          <div style="background:var(--green-dim); border-left:4px solid var(--green); padding:10px 0; margin:0;">
+            <div style="padding:0 16px 8px 16px; color:var(--green); font-weight:600;"><i class="fas fa-user-shield"></i> Acompanhamento (Supervisão)</div>
+            <div id="man-aceitarPedidoPecaBox" style="display:none; margin:0 16px 12px 16px; padding:14px; border:1px dashed var(--green); border-radius:6px; background:var(--green-dim);">
+              <p style="margin:0 0 10px 0; color:var(--text-2); font-size:13px;"><i class="fas fa-info-circle"></i> <span id="man-aceitarPedidoPecaTexto">Há um pedido de peça pendente. Os campos de acompanhamento só aparecem depois que Supervisão, Encarregado ou Administrador aceitarem o pedido.</span></p>
               <button type="button" id="man-btnAceitarPedidoPeca" class="man-btn man-btn-success" onclick="aceitarPedidoPeca()"><i class="fas fa-hand-paper"></i> Aceitar Pedido de Peça</button>
             </div>
             <div id="man-supCampos">
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-play"></i> Início (Data/Hora)</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-supDataInicio" onchange="calcularTempoSupervisao()"><label>Hora</label><input type="time" id="man-supHoraInicio" onchange="calcularTempoSupervisao()"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-stop"></i> Fim (Data/Hora)</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-supDataFim" onchange="calcularTempoSupervisao()"><label>Hora</label><input type="time" id="man-supHoraFim" onchange="calcularTempoSupervisao()"></div></div>
-            <div class="man-form-row"><div class="man-form-label"><i class="fas fa-hourglass-half"></i> Tempo de atuação</div><div class="man-form-field"><input type="text" id="man-supTempoGasto" readonly placeholder="Calculado automaticamente" style="color:var(--man-green); font-weight:600;"></div></div>
+            <div class="man-form-row"><div class="man-form-label"><i class="fas fa-hourglass-half"></i> Tempo de atuação</div><div class="man-form-field"><input type="text" id="man-supTempoGasto" readonly placeholder="Calculado automaticamente" style="color:var(--green); font-weight:600;"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-shipping-fast"></i> Status da Compra</div><div class="man-form-field"><select id="man-manStatusCompra"><option value="">Selecione...</option><option value="Em Análise">Em Análise</option><option value="Cotação em andamento">Cotação em andamento</option><option value="Pedido efetuado">Pedido efetuado</option><option value="Peça em transporte">Peça em transporte</option><option value="Peça recebida">Peça recebida</option></select></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-calendar-check"></i> Previsão de Chegada</div><div class="man-form-field"><input type="date" id="man-manPrevisaoChegada"></div></div>
             <div class="man-form-row"><div class="man-form-label"><i class="fas fa-truck"></i> Nº Pedido / Fornecedor</div><div class="man-form-field"><input type="text" id="man-manFornecedor" placeholder="Pedido #123 - Fornecedor A"></div></div>
@@ -2908,19 +3000,40 @@
             </div>
           </div>
         </div>
-        
-        <!-- BOTÕES INFERIORES -->
+
+        <!-- 4ª ETAPA DO ASSISTENTE: FECHAMENTO — nova (antes só existia
+             como botão solto + modal). _manRenderizarFechamento()
+             (manutencao.js) decide o conteúdo: aviso (situação ainda não
+             é "Concluído"), resumo + botão (pronto pra fechar), ou
+             confirmação (já fechado). O botão continua abrindo o MESMO
+             modal de sempre (abrirModalFechamento/confirmarFechamento) —
+             só mudou ONDE o botão mora. -->
+        <div id="man-zonaFechamento" style="display:none;">
+          <div style="background:var(--green-dim); border-left:4px solid var(--green); padding:10px 0; margin:0;">
+            <div style="padding:0 16px 8px 16px; color:var(--green); font-weight:600;"><i class="fas fa-lock"></i> Fechamento</div>
+            <div id="man-fechamentoConteudo"></div>
+          </div>
+        </div>
+
+        <!-- BOTÕES INFERIORES — sempre visíveis, independente da etapa
+             atual do assistente (salva o que estiver preenchido, onde
+             quer que a pessoa esteja navegando). -->
         <div style="display:flex; gap:12px; margin:16px; padding:10px; flex-wrap:wrap;">
           <button type="button" id="man-btnSalvarManutencao" class="man-btn man-btn-success" data-manut-area="manutencao-chamado" onclick="salvarManutencao()"><i class="fas fa-save"></i> Salvar Chamado</button>
-          <button type="button" class="man-btn man-btn-warning" id="man-btnFecharEtiqueta" style="display:none;" data-manut-area="manutencao" onclick="abrirModalFechamento()"><i class="fas fa-lock"></i> Fechar Chamado</button>
           <button type="button" class="man-btn man-btn-outline" onclick="fecharFormulario()"><i class="fas fa-times"></i> Cancelar</button>
         </div>
       </form>
     </div>
 
-    <!-- PAINEL DE CHAMADOS -->
+    <!-- TODOS OS CHAMADOS — tabela somente-leitura (ver conversa: "sem a
+         opção de editar, só pra visualizar todos os chamados tipo numa
+         tabela"). Clique na linha abre a trajetória completa
+         (abrirHistorico) — não abre o formulário/assistente de edição;
+         quem quer agir usa o acordeão lá em cima. Mesmos filtros da
+         página se aplicam aqui também (mesmo conjunto de dados
+         filtrados de renderCorretiva()). -->
     <div class="man-card">
-      <div class="man-card-title"><i class="fas fa-wrench"></i> Painel de Chamados Corretivos</div>
+      <div class="man-card-title"><i class="fas fa-list"></i> Todos os Chamados (consulta)</div>
       <div class="man-table-wrap man-table-wrap--linha-unica">
         <table>
           <thead><tr>
@@ -2933,13 +3046,11 @@
             <th style="width: 8%;">Prioridade</th>
             <th style="width: 8%;">Etiqueta</th>
             <th style="width: 12%;">Status</th>
-            <th style="width: 12%;">Supervisão</th>
-            <th style="width: 10%;">Ações</th>
+            <th style="width: 13%;">Supervisão</th>
           </tr></thead>
           <tbody id="man-corretivaTableBody"></tbody>
         </table>
       </div>
-      <div id="man-pagCorretiva" class="man-pagination man-no-print"></div>
     </div>
   </div>
 
@@ -2947,25 +3058,25 @@
   <div id="man-programada" class="man-page">
     <div class="man-dashboard-kpis man-no-print">
       <div class="man-kpi-card"><div class="man-kpi-number" id="man-progTotal">0</div><div class="man-kpi-label"><i class="fas fa-calendar-alt"></i> Total</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-progPendentes" style="color:var(--man-yellow);">0</div><div class="man-kpi-label"><i class="fas fa-hourglass-start"></i> Pendentes</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-progAprovados" style="color:var(--man-green);">0</div><div class="man-kpi-label"><i class="fas fa-check-circle"></i> Aprovados</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-progReprovados" style="color:var(--man-red);">0</div><div class="man-kpi-label"><i class="fas fa-times-circle"></i> Reprovados</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-progPendentes" style="color:var(--accent);">0</div><div class="man-kpi-label"><i class="fas fa-hourglass-start"></i> Pendentes</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-progAprovados" style="color:var(--green);">0</div><div class="man-kpi-label"><i class="fas fa-check-circle"></i> Aprovados</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-progReprovados" style="color:var(--red);">0</div><div class="man-kpi-label"><i class="fas fa-times-circle"></i> Reprovados</div></div>
     </div>
 
     <div class="man-card">
       <div class="man-card-title"><i class="fas fa-pen-square"></i> Solicitar Manutenção Programada</div>
       <form class="man-form-paper" onsubmit="return false;">
         <!-- SEÇÃO 1: DADOS DA SOLICITAÇÃO -->
-        <div style="background:rgba(77,141,255,0.05); border-left:4px solid var(--man-blue); padding:10px 0; margin:0;">
-          <div style="padding:0 16px 8px 16px; color:var(--man-blue); font-weight:600;"><i class="fas fa-file-alt"></i> 1. Dados da Solicitação</div>
+        <div style="background:var(--blue-dim); border-left:4px solid var(--blue); padding:10px 0; margin:0;">
+          <div style="padding:0 16px 8px 16px; color:var(--blue); font-weight:600;"><i class="fas fa-file-alt"></i> 1. Dados da Solicitação</div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-building"></i> Setor</div><div class="man-form-field"><input type="text" id="man-progSetor" placeholder="Ex: Injetora"></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-industry"></i> Máquina</div><div class="man-form-field"><input type="text" id="man-progMaquina" placeholder="Ex: M01"></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-tools"></i> Tipo de Manutenção</div><div class="man-form-field"><select id="man-progTipo"><option value="Elétrica">Elétrica</option><option value="Mecânica">Mecânica</option></select></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-user"></i> Solicitante</div><div class="man-form-field"><input type="text" id="man-progSolicitante" placeholder="Seu nome"></div></div>
         </div>
         <!-- SEÇÃO 2: PLANEJAMENTO -->
-        <div style="background:rgba(245,130,31,0.05); border-left:4px solid var(--man-orange); padding:10px 0; margin:0;">
-          <div style="padding:0 16px 8px 16px; color:var(--man-orange); font-weight:600;"><i class="fas fa-calendar-check"></i> 2. Planejamento</div>
+        <div style="background:var(--accent-dim); border-left:4px solid var(--accent); padding:10px 0; margin:0;">
+          <div style="padding:0 16px 8px 16px; color:var(--accent); font-weight:600;"><i class="fas fa-calendar-check"></i> 2. Planejamento</div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-calendar-day"></i> Data Programada</div><div class="man-form-field"><input type="date" id="man-progData"></div></div>
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-clock"></i> Turno</div>
             <div class="man-form-field">
@@ -2990,7 +3101,7 @@
           <div class="man-form-row"><div class="man-form-label"><i class="fas fa-sticky-note"></i> Observações</div><div class="man-form-field"><textarea id="man-progObs" placeholder="Descreva o motivo ou necessidade..."></textarea></div></div>
           <div style="display:flex; gap:12px; margin:16px; padding:10px; flex-wrap:wrap;">
             <button type="button" class="man-btn man-btn-primary" data-manut-area="manutencao" onclick="verificarEAgendiar()"><i class="fas fa-calendar-check"></i> Verificar e Agendar</button>
-            <div id="man-progMensagem" style="font-size:13px; display:flex; align-items:center; color:var(--man-text-secondary);"></div>
+            <div id="man-progMensagem" style="font-size:13px; display:flex; align-items:center; color:var(--text-2);"></div>
           </div>
         </div>
       </form>
@@ -3007,25 +3118,25 @@
   <div id="man-dashboard" class="man-page">
     <div class="man-dashboard-kpis">
       <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiTotalAbertos">0</div><div class="man-kpi-label"><i class="fas fa-folder-open"></i> Chamados Abertos</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiTotalFechados" style="color:var(--man-green);">0</div><div class="man-kpi-label"><i class="fas fa-check-double"></i> Chamados Fechados</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiTotalFechados" style="color:var(--green);">0</div><div class="man-kpi-label"><i class="fas fa-check-double"></i> Chamados Fechados</div></div>
       <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiProgMes">0</div><div class="man-kpi-label"><i class="fas fa-calendar-alt"></i> Programadas no Mês</div></div>
       <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiProgHoje">0</div><div class="man-kpi-label"><i class="fas fa-calendar-day"></i> Manut. Hoje</div></div>
       <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiProgPend">0</div><div class="man-kpi-label"><i class="fas fa-hourglass-start"></i> Agend. Pendentes</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiCustoPecas" style="color:var(--man-yellow);">R$ 0</div><div class="man-kpi-label"><i class="fas fa-cogs"></i> Custo Peças</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiCustoMaoObra" style="color:var(--man-blue);">R$ 0</div><div class="man-kpi-label"><i class="fas fa-user-clock"></i> Mão de Obra</div></div>
-      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiCustoTotal" style="color:var(--man-orange);">R$ 0</div><div class="man-kpi-label"><i class="fas fa-coins"></i> Custo Total</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiCustoPecas" style="color:var(--accent);">R$ 0</div><div class="man-kpi-label"><i class="fas fa-cogs"></i> Custo Peças</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiCustoMaoObra" style="color:var(--blue);">R$ 0</div><div class="man-kpi-label"><i class="fas fa-user-clock"></i> Mão de Obra</div></div>
+      <div class="man-kpi-card"><div class="man-kpi-number" id="man-kpiCustoTotal" style="color:var(--accent);">R$ 0</div><div class="man-kpi-label"><i class="fas fa-coins"></i> Custo Total</div></div>
     </div>
     <div class="man-card"><div class="man-card-title"><i class="fas fa-chart-bar"></i> Evolução de Chamados (últimos 6 meses)</div><canvas id="man-chartManutencao" height="150"></canvas></div>
     <div class="man-card"><div class="man-card-title"><i class="fas fa-clock"></i> MTTR (Tempo Médio de Reparo) por Máquina</div><div id="man-mttrContainer"></div></div>
-    <div class="man-card"><div class="man-card-title"><i class="fas fa-folder-open"></i> Últimos Chamados Abertos</div><div id="man-dashboardAbertos" style="font-size:13px; color:var(--man-text-secondary);">Nenhum chamado aberto recente.</div></div>
-    <div class="man-card"><div class="man-card-title"><i class="fas fa-check-double"></i> Últimos Chamados Fechados</div><div id="man-dashboardFechados" style="font-size:13px; color:var(--man-text-secondary);">Nenhum chamado fechado recente.</div></div>
+    <div class="man-card"><div class="man-card-title"><i class="fas fa-folder-open"></i> Últimos Chamados Abertos</div><div id="man-dashboardAbertos" style="font-size:13px; color:var(--text-2);">Nenhum chamado aberto recente.</div></div>
+    <div class="man-card"><div class="man-card-title"><i class="fas fa-check-double"></i> Últimos Chamados Fechados</div><div id="man-dashboardFechados" style="font-size:13px; color:var(--text-2);">Nenhum chamado fechado recente.</div></div>
   </div>
 
   <!-- MODAIS EXISTENTES -->
   <div id="man-modalRecusaChamado" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
       <h2><i class="fas fa-times-circle"></i> Recusar Chamado</h2>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Explique por que este chamado deveria ser recusado. Isso vira uma solicitação pra Supervisão, Encarregado ou Administrador revisarem.</p>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Explique por que este chamado deveria ser recusado. Isso vira uma solicitação pra Supervisão, Encarregado ou Administrador revisarem.</p>
       <form class="man-form-paper" onsubmit="return false;">
         <div class="man-form-row"><div class="man-form-label"><i class="fas fa-comment-alt"></i> Motivo</div><div class="man-form-field"><textarea id="man-recusaMotivoInput" placeholder="Ex: Chamado duplicado, fora do escopo da Manutenção, etc."></textarea></div></div>
         <div style="display:flex; gap:12px; margin-top:16px; padding:10px; justify-content:flex-end;">
@@ -3039,7 +3150,7 @@
   <div id="man-modalFechamento" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
       <h2><i class="fas fa-lock"></i> Confirmar Fechamento do Chamado</h2>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Revise o resumo antes de finalizar:</p>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Revise o resumo antes de finalizar:</p>
       <div id="man-modalResumoBody"></div>
       <div class="man-modal-actions" style="display:flex; gap:12px; margin-top:24px; justify-content:flex-end;">
         <button class="man-btn man-btn-success" data-manut-area="manutencao" onclick="confirmarFechamento()"><i class="fas fa-check"></i> Confirmar e Fechar</button>
@@ -3055,7 +3166,7 @@
         <div class="man-trajetoria-titulo"><i class="fas fa-route"></i> Progresso do Chamado</div>
         <div id="man-progressoChamado" class="man-trajetoria-wrap"></div>
       </div>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Linha do tempo visual do chamado:</p>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Linha do tempo visual do chamado:</p>
       <div id="man-historicoBody" style="font-size: 14px; line-height: 1.6; max-height: 400px; overflow-y: auto;"></div>
       <div class="man-modal-actions" style="display:flex; gap:12px; margin-top:24px; justify-content:flex-end;">
         <button class="man-btn man-btn-outline" onclick="fecharModalHistorico()">Fechar</button>
@@ -3066,7 +3177,7 @@
   <div id="man-modalInicioProgramada" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
       <h2><i class="fas fa-play"></i> Iniciar Execução da Tarefa</h2>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Registre o horário de início da execução.</p>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Registre o horário de início da execução.</p>
       <form id="man-inicioForm" class="man-form-paper" onsubmit="return false;">
         <input type="hidden" id="man-inicioId">
         <div class="man-form-row"><div class="man-form-label"><i class="fas fa-clock"></i> Início (Data/Hora):</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-inicioData" onchange="calcularTempoEstimado()"><label>Hora</label><input type="time" id="man-inicioHora" onchange="calcularTempoEstimado()"></div></div>
@@ -3081,13 +3192,13 @@
   <div id="man-modalFinalizarProgramada" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
       <h2><i class="fas fa-stopwatch"></i> Finalizar Execução da Tarefa</h2>
-      <div id="man-execucaoAvisoAtraso" style="display:none; padding:10px; margin-bottom:12px; border:1px solid var(--man-red); background:rgba(255,92,108,0.1); border-radius:6px; color:var(--man-red); font-weight:600;"><i class="fas fa-exclamation-triangle"></i> Esta tarefa está ATRASADA! Por favor, informe o motivo do atraso ou da não execução no campo abaixo.</div>
+      <div id="man-execucaoAvisoAtraso" style="display:none; padding:10px; margin-bottom:12px; border:1px solid var(--red); background:var(--red-dim); border-radius:6px; color:var(--red); font-weight:600;"><i class="fas fa-exclamation-triangle"></i> Esta tarefa está ATRASADA! Por favor, informe o motivo do atraso ou da não execução no campo abaixo.</div>
       <form id="man-execForm" class="man-form-paper" onsubmit="return false;">
         <input type="hidden" id="man-execId">
-        <div class="man-form-row" style="background:var(--man-bg-card); border-radius:6px; margin-bottom:6px;"><div class="man-form-label" style="grid-column: span 2; border-right:none; background:transparent;"><i class="fas fa-clock"></i> Período de Execução</div></div>
+        <div class="man-form-row" style="background:var(--bg-card); border-radius:6px; margin-bottom:6px;"><div class="man-form-label" style="grid-column: span 2; border-right:none; background:transparent;"><i class="fas fa-clock"></i> Período de Execução</div></div>
         <div class="man-form-row"><div class="man-form-label">Início (Data/Hora):</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-execDataInicio" readonly style="opacity:0.7; cursor:not-allowed;"><label>Hora</label><input type="time" id="man-execHoraInicio" readonly style="opacity:0.7; cursor:not-allowed;"></div></div>
         <div class="man-form-row"><div class="man-form-label">Fim (Data/Hora):</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-execDataFim" onchange="calcularTempoExecucao()"><label>Hora</label><input type="time" id="man-execHoraFim" onchange="calcularTempoExecucao()"></div></div>
-        <div class="man-form-row"><div class="man-form-label">Tempo gasto:</div><div class="man-form-field"><input type="text" id="man-execTempoGasto" readonly placeholder="Calculado automaticamente" style="color:var(--man-orange); font-weight:600; width:100%;"></div></div>
+        <div class="man-form-row"><div class="man-form-label">Tempo gasto:</div><div class="man-form-field"><input type="text" id="man-execTempoGasto" readonly placeholder="Calculado automaticamente" style="color:var(--accent); font-weight:600; width:100%;"></div></div>
         <div class="man-form-row"><div class="man-form-label">Responsável pela Execução:</div>
           <div class="man-form-field">
             <select id="man-execTipoExecucao" onchange="toggleExecEmpresaExterna()">
@@ -3112,13 +3223,13 @@
   <div id="man-modalAprovacaoProgramada" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
       <h2><i class="fas fa-check-circle"></i> Aprovar Tarefa e Definir Horário</h2>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Defina o horário de início e fim estimados para a execução da tarefa.</p>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Defina o horário de início e fim estimados para a execução da tarefa.</p>
       <form id="man-aprForm" class="man-form-paper" onsubmit="return false;">
         <input type="hidden" id="man-aprId">
-        <div class="man-form-row" style="background:var(--man-bg-card); border-radius:6px; margin-bottom:6px;"><div class="man-form-label" style="grid-column: span 2; border-right:none; background:transparent;"><i class="fas fa-clock"></i> Sugestão do Operador: <span id="man-aprSugestaoDisplay" style="color:var(--man-text-primary); font-weight:600;">--:--</span></div></div>
+        <div class="man-form-row" style="background:var(--bg-card); border-radius:6px; margin-bottom:6px;"><div class="man-form-label" style="grid-column: span 2; border-right:none; background:transparent;"><i class="fas fa-clock"></i> Sugestão do Operador: <span id="man-aprSugestaoDisplay" style="color:var(--text); font-weight:600;">--:--</span></div></div>
         <div class="man-form-row"><div class="man-form-label">Início Previsto (Data/Hora):</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-aprDataInicio" onchange="calcularTempoEstimado()"><label>Hora</label><input type="time" id="man-aprHoraInicio" onchange="calcularTempoEstimado()"></div></div>
         <div class="man-form-row"><div class="man-form-label">Fim Previsto (Data/Hora):</div><div class="man-form-datetime-group"><label>Data</label><input type="date" id="man-aprDataFim" onchange="calcularTempoEstimado()"><label>Hora</label><input type="time" id="man-aprHoraFim" onchange="calcularTempoEstimado()"></div></div>
-        <div class="man-form-row"><div class="man-form-label">Duração Estimada:</div><div class="man-form-field"><input type="text" id="man-aprTempoEstimado" readonly placeholder="Calculado automaticamente" style="color:var(--man-orange); font-weight:600; width:100%;"></div></div>
+        <div class="man-form-row"><div class="man-form-label">Duração Estimada:</div><div class="man-form-field"><input type="text" id="man-aprTempoEstimado" readonly placeholder="Calculado automaticamente" style="color:var(--accent); font-weight:600; width:100%;"></div></div>
         <div class="man-form-row"><div class="man-form-label">Responsável pela Aprovação:</div><div class="man-form-field"><input type="text" id="man-aprResponsavel" placeholder="Nome do técnico/supervisor que aprova" style="width:100%;"></div></div>
         <div style="display:flex; gap:12px; margin-top:16px; padding:10px; justify-content:flex-end;">
           <button type="button" class="man-btn man-btn-success" data-manut-area="manutencao" onclick="confirmarAprovacao()"><i class="fas fa-check"></i> Confirmar Aprovação</button>
@@ -3131,7 +3242,7 @@
   <div id="man-modalDetalhesProgramada" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
       <h2><i class="fas fa-file-alt"></i> Detalhes da Solicitação</h2>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Visualização completa dos dados:</p>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Visualização completa dos dados:</p>
       <div id="man-detalhesProgramadaBody"></div>
       <div class="man-modal-actions" style="display:flex; gap:12px; margin-top:24px; justify-content:flex-end;">
         <button class="man-btn man-btn-outline" onclick="fecharModalDetalhesProgramada()">Fechar</button>
@@ -3142,8 +3253,8 @@
   <!-- NOVO MODAL: REPROVAÇÃO DE AGENDAMENTO -->
   <div id="man-modalReprovacaoProgramada" class="man-modal-overlay" style="display: none;">
     <div class="man-modal-content">
-      <h2><i class="fas fa-times-circle" style="color:var(--man-red);"></i> Reprovar Agendamento</h2>
-      <p style="color: var(--man-text-secondary); margin-bottom: 16px; font-size: 14px;">Por favor, informe o motivo da reprovação do agendamento para registro no histórico.</p>
+      <h2><i class="fas fa-times-circle" style="color:var(--red);"></i> Reprovar Agendamento</h2>
+      <p style="color: var(--text-2); margin-bottom: 16px; font-size: 14px;">Por favor, informe o motivo da reprovação do agendamento para registro no histórico.</p>
       <form id="man-reprovacaoForm" class="man-form-paper" onsubmit="return false;">
         <input type="hidden" id="man-reprovacaoId">
         <div class="man-form-row"><div class="man-form-label"><i class="fas fa-sticky-note"></i> Justificativa</div><div class="man-form-field"><textarea id="man-reprovacaoJustificativa" placeholder="Ex: Não será possível realizar nesta data devido a falta de peças..."></textarea></div></div>
@@ -3160,7 +3271,7 @@
 </div>
 
       </div>
-    </main>
+    </main>
 
   </div><!-- .app-shell -->
 
@@ -3222,7 +3333,7 @@
 <!-- ============ MODAL CONFIGURAÇÕES ============ -->
   <div id="config-modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
-    <div
+    <div class="cfg-modal-box"
       style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:880px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
@@ -3236,10 +3347,10 @@
         </div>
       </div>
 
-      <div style="display:flex;gap:24px;align-items:flex-start">
+      <div class="cfg-modal-layout" style="display:flex;gap:24px;align-items:flex-start">
 
         <!-- ---- Menu lateral ---- -->
-        <div style="width:190px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;border-right:1px solid var(--border);padding-right:20px">
+        <div class="cfg-modal-nav" style="width:190px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;border-right:1px solid var(--border);padding-right:20px">
           <button type="button" id="cfg-nav-dados" onclick="cfgMostrarSecao('dados')"
             style="text-align:left;background:var(--bg-2);border:1px solid var(--accent-dim);color:var(--accent);border-radius:var(--radius);padding:10px 14px;font-size:.85rem;cursor:pointer;font-weight:600">
             🔧 Baterias e Montagem</button>
@@ -3267,7 +3378,7 @@
         </div>
 
         <!-- ---- Conteúdo ---- -->
-        <div style="flex:1;min-width:0;max-height:68vh;overflow-y:auto;padding-right:6px">
+        <div class="cfg-modal-content" style="flex:1;min-width:0;max-height:68vh;overflow-y:auto;padding-right:6px">
 
           <!-- ========== SEÇÃO: Baterias e Tipos de Montagem ========== -->
           <div id="cfg-secao-dados">
@@ -4142,7 +4253,7 @@
 
     </div>
   </div>
-
+
   <!-- ============ MODAL IMPORTAÇÃO ============ -->
   <!-- ============ MODAL EXPORTAÇÃO CSV ============ -->
   <div id="export-modal"
@@ -4212,7 +4323,7 @@
 
     </div>
   </div>
-
+
   <!-- ============ MODAL EXPORTAÇÃO EXCEL — RELATÓRIO DE INJEÇÃO ============ -->
   <div id="export-relatorio-modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">
@@ -4283,7 +4394,7 @@
 
     </div>
   </div>
-
+
 <!-- ============ MODAL: RESTAURAR BACKUP DE DADOS ============ -->
   <div id="restaurar-backup-modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center">

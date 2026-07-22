@@ -247,7 +247,12 @@ h4 {
 .app-shell {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: 56px 1fr;
+  /* "auto" em vez de "56px" fixo — em telas estreitas a topbar pode
+     precisar quebrar em 2 linhas (ver @media abaixo); com altura fixa,
+     esse conteúdo extra ficava cortado/sobreposto ao invés de empurrar
+     o resto da página pra baixo. min-height na .topbar (abaixo) garante
+     os mesmos 56px de sempre quando cabe tudo numa linha só. */
+  grid-template-rows: auto 1fr;
   min-height: 100vh;
 }
 
@@ -258,6 +263,7 @@ h4 {
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
+  min-height: 56px;
   padding: 0 24px;
   gap: 16px;
   z-index: 100;
@@ -345,14 +351,15 @@ h4 {
   background: var(--bg-3);
   border: 1px solid var(--border);
   color: var(--text-2);
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   border-radius: 4px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .sidebar-label {
@@ -448,12 +455,179 @@ h4 {
   gap: 20px;
 }
 
+/* Identificação da Bateria: Data/Turno/ID/Dimensão/Capacidade/Tipo de
+   Montagem/Berços Injetados — 7 campos, 3 por linha no desktop. Sem
+   breakpoint próprio, isso vira 7 colunas espremidas de ~50px numa tela
+   de celular — ver @media abaixo. */
+.op-grid-identificacao {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+/* Início/Fim da Injeção, Tempo Total, Atraso — 4 campos numa linha só
+   no desktop. Mesmo problema em tela estreita — ver @media abaixo. */
+.op-grid-controle {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 14px;
+  align-items: end;
+}
+
+/* Cards de Total de Painéis/m² por tipo — quantidade de colunas na
+   verdade é DINÂMICA (operacao.js injeta 1 par de cards — painéis + m²
+   — por tipo de painel usado na bateria, dentro de #op-cards-paineis-tipo
+   e #op-cards-m2-tipo, ambos com display:contents pra virarem itens
+   diretos DESTE grid). "repeat(7,1fr)" era só um chute de quantas
+   colunas cabem — com auto-fit, cada coluna tem no mínimo 70px (dá pra
+   ler o número) e quantas couberem na largura disponível ficam numa
+   linha só; o resto quebra pra próxima — funciona igual em qualquer
+   tela e não depende de quantos tipos a bateria tiver. */
+.op-grid-paineis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 8px;
+  text-align: center;
+}
+
+/* Card de status (badge + botões de Pendências/Referências + timer) —
+   antes tudo numa linha só (justify-content:space-between, sem wrap);
+   sem espaço lateral sobrando (ex: celular), timer saía espremido ou
+   cortado. Ver @media abaixo pra quebra em telas estreitas. */
+.op-status-card {
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.op-status-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.op-status-triggers {
+  display: flex;
+  gap: 8px;
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+.op-status-timers {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+/* Página de Paradas — formulário de registro (esquerda) + KPIs/gráfico
+   (direita), lado a lado no desktop. Ver @media abaixo pra empilhar em
+   telas menores (mesmo breakpoint de .op-layout-grid, que tem o mesmo
+   formato "form + painel lateral"). */
+.paradas-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+  align-items: start;
+}
+
+/* Início/Término da parada — 2 campos de data/hora lado a lado dentro
+   do formulário. Só precisa empilhar em telas BEM estreitas (celular),
+   não no tablet — mesmo com .paradas-layout-grid já em 1 coluna lá, o
+   formulário sozinho ainda é largo o bastante pros 2 campos ao mesmo
+   tempo. Ver @media de celular, abaixo. */
+.paradas-form-datas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* Página de Turnos — mini-grid de 6 estatísticas (Baterias/m²/Painéis/
+   %Atraso/Tempo Médio/2P-SP) dentro de cada card de turno (1º/2º/3º).
+   2 colunas seguram bem até telas bem estreitas (são só rótulo+valor
+   compactos, não campo de formulário) — só empilha de vez no celular
+   menor, ver @media abaixo. */
+.turnos-kpi-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Modal de Configurações (⚙, na topbar) — menu lateral (8 abas) +
+   conteúdo lado a lado, largura fixa de 190px pro menu, sem NENHUM
+   ajuste pra tela estreita. Num celular (modal com max-width:95vw —
+   ~356px numa tela de 375px, menos 2x32px de padding = ~292px de
+   sobra), sobrava menos de 100px pro conteúdo depois do menu — pior
+   caso encontrado nesse pente-fino de responsividade do app inteiro.
+   Como a maior parte do estilo aqui é INLINE (o próprio JS que troca
+   de aba troca o `style=""` do botão inteiro, não uma classe — ver
+   cfgMostrarSecao, app-core.js), inline sempre vence uma classe normal
+   por especificidade; as regras abaixo usam !important só onde
+   realmente precisa virar (não é preguiça — é a única forma de vencer
+   inline sem reescrever a troca de aba toda). */
+@media (max-width: 700px) {
+  .cfg-modal-box {
+    padding: 16px !important;
+  }
+
+  .cfg-modal-layout {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  /* Menu lateral vira uma fileira de abas no TOPO, rolável na
+     horizontal se não couber tudo — em vez de uma coluna fixa de
+     190px ao lado do conteúdo (que não sobrava quase nada pra ele). */
+  .cfg-modal-nav {
+    width: 100% !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0 !important;
+    padding-bottom: 12px !important;
+  }
+
+  .cfg-modal-nav button {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .cfg-modal-content {
+    max-height: none !important;
+    padding-right: 0 !important;
+  }
+}
+
 @media (max-width: 1200px) {
   .op-layout-grid {
     grid-template-columns: 1fr;
   }
   .op-info-column {
     position: static;
+  }
+  .paradas-layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* 6 -> 3 colunas — o card da Taxa de Acerto (grid-column:span 2, no
+     HTML) automaticamente vira 2/3 da linha, sem precisar mudar nada
+     nele; só a contagem de colunas do grid muda. Ver breakpoint de
+     tablet/celular, abaixo, pra reduzir mais. */
+  .qt-kpi-grid-6 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* 4 "colunas" -> 2x2 — cada coluna vira largura igual (a 4ª perde o
+     2fr especial, que só fazia sentido ao lado de outras 3 mais
+     estreitas). Ver breakpoint de celular, abaixo, pra empilhar tudo
+     numa coluna só. */
+  .ao-kpi-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -538,10 +712,22 @@ h4 {
   background: var(--bg-3);
   cursor: grab;
   user-select: none;
+  /* Essencial pro arraste por toque (ver _poTouchMove, paletes-ordem.js)
+     — sem isso, tentar arrastar na vertical só rola a página/modal em
+     vez de mover o palete; o navegador nunca chega a considerar isso
+     um "arraste", trata como um scroll comum. */
+  touch-action: none;
 }
 
 .po-pallet-label:active {
   cursor: grabbing;
+}
+
+/* Enquanto o dedo segura um palete (touchstart até touchend/touchcancel)
+   — mesma ideia visual do :active do mouse, só que esse cobre o tempo
+   TODO do arraste por toque (não só o instante do toque em si). */
+.po-pallet-label-arrastando {
+  opacity: .5;
 }
 
 .po-pallet-col.po-pallet-col-dragover .po-pallet-label {
@@ -754,6 +940,30 @@ h4 {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
+}
+
+/* Análise Operacional — 4 "colunas" de KPI lado a lado (Produção /
+   Ciclo / Atrasos / Eficiência+Melhor-Pior), a última mais larga (2fr)
+   porque tem uma sub-grade dentro. Não dá pra usar .kpi-grid (auto-fit
+   simples) direto porque essas "colunas" não são cards individuais —
+   cada uma é uma coluna com 2-3 cards empilhados dentro. Em telas
+   menores agrupa 2x2 e depois empilha tudo — ver @media abaixo. */
+.ao-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr) 2fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* Qualidade de Traços (CEP) — linha 1 de KPIs: Taxa de Acerto (card
+   maior, ocupa 2 das 6 colunas) + Total de Ajustes + Média/Traço +
+   Receita Estável + Receita Instável = 6 colunas ao todo. Ver @media
+   abaixo pra reduzir sem perder a proporção do card da Taxa. */
+.qt-kpi-grid-6 {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .kpi-card {
@@ -1659,11 +1869,30 @@ td.mono {
 }
 
 /* ---- MENU page ---- */
+.menu-page-wrap {
+  padding: 40px 32px;
+}
+
+.menu-page-header {
+  margin-bottom: 40px;
+}
+
+.menu-page-title {
+  font-size: 2.6rem;
+  margin-bottom: 6px;
+}
+
+.menu-page-subtitle {
+  color: var(--text-3);
+  font-size: .9rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
 .menu-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 20px;
-  padding: 40px 32px;
   max-width: 1350px;
   margin: 0 auto;
 }
@@ -1731,9 +1960,66 @@ td.mono {
     grid-template-columns: 1fr;
   }
 
+  /* 3 -> 2 colunas — Taxa de Acerto (span 2) já vira linha inteira
+     sozinha aqui (ver .qt-kpi-grid-6, e o breakpoint de 1200px, que
+     leva de 6 pra 3 colunas primeiro). */
+  .qt-kpi-grid-6 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Topbar: logo + assinatura + fila pendente + usuário + Debriefing +
+     data/hora/tema/sair não cabem mais numa linha só a partir daqui —
+     deixa quebrar em 2 linhas (a .topbar já não tem mais altura fixa,
+     ver .app-shell acima, então isso empurra o conteúdo pra baixo em
+     vez de cortar/sobrepor). "Sistema de Injeção V1.0" é só decorativo
+     — primeiro a sumir quando o espaço aperta. */
+  .topbar {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    row-gap: 6px;
+  }
+
+  .topbar-sub {
+    display: none;
+  }
+
+  .topbar-right {
+    margin-left: 0;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
   .grid-2,
   .grid-3 {
     grid-template-columns: 1fr;
+  }
+
+  /* Identificação da Bateria: 3 -> 2 colunas no tablet (7 campos ainda
+     cabem bem em pares) — ver breakpoint de celular, abaixo, pra 1
+     coluna. Controle de Injeção: 4 -> 2 (Início/Fim numa linha, Tempo
+     Total/Atraso na outra). */
+  .op-grid-identificacao {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .op-grid-controle {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* 2x2 (ver breakpoint de 1200px, acima) -> 1 coluna só, tudo empilhado. */
+  .ao-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Card de status: badge/botões de um lado, timer do outro — em telas
+     menores, quebra em 2 linhas em vez de espremer ou cortar. */
+  .op-status-card {
+    flex-wrap: wrap;
+  }
+
+  .op-status-timers {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .traco-card-header {
@@ -1762,6 +2048,108 @@ td.mono {
 
   .page-header {
     padding: 20px 16px 0;
+  }
+
+  .menu-page-wrap {
+    padding: 24px 16px;
+  }
+
+  .menu-page-header {
+    margin-bottom: 24px;
+  }
+
+  .menu-page-title {
+    font-size: 1.9rem;
+  }
+}
+
+/* Celular (mais estreito que o breakpoint de tablet acima) — ajustes
+   finos que só fazem falta quando o espaço aperta de verdade. */
+@media (max-width: 600px) {
+  /* Popovers no geral (Pendências, Referências, menus de coluna etc.) —
+     nascem ancorados (position:absolute) no botão que os abre; em telas
+     estreitas, se esse botão não estiver perto da borda esquerda, o
+     popover pode ultrapassar a borda direita da tela. Isso não muda
+     ONDE ele nasce (ainda gruda no botão) — só impede que ele seja mais
+     largo que a tela chegou a ficar. */
+  .ao-popover {
+    max-width: calc(100vw - 24px);
+  }
+
+  /* Início/Término da parada: 1 campo por linha — só aqui, em tela de
+     celular de verdade (ver .paradas-form-datas, acima). */
+  .paradas-form-datas {
+    grid-template-columns: 1fr;
+  }
+
+  /* 2 -> 1 coluna — tudo empilhado, inclusive a Taxa de Acerto (span 2
+     não faz diferença com só 1 coluna existindo). */
+  .qt-kpi-grid-6 {
+    grid-template-columns: 1fr;
+  }
+
+  /* Mini-grid de estatísticas de cada card de turno — só empilha de
+     vez aqui, em celular de verdade (ver .turnos-kpi-mini-grid). */
+  .turnos-kpi-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Identificação da Bateria e Controle de Injeção: 1 campo por linha
+     — em telas de celular de verdade, 2 colunas ainda fica apertado
+     pros rótulos mais longos (ex: "ID da Bateria", "Berços Injetados"). */
+  .op-grid-identificacao,
+  .op-grid-controle {
+    grid-template-columns: 1fr;
+  }
+
+  /* "dd/mm" da data no relógio da topbar é o item menos essencial que
+     sobra depois do .topbar-sub já ter saído (ver breakpoint de 900px,
+     acima) — sai também aqui, mantém só o relógio (mais útil de bater o
+     olho rápido) e o resto (tema/sair/config). */
+  #topbar-date {
+    display: none;
+  }
+
+  /* Botão "📓 Debriefing do Dia" perde o texto, fica só o ícone — meio
+     texto ("Debriefing do Dia") empurrava o resto da topbar pra quebrar
+     em 2-3 linhas sem necessidade; o ícone sozinho já é reconhecível
+     (é o único botão com esse emoji na tela). */
+  .topbar button[onclick*="LWDebriefing.toggle"] {
+    font-size: 0;
+    padding: 6px 8px;
+  }
+  .topbar button[onclick*="LWDebriefing.toggle"]::before {
+    content: '📓';
+    font-size: 1rem;
+  }
+
+  /* O popover de Debriefing normalmente nasce ancorado (position:
+     absolute) embaixo do botão que abriu ele (ver .ao-popover) — como
+     esse botão fica no meio da topbar, o popover (até 560px de largura)
+     saía cortado pela borda da tela num celular. Em vez de ficar preso
+     à posição do botão, vira um painel fixo, centralizado na tela. */
+  .debriefing-popover {
+    position: fixed;
+    left: 50%;
+    top: 90px;
+    transform: translateX(-50%);
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 110px);
+  }
+  .debriefing-popover::before {
+    display: none; /* a "setinha" apontando pro botão não faz sentido mais estando centralizado */
+  }
+
+  /* Card do menu principal: em telas bem estreitas, um pouco menos de
+     respiro interno (sem mudar o grid — auto-fit já empilha em 1 coluna
+     sozinho a partir de ~272px, ver .menu-grid). */
+  .menu-page-title {
+    font-size: 1.6rem;
+  }
+
+  .menu-card {
+    padding: 20px;
   }
 }
 
