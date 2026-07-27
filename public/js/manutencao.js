@@ -198,6 +198,24 @@
     const p = _meuPerfilAtual();
     return p === 'Supervisao' || p === 'Encarregado';
   }
+  // Mesma regra de podeRenotificarManutencao (server.js) — Encarregado,
+  // Administrativo, Admin Master ou Supervisão (pedido do usuário: só
+  // quem cobra o aceite, perfil Manutenção fica de fora do botão
+  // "Renotificar").
+  function _podeRenotificarAtual() {
+    if (_souAdminAtual()) return true;
+    const p = _meuPerfilAtual();
+    return p === 'Supervisao' || p === 'Encarregado';
+  }
+  // Mesma regra de podeConfirmarRecebimentoPeca (server.js) — Manutenção,
+  // Supervisão, Encarregado ou Admin (mesmo grupo de
+  // _podeAceitarChamadoAtual — quem confirma é o mesmo público que
+  // executa a manutenção).
+  function _podeConfirmarRecebimentoAtual() {
+    if (_souAdminAtual()) return true;
+    const p = _meuPerfilAtual();
+    return p === 'Manutencao' || p === 'Supervisao' || p === 'Encarregado';
+  }
 
   function _idsSecaoAbertura() {
     return ['man-manSetor', 'man-manMaquina', 'man-manTurno', 'man-manData', 'man-manObservador'];
@@ -256,6 +274,7 @@
     const normal = document.getElementById('man-aceitarChamadoNormal');
     const btnAceitar = document.getElementById('man-btnAceitarChamado');
     const btnRecusar = document.getElementById('man-btnRecusarChamado');
+    const btnRenotificar = document.getElementById('man-btnRenotificarChamado');
     const recusaBox = document.getElementById('man-recusaPendenteBox');
     const recusaBotoes = document.getElementById('man-recusaBotoesRevisor');
     const recusaSolicitante = document.getElementById('man-recusaInfoSolicitante');
@@ -287,6 +306,11 @@
       const podeAgir = _podeAceitarChamadoAtual(); // mesmo grupo: Manutenção/Supervisão/Encarregado/Admin
       btnAceitar.style.display = podeAgir ? 'inline-block' : 'none';
       btnRecusar.style.display = podeAgir ? 'inline-block' : 'none';
+      // "Renotificar" — pedido do usuário: visível só pra quem cobra o
+      // aceite (Encarregado/Supervisão/Admin), NÃO pra Manutenção (mesmo
+      // grupo que aceita o chamado, mas checagem própria — ver
+      // _podeRenotificarAtual, acima).
+      if (btnRenotificar) btnRenotificar.style.display = _podeRenotificarAtual() ? 'inline-block' : 'none';
     }
   }
 
@@ -296,19 +320,40 @@
   // inteira; esta função só decide o que aparece DENTRO dela).
   function _atualizarGateAcompanhamento() {
     const box = document.getElementById('man-aceitarPedidoPecaBox');
+    const confirmBox = document.getElementById('man-confirmarRecebimentoBox');
     const campos = document.getElementById('man-supCampos');
     const btn = document.getElementById('man-btnAceitarPedidoPeca');
-    if (!box || !campos || !btn) return;
+    const btnRenotificar = document.getElementById('man-btnRenotificarPedidoPeca');
+    const btnConfirmar = document.getElementById('man-btnConfirmarRecebimento');
+    if (!box || !campos || !btn || !confirmBox) return;
     const m = _chamadoEmEdicao;
     const pedidoAceito = m && m.pedidoPecaAceito === 'Sim';
-    if (pedidoAceito) {
-      box.style.display = 'none';
-      campos.style.display = '';
-      _setCamposEditaveis(_idsSecaoAcompanhamento(), _podeAceitarPedidoPecaAtual());
-    } else {
+    // 3º portão do fluxo de peça (ver conversa que motivou isso): peça já
+    // marcada "recebida" pela Supervisão, mas a Manutenção ainda não
+    // confirmou que recebeu de verdade — trava aqui ANTES de reabrir o
+    // formulário de Execução (ver _pecaAguardandoConfirmacao, definida
+    // perto de _manDefinirStepInicial).
+    const aguardandoConfirmacao = _pecaAguardandoConfirmacao(m);
+    if (!pedidoAceito) {
+      confirmBox.style.display = 'none';
       campos.style.display = 'none';
       box.style.display = 'block';
       btn.style.display = _podeAceitarPedidoPecaAtual() ? 'inline-block' : 'none';
+      // "Renotificar" — pedido do usuário: visível só pra quem cobra o
+      // aceite (Encarregado/Supervisão/Admin), NÃO pra Manutenção (mesmo
+      // grupo que aceita o chamado, mas checagem própria — ver
+      // _podeRenotificarAtual, acima).
+      if (btnRenotificar) btnRenotificar.style.display = _podeRenotificarAtual() ? 'inline-block' : 'none';
+    } else if (aguardandoConfirmacao) {
+      box.style.display = 'none';
+      campos.style.display = 'none';
+      confirmBox.style.display = 'block';
+      if (btnConfirmar) btnConfirmar.style.display = _podeConfirmarRecebimentoAtual() ? 'inline-block' : 'none';
+    } else {
+      box.style.display = 'none';
+      confirmBox.style.display = 'none';
+      campos.style.display = '';
+      _setCamposEditaveis(_idsSecaoAcompanhamento(), _podeAceitarPedidoPecaAtual());
     }
   }
 
@@ -331,6 +376,53 @@
       editarManutencao(id); // reabre o formulário já com o novo estado
     } catch (e) {
       toast('Erro ao aceitar: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // Reenvia a notificação push de "chamado aguardando aceite" — pedido
+  // do usuário: botão "Renotificar" ao lado de "Aceitar Chamado"/
+  // "Recusar Chamado", visível só pra Encarregado/Supervisão/Admin (ver
+  // _podeRenotificarAtual, acima; o servidor valida de verdade, ver
+  // podeRenotificarManutencao, server.js).
+  async function renotificarChamado() {
+    const id = document.getElementById('man-manId')?.value;
+    if (!id) return;
+    const btn = document.getElementById('man-btnRenotificarChamado');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/manutencao/renotificar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, tipo: 'chamado' }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.erro || 'Erro ao renotificar.');
+      toast('Notificação reenviada pra quem pode aceitar o chamado.');
+    } catch (e) {
+      toast('Erro ao renotificar: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // Mesma ideia de renotificarChamado(), acima, pro pedido de peça —
+  // botão ao lado de "Aceitar Pedido de Peça".
+  async function renotificarPedidoPeca() {
+    const id = document.getElementById('man-manId')?.value;
+    if (!id) return;
+    const btn = document.getElementById('man-btnRenotificarPedidoPeca');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/manutencao/renotificar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, tipo: 'pedidoPeca' }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.erro || 'Erro ao renotificar.');
+      toast('Notificação reenviada pra quem pode aceitar o pedido de peça.');
+    } catch (e) {
+      toast('Erro ao renotificar: ' + e.message, 'error');
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -418,6 +510,33 @@
       editarManutencao(id);
     } catch (e) {
       toast('Erro ao aceitar pedido de peça: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // Confirmar RECEBIMENTO da peça (3º portão do fluxo de peça, ver
+  // conversa que motivou isso) — só depois disso o formulário de
+  // Execução reabre. Mesmo grupo de aceitarChamado (Manutenção/
+  // Supervisão/Encarregado/Admin — ver _podeConfirmarRecebimentoAtual,
+  // acima).
+  async function confirmarRecebimentoPeca() {
+    const id = document.getElementById('man-manId')?.value;
+    if (!id) return;
+    const btn = document.getElementById('man-btnConfirmarRecebimento');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/manutencao/confirmar-recebimento-peca', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.erro || 'Erro ao confirmar recebimento da peça.');
+      await carregarManutencoesDoServidor();
+      toast('Recebimento confirmado! O formulário de Execução já está liberado de novo.');
+      renderCorretiva();
+      editarManutencao(id); // reabre já no estado novo — _manDefinirStepInicial cai em "Execução"
+    } catch (e) {
+      toast('Erro ao confirmar recebimento: ' + e.message, 'error');
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -919,6 +1038,13 @@
         feito: m.statusCompra === 'Peça recebida',
         tooltip: m.statusCompra ? `Status da compra: ${m.statusCompra}` : 'Peça ainda não chegou',
       });
+      passos.push({
+        label: 'Recebimento confirmado',
+        feito: m.recebimentoPecaConfirmado === 'Sim',
+        tooltip: m.recebimentoPecaConfirmado === 'Sim'
+          ? `Confirmado por ${m.recebimentoPecaConfirmadoPor || '—'} em ${fmtData(m.recebimentoPecaConfirmadoEm)}`
+          : 'Aguardando a Manutenção confirmar que recebeu a peça',
+      });
     }
 
     passos.push({
@@ -1164,7 +1290,7 @@
   function _corretivaColuna(m) {
     if (m.recusaResultado === 'Aceita' || m.etiquetaFechada) return 'concluido';
     if (m.situacao === 'Concluido') return 'fechamento';
-    if ((m.aguardandoPecas || '') === 'Sim' && m.statusCompra !== 'Peça recebida') return 'peca';
+    if ((m.aguardandoPecas || '') === 'Sim' && (m.statusCompra !== 'Peça recebida' || _pecaAguardandoConfirmacao(m))) return 'peca';
     if (m.aceito === 'Sim') return 'execucao';
     return 'aceite';
   }
@@ -1198,6 +1324,11 @@
       return _podeAceitarPedidoPecaAtual()
         ? { texto: 'Sua vez: aceitar pedido de peça', urgente: true }
         : { texto: 'Aguardando aceite da Supervisão', urgente: false };
+    }
+    if (_pecaAguardandoConfirmacao(m)) {
+      return _podeConfirmarRecebimentoAtual()
+        ? { texto: 'Sua vez: confirmar recebimento da peça', urgente: true }
+        : { texto: 'Aguardando confirmação da Manutenção', urgente: false };
     }
     if (m.situacao === 'Concluido' && !m.etiquetaFechada) {
       const podeFechar = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
@@ -1336,6 +1467,18 @@
           const etiquetaCor = etiqueta === 'Azul' ? 'var(--blue)' : 'var(--red)';
           const etiquetaEmoji = etiqueta === 'Azul' ? '🔵' : '🔴';
           const fechadoIcon = m.etiquetaFechada ? '<i class="fas fa-lock" title="Etiqueta fechada"></i>' : '';
+          // Excluir na tabela de consulta é exclusivo do Administrador
+          // (master OU perfil Administrativo) — pedido do usuário:
+          // diferente do ícone de excluir do card no acordeão (que some
+          // depois que o chamado é processado/fechado, ver
+          // _renderizarCartaoCorretiva), aqui o admin precisa conseguir
+          // excluir QUALQUER chamado, aberto ou já finalizado. A
+          // validação que vale de verdade continua sendo do servidor
+          // (podeExcluirChamado, server.js); isto aqui só decide se o
+          // botão aparece.
+          const acaoExcluir = _souAdminAtual()
+            ? `<span style="color:var(--red); cursor:pointer;" title="Excluir chamado" onclick="event.stopPropagation(); excluirManutencao('${m.id}')"><i class="fas fa-trash-alt"></i></span>`
+            : '';
           return `<tr style="cursor:pointer;" onclick="abrirHistorico('${m.id}')" title="Ver trajetória do chamado">
             <td data-label="Nº"><strong>${esc(m.id)}</strong> ${fechadoIcon}</td>
             <td data-label="Máquina">${esc(m.maquina || '-')}</td>
@@ -1347,8 +1490,9 @@
             <td data-label="Etiqueta"><span style="color:${etiquetaCor}; font-weight:600;">${etiquetaEmoji} ${esc(etiqueta)}</span></td>
             <td data-label="Status"><span class="man-badge ${sc}">${esc(situacao)}</span></td>
             <td data-label="Supervisão"><span class="man-badge ${supClass}">${esc(supText)}</span></td>
+            <td data-label="Ações" onclick="event.stopPropagation();">${acaoExcluir}</td>
           </tr>`;
-        }).join('') : `<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--text-2);">Nenhum chamado encontrado.</td></tr>`;
+        }).join('') : `<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--text-2);">Nenhum chamado encontrado.</td></tr>`;
       }
     } catch (error) {
       console.error("Erro ao renderizar a área de corretiva:", error);
@@ -1385,6 +1529,16 @@
     _manAplicarStepAtual();
   }
 
+  // Peça já foi marcada "recebida" pela Supervisão (Status da Compra),
+  // mas a Manutenção ainda não confirmou que recebeu de verdade nas mãos
+  // — 3º portão do fluxo de peça (ver conversa que motivou isso). Também
+  // exige pedidoPecaAceito === 'Sim' (não faz sentido "confirmar
+  // recebimento" de um pedido que nem foi aceito ainda).
+  function _pecaAguardandoConfirmacao(m) {
+    return !!m && m.aguardandoPecas === 'Sim' && m.pedidoPecaAceito === 'Sim'
+      && m.statusCompra === 'Peça recebida' && m.recebimentoPecaConfirmado !== 'Sim';
+  }
+
   // Decide em qual etapa o assistente deve ABRIR — sempre a etapa onde a
   // próxima ação relevante está (mesmo raciocínio de _acaoPendenteCard(),
   // agora aplicado dentro do próprio formulário). Chamado novo (m null)
@@ -1395,7 +1549,21 @@
     if (m.recusaPendente === 'Sim') { _manStepAtual = 'execucao'; return; }
     if (m.aceito !== 'Sim') { _manStepAtual = 'execucao'; return; }
     if (m.situacao === 'Concluido' && !m.etiquetaFechada) { _manStepAtual = 'fechamento'; return; }
-    if ((m.aguardandoPecas || '') === 'Sim' && m.pedidoPecaAceito !== 'Sim') { _manStepAtual = 'peca'; return; }
+    // Enquanto o chamado estiver "aguardando peça" — do momento em que o
+    // pedido nasce até a peça efetivamente chegar (statusCompra = 'Peça
+    // recebida') E a Manutenção confirmar que recebeu de verdade (3º
+    // portão, ver _pecaAguardandoConfirmacao acima) — a próxima ação
+    // relevante está na etapa "Peça", esteja o pedido ainda pendente de
+    // aceite (Sup./Encarregado/Admin aceitam), já aceito e só
+    // acompanhando compra/entrega, OU já com a peça marcada como
+    // recebida mas aguardando a Manutenção confirmar (é justamente essa
+    // 3ª situação que faz a notificação push de "peça recebida", ao ser
+    // clicada, cair aqui em vez de pular direto pro formulário de
+    // Execução). Antes, esta condição exigia pedidoPecaAceito !== 'Sim',
+    // então assim que alguém aceitava o pedido, reabrir o chamado pela
+    // fila caía de volta na etapa "Execução" — mesmo com a peça ainda a
+    // caminho.
+    if ((m.aguardandoPecas || '') === 'Sim' && (m.statusCompra !== 'Peça recebida' || _pecaAguardandoConfirmacao(m))) { _manStepAtual = 'peca'; return; }
     _manStepAtual = 'execucao';
   }
 
@@ -1419,7 +1587,7 @@
     switch (_manStepAtual) {
       case 'abertura': return _podeEditarAberturaChamadoAtual(m);
       case 'execucao': return m.aceito === 'Sim' && _podeAceitarChamadoAtual();
-      case 'peca': return m.pedidoPecaAceito === 'Sim' && _podeAceitarPedidoPecaAtual();
+      case 'peca': return m.pedidoPecaAceito === 'Sim' && !_pecaAguardandoConfirmacao(m) && _podeAceitarPedidoPecaAtual();
       default: return false; // 'fechamento'
     }
   }
@@ -1447,7 +1615,7 @@
       const feito = m && (
         (step === 'abertura') ||
         (step === 'execucao' && m.aceito === 'Sim') ||
-        (step === 'peca' && m.pedidoPecaAceito === 'Sim') ||
+        (step === 'peca' && m.pedidoPecaAceito === 'Sim' && !_pecaAguardandoConfirmacao(m)) ||
         (step === 'fechamento' && !!m.etiquetaFechada)
       );
       btn.classList.toggle('feito', !!feito);
@@ -1631,7 +1799,13 @@
 
   async function excluirManutencao(id) { 
     const m = manutencoes.find(x => x.id === id); 
-    if (m && (m.etiquetaFechada || m.situacao !== 'Aguardando')) { 
+    // Trava de "só dá pra excluir enquanto ainda tá Aguardando" vale só
+    // pra quem NÃO é admin — pedido do usuário: o Administrador (master
+    // ou perfil Administrativo) precisa poder excluir qualquer chamado
+    // da lista "Todos os Chamados", aberto ou já finalizado/fechado. A
+    // trava de fundo continua sendo o servidor (podeExcluirChamado,
+    // server.js), isto aqui é só a checagem de UX.
+    if (m && !_souAdminAtual() && (m.etiquetaFechada || m.situacao !== 'Aguardando')) { 
       toast('Este chamado não pode mais ser excluído (já foi processado).', 'error'); 
       return; 
     } 
@@ -2273,6 +2447,33 @@
     a.click(); URL.revokeObjectURL(url); toast('Exportação CSV concluída!');
   }
 
+  // Deep-link de notificação push ("Novo chamado de manutenção" — ver
+  // lib/notificacoes-push.js e o listener 'message'/URL de boot em
+  // app-core.js): abre a página de Manutenção já com ESTE chamado
+  // específico selecionado, no mesmo estado que editarManutencao(id)
+  // deixaria se a pessoa tivesse clicado nele manualmente na lista
+  // (inclui a caixa "Aceitar/Recusar", ver _atualizarGateExecucao).
+  //
+  // SEMPRE recarrega do servidor antes de tentar abrir — mesmo que a
+  // página já estivesse inicializada nesta aba — porque o motivo de
+  // existir aqui é justamente um chamado que pode ter acabado de ser
+  // criado, ainda não presente no `manutencoes` já carregado em memória.
+  // Marca window._manInit ANTES de chamar init() de propósito: showPage()
+  // (app-core.js) confere essa flag pra decidir se dispara MAN.init() de
+  // novo — sem marcar aqui primeiro, os dois chamados de init() rodariam
+  // em paralelo (duas buscas concorrentes, mesmo resultado final, mas
+  // desperdício e mais uma fonte de corrida sem necessidade nenhuma).
+  async function abrirChamado(id) {
+    if (!id) return;
+    window._manInit = true;
+    await init();
+    if (!manutencoes.some(m => m.id === id)) {
+      toast('Chamado não encontrado — pode já ter sido fechado ou removido.', 'error');
+      return;
+    }
+    editarManutencao(id);
+  }
+
   // ============================================================
   // 7. INICIALIZAÇÃO
   // ============================================================
@@ -2335,6 +2536,7 @@
      do HTML (estático E gerado dinamicamente) para
      onclick="MAN.excluirManutencao(...)". */
   window.MAN = {
+    abrirChamado,
     abrirDetalhesProgramada,
     abrirHistorico,
     _construirPassosTrajetoria,
@@ -2349,6 +2551,9 @@
     responderRecusaChamado,
     aceitarChamado,
     aceitarPedidoPeca,
+    confirmarRecebimentoPeca,
+    renotificarChamado,
+    renotificarPedidoPeca,
     aoMudarSituacao,
     aplicarFiltrosCorretiva,
     aprovarAgendamento,
@@ -2409,6 +2614,9 @@
   window.responderRecusaChamado = MAN.responderRecusaChamado;
   window.aceitarChamado = MAN.aceitarChamado;
   window.aceitarPedidoPeca = MAN.aceitarPedidoPeca;
+  window.confirmarRecebimentoPeca = MAN.confirmarRecebimentoPeca;
+  window.renotificarChamado = MAN.renotificarChamado;
+  window.renotificarPedidoPeca = MAN.renotificarPedidoPeca;
   window.aoMudarSituacao = MAN.aoMudarSituacao;
   window.aplicarFiltrosCorretiva = MAN.aplicarFiltrosCorretiva;
   window.aprovarAgendamento = MAN.aprovarAgendamento;

@@ -7,7 +7,7 @@ Sistema interno de controle de operações de injeção de baterias (placas cime
 - **Backend**: Node.js puro (módulo `http`, sem framework), servindo arquivos estáticos e uma API simples em JSON. A lógica vinha toda num `server.js` só; está sendo fatiada por fases pra `lib/` (ver *Fatiamento de server.js*, abaixo).
 - **Frontend**: HTML/CSS/JS sem framework — `index.html` é gerado a partir de pedaços (`public/partials/` + `public/index.template.html`) por um pequeno script (`build-index.js`), em vez de ser editado à mão como um arquivo só de 5 mil linhas (ver *Fatiamento de index.html*, abaixo). Fora isso, continua sem framework nem bundler — é só um passo extra antes de rodar/editar.
 - **"Banco de dados"**: em migração, por fases, de arquivos JSON (`public/db/`) pra **SQLite** (`better-sqlite3`) — ver seção dedicada, abaixo. Os arquivos JSON que ainda não foram migrados continuam exatamente como sempre.
-- **Dependências**: `xlsx` (exportação/importação de Excel), `jszip` (geração e leitura de backups `.zip`), `ws` (WebSocket da Operação em Andamento), `better-sqlite3` (banco de dados). Nenhuma dependência nova foi adicionada nas mudanças de segurança/testes abaixo — `lib/sessao.js` usa só `crypto` nativo do Node, e os testes usam o test runner nativo (`node:test`).
+- **Dependências**: `xlsx` (exportação/importação de Excel), `jszip` (geração e leitura de backups `.zip`), `ws` (WebSocket da Operação em Andamento), `better-sqlite3` (banco de dados), `web-push` (notificações push de novo chamado de manutenção — ver *Notificações Push*, abaixo). `lib/sessao.js` usa só `crypto` nativo do Node, e os testes usam o test runner nativo (`node:test`).
 
 ## Como rodar
 
@@ -71,6 +71,9 @@ lib/
 test/
 ├── auth.test.js            # ver "Testes automatizados", acima
 └── helpers/servidor-teste.js
+deploy/
+├── instalar-https.sh     # HTTPS via Caddy + nip.io numa VM sem domínio próprio (ver "Notificações Push")
+└── Caddyfile.exemplo     # modelo de referência do Caddyfile gerado pelo script acima
 server.js               # servidor HTTP + rotas da API
 build-index.js          # monta public/index.html a partir do template + partials
 package.json
@@ -249,6 +252,55 @@ Pontos específicos desse domínio:
 - **Excluir uma peça** remove também todo o seu histórico de movimentações (cascata manual, já que `foreign_keys` está ativado no banco).
 - **Upload de foto/PDF** ainda é só visual — os campos existem na tela mas não fazem upload de verdade (limitação conhecida, ver abaixo).
 - Só `GET`/`POST` (nunca `DELETE`/`PUT`) — mesmo padrão do resto do sistema; exclusão/edição usam rotas próprias com o verbo no path (`/manutencao/excluir-corretiva`, `/manutencao/editar-estoque`), pra ficarem cobertas pela mesma proteção de tamanho máximo de corpo que `server.js` só aplica a `POST`.
+
+## Notificações Push (Manutenção)
+
+O servidor dispara uma notificação Web Push pra todo mundo cujo perfil tem a permissão marcada em 3 momentos do fluxo de um chamado corretivo — funciona tanto em PC quanto em celular (Android: qualquer navegador; iOS: só com o app adicionado à Tela de Início, Safari 16.4+):
+
+| Evento | Dispara quando | Item de permissão | Padrão de fábrica |
+|---|---|---|---|
+| **Abertura de chamado** | Chamado **NOVO** é aberto (`POST /manutencao/corretiva` sem `id` existente) | `manutencao-notificacao-abertura` | Quem edita a área `manutencao` (Manutenção, Supervisão, Encarregado, Administrador, Operador de Injetora) |
+| **Pedido de peça** | Chamado **já em execução** (`situacao='Em Manutencao'`) é salvo com `aguardandoPecas` passando pra `'Sim'` | `manutencao-notificacao-pedido-peca` | Supervisão, Encarregado, Administrador |
+| **Peça recebida** | Chamado é salvo com `statusCompra` passando pra `'Peça recebida'` | `manutencao-notificacao-peca-recebida` | Manutenção, Supervisão, Encarregado, Administrador |
+
+Em todos os casos: só dispara na **transição** de estado (nunca de novo em saves subsequentes do mesmo chamado já naquele estado), e quem causou o evento (quem está logado no momento) nunca recebe a própria notificação.
+
+- **Permissão** — cada evento acima tem seu próprio item no catálogo de permissões (`lib/itens-permissao.js`), dentro de Manutenção → Corretiva. Igual a qualquer outro item do catálogo, é configurável perfil a perfil (fixo ou customizado) em Configurações → Usuários → engrenagem ⚙️, ou de forma mais direta em **Configurações → Notificações** (tela dedicada só com esses 3 toggles, ver `public/js/notificacoes-config.js`). `Acesso Total` = recebe a notificação; `Apenas Visualizar`/`Ocultar` = não recebe — mas o Administrador pode mudar isso a qualquer momento, perfil a perfil.
+- **Ativar no dispositivo** — botão 🔔 na barra superior (só aparece logado e com o navegador suportando Web Push); pede permissão de notificação do navegador e inscreve o dispositivo (`lib/notificacoes-push.js`, `public/js/notificacoes-push.js`). Cada pessoa pode ativar em vários dispositivos ao mesmo tempo (PC do chão de fábrica + celular pessoal, por exemplo).
+- **Envio** — Web Push padrão (VAPID), sem depender de nenhum serviço de terceiro; chave gerada na 1ª subida e guardada em `private/vapid-keys.json` (fora do git). Disparo é *fire-and-forget*: uma falha ou demora no envio nunca atrasa nem quebra o salvamento do chamado em si; inscrições que o próprio serviço de push confirma como mortas (404/410) são removidas automaticamente.
+- **Rotas**: `GET /push/config` (chave pública + se há sessão), `POST /push/inscrever`, `POST /push/desinscrever` (ver `lib/rotas/notificacoes.js`).
+- **Exige HTTPS** (ou `localhost`) — exigência da própria Web Push API do navegador, não do código deste projeto: em HTTP simples o navegador nem expõe `navigator.serviceWorker`/`PushManager`, então o sino de notificações fica escondido (ver `_suportado()`, `public/js/notificacoes-push.js`). Se a instalação roda numa VM sem domínio/HTTPS (ex: acessada só pelo IP), veja a seção **HTTPS via Caddy + nip.io**, logo abaixo.
+- **Diagnóstico** — `node scripts/diagnosticar-push.js [usuário]` confere de uma vez: chaves VAPID, permissão de notificação de cada usuário cadastrado e quais dispositivos têm inscrição salva.
+
+### HTTPS via Caddy + nip.io (VM sem domínio próprio)
+
+Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é acessado só pelo IP da VM (`http://34.123.45.67:3000`, por exemplo), o navegador esconde o sino 🔔 porque a API nem fica disponível. `deploy/instalar-https.sh` resolve isso colocando o [Caddy](https://caddyserver.com/) (servidor com emissão automática de certificado Let's Encrypt) na frente do Node, usando o [nip.io](https://nip.io) — um serviço de DNS público e gratuito que resolve `A-B-C-D.nip.io` pro IP `A.B.C.D` automaticamente, sem precisar cadastrar nem comprar domínio nenhum.
+
+**Pré-requisitos**
+- VM com o Lightwall já rodando (`npm start`, ver *Como rodar*) — o script assume que o Node está escutando em `localhost` numa porta (padrão `3000`).
+- Portas **80** e **443** liberadas no firewall da VM (necessário pro Let's Encrypt validar o domínio e emitir o certificado). No Google Cloud: Console → VPC network → Firewall → criar/editar regra permitindo `tcp:80,443` de `0.0.0.0/0`.
+- Acesso root/sudo na VM.
+
+**Passo a passo**
+1. Acesse a VM via SSH.
+2. Dentro da pasta do projeto, rode:
+   ```bash
+   sudo bash deploy/instalar-https.sh [porta-do-node]
+   ```
+   `[porta-do-node]` é opcional — padrão `3000` (mesma porta padrão de `server.js`). Só informe se o `PORT` estiver configurado com outro valor.
+3. O script faz tudo sozinho:
+   - Descobre o IP externo da VM (via metadata do Google Cloud; se não conseguir — ex: VM fora do GCP — pergunta o IP manualmente).
+   - Instala o Caddy (repositório oficial via `apt`).
+   - Gera `/etc/caddy/Caddyfile` apontando `SEU-IP-COM-HIFENS.nip.io` → `localhost:PORTA` (ver `deploy/Caddyfile.exemplo` pra um modelo de referência, caso prefira editar manualmente).
+   - Recarrega o Caddy — ele mesmo emite e renova o certificado HTTPS automaticamente, sem passo manual nenhum.
+4. Ao final, acesse `https://SEU-IP-COM-HIFENS.nip.io` (ex: IP `34.123.45.67` → `https://34-123-45-67.nip.io`) — deve aparecer o cadeado do navegador. A URL antiga (`http://SEU-IP:3000`) para de ser usada.
+5. Peça pra cada pessoa clicar em "Ativar notificações" (🔔) de novo — inscrições feitas sob HTTP simples nunca existiram de verdade pro navegador, então não migram sozinhas.
+
+**Depois de instalado**
+- Pra reaplicar mudanças manuais no `/etc/caddy/Caddyfile`: `sudo systemctl reload caddy`.
+- Pra ver status/logs do Caddy: `sudo systemctl status caddy` / `sudo journalctl -u caddy -f`.
+- O certificado renova sozinho (Caddy cuida disso) — nenhuma tarefa cron extra é necessária.
+- Rodar o script de novo é seguro (idempotente): ele reinstala o Caddy se preciso e regrava o `Caddyfile` do zero com o IP atual.
 
 ## Autoria automática de registro
 

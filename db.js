@@ -484,6 +484,21 @@ db.exec(`
     pedido_peca_aceito        TEXT NOT NULL DEFAULT 'Nao',
     pedido_peca_aceito_por    TEXT,
     pedido_peca_aceito_em     TEXT,
+    -- Confirmação de RECEBIMENTO da peça (ver conversa que motivou isso):
+    -- depois que a Supervisão marca "Status da Compra = Peça recebida",
+    -- o formulário de Execução (Seção 3) NÃO reabre direto — antes disso,
+    -- a Manutenção (mesmo grupo de podeAceitarChamado: Manutenção/
+    -- Supervisão/Encarregado/Admin) precisa confirmar que recebeu a peça
+    -- de verdade nas mãos (POST /manutencao/confirmar-recebimento-peca).
+    -- Mesmo princípio de "aceito"/"pedido_peca_aceito": só a rota
+    -- dedicada (confirmarRecebimentoPecaManutencaoCorretiva) muda isso;
+    -- o upsert geral sempre preserva o valor já salvo. Reseta pra 'Nao'
+    -- junto com pedido_peca_aceito sempre que "aguardando_pecas" deixar
+    -- de ser 'Sim' (mesmo raciocínio: um NOVO pedido de peça, no futuro,
+    -- não deveria nascer já "confirmado" por causa de um pedido antigo).
+    recebimento_peca_confirmado      TEXT NOT NULL DEFAULT 'Nao',
+    recebimento_peca_confirmado_por  TEXT,
+    recebimento_peca_confirmado_em   TEXT,
     -- Fluxo de RECUSA do chamado (ver conversa que motivou isso): a
     -- Manutenção (ou Admin/Supervisão/Encarregado — mesmo grupo que pode
     -- aceitar) pode, em vez de aceitar, recusar o chamado com um motivo
@@ -585,6 +600,31 @@ db.exec(`
   -- dados reais em produção no momento da remoção.
   DROP TABLE IF EXISTS manutencao_movimentacoes;
   DROP TABLE IF EXISTS manutencao_estoque;
+
+  -- ============================================================
+  --  NOTIFICAÇÕES PUSH — Web Push (PC e celular via PWA)
+  --
+  --  Guarda a "inscrição" (PushSubscription) que o navegador devolve
+  --  depois que o usuário aceita receber notificações (ver
+  --  public/js/notificacoes-push.js) — endpoint + chaves públicas do
+  --  navegador (p256dh/auth), nunca uma senha nem nada sensível. 1
+  --  usuário pode ter VÁRIAS inscrições ao mesmo tempo (PC do chão de
+  --  fábrica + celular pessoal, por exemplo) — por isso "endpoint" é a
+  --  chave única (1 por dispositivo/navegador), não "usuario_nome".
+  --  "usuario_nome" é o texto livre do cadastro (mesmo campo usado como
+  --  autoria em outras tabelas, ex: manutencao_corretiva.observador) —
+  --  é contra ele que se decide, na hora de notificar, se o PERFIL
+  --  daquele nome tem a permissão "Notificar Abertura de Chamado" (ver
+  --  lib/itens-permissao.js e lib/notificacoes-push.js).
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint      TEXT PRIMARY KEY,
+    usuario_nome  TEXT NOT NULL,
+    p256dh        TEXT NOT NULL,
+    auth          TEXT NOT NULL,
+    user_agent    TEXT,
+    criado_em     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_subscriptions_usuario ON push_subscriptions(usuario_nome);
 `);
 
 // ------------------------------------------------------------
@@ -790,6 +830,12 @@ if (!_colunasManutencaoCorretiva.includes('visualizado_por')) {
   db.exec('ALTER TABLE manutencao_corretiva ADD COLUMN visualizado_por TEXT');
   db.exec('ALTER TABLE manutencao_corretiva ADD COLUMN visualizado_em TEXT');
   console.log('[migração] Colunas de visualização (trajetória visual) adicionadas à tabela manutencao_corretiva.');
+}
+if (!_colunasManutencaoCorretiva.includes('recebimento_peca_confirmado')) {
+  db.exec("ALTER TABLE manutencao_corretiva ADD COLUMN recebimento_peca_confirmado TEXT NOT NULL DEFAULT 'Nao'");
+  db.exec('ALTER TABLE manutencao_corretiva ADD COLUMN recebimento_peca_confirmado_por TEXT');
+  db.exec('ALTER TABLE manutencao_corretiva ADD COLUMN recebimento_peca_confirmado_em TEXT');
+  console.log('[migração] Colunas de confirmação de recebimento de peça adicionadas à tabela manutencao_corretiva.');
 }
 
 // ------------------------------------------------------------
@@ -2599,6 +2645,9 @@ function _rowParaManutencaoCorretiva(row) {
     pedidoPecaAceito: row.pedido_peca_aceito || 'Nao',
     pedidoPecaAceitoPor: row.pedido_peca_aceito_por,
     pedidoPecaAceitoEm: row.pedido_peca_aceito_em,
+    recebimentoPecaConfirmado: row.recebimento_peca_confirmado || 'Nao',
+    recebimentoPecaConfirmadoPor: row.recebimento_peca_confirmado_por,
+    recebimentoPecaConfirmadoEm: row.recebimento_peca_confirmado_em,
     recusaPendente: row.recusa_pendente || 'Nao',
     recusaMotivo: row.recusa_motivo,
     recusaSolicitadoPor: row.recusa_solicitado_por,
@@ -2626,6 +2675,7 @@ const SQL_UPSERT_MANUTENCAO_CORRETIVA = `
     resp_supervisor, obs_supervisor, custo_pecas, custo_mao_obra,
     etiqueta_fechada, aceito, aceito_por, aceito_em,
     pedido_peca_aceito, pedido_peca_aceito_por, pedido_peca_aceito_em,
+    recebimento_peca_confirmado, recebimento_peca_confirmado_por, recebimento_peca_confirmado_em,
     recusa_pendente, recusa_motivo, recusa_solicitado_por, recusa_solicitado_em,
     recusa_resultado, recusa_revisado_por, recusa_revisado_em,
     visualizado_por, visualizado_em,
@@ -2641,6 +2691,7 @@ const SQL_UPSERT_MANUTENCAO_CORRETIVA = `
     @resp_supervisor, @obs_supervisor, @custo_pecas, @custo_mao_obra,
     @etiqueta_fechada, @aceito, @aceito_por, @aceito_em,
     @pedido_peca_aceito, @pedido_peca_aceito_por, @pedido_peca_aceito_em,
+    @recebimento_peca_confirmado, @recebimento_peca_confirmado_por, @recebimento_peca_confirmado_em,
     @recusa_pendente, @recusa_motivo, @recusa_solicitado_por, @recusa_solicitado_em,
     @recusa_resultado, @recusa_revisado_por, @recusa_revisado_em,
     @visualizado_por, @visualizado_em,
@@ -2663,6 +2714,9 @@ const SQL_UPSERT_MANUTENCAO_CORRETIVA = `
     aceito=@aceito, aceito_por=@aceito_por, aceito_em=@aceito_em,
     pedido_peca_aceito=@pedido_peca_aceito, pedido_peca_aceito_por=@pedido_peca_aceito_por,
     pedido_peca_aceito_em=@pedido_peca_aceito_em,
+    recebimento_peca_confirmado=@recebimento_peca_confirmado,
+    recebimento_peca_confirmado_por=@recebimento_peca_confirmado_por,
+    recebimento_peca_confirmado_em=@recebimento_peca_confirmado_em,
     recusa_pendente=@recusa_pendente, recusa_motivo=@recusa_motivo,
     recusa_solicitado_por=@recusa_solicitado_por, recusa_solicitado_em=@recusa_solicitado_em,
     recusa_resultado=@recusa_resultado, recusa_revisado_por=@recusa_revisado_por,
@@ -2713,6 +2767,24 @@ function aceitarPedidoPecaManutencaoCorretiva(id, nomeQuemAceitou) {
     SET pedido_peca_aceito = 'Sim', pedido_peca_aceito_por = @nome, pedido_peca_aceito_em = @agora, data_modificacao = @agora
     WHERE id = @id AND pedido_peca_aceito != 'Sim'
   `).run({ id, nome: nomeQuemAceitou, agora });
+}
+
+/**
+ * Marca a PEÇA como CONFIRMADA (recebida de verdade nas mãos da
+ * Manutenção) — libera de novo os campos de Execução (Seção 3), que
+ * ficam bloqueados desde que "Status da Compra" virou 'Peça recebida'
+ * até essa confirmação (ver conversa que motivou isso). Mesmo raciocínio
+ * de aceitarManutencaoCorretiva()/aceitarPedidoPecaManutencaoCorretiva(),
+ * acima, só que pra esse 3º portão do fluxo de peça.
+ */
+function confirmarRecebimentoPecaManutencaoCorretiva(id, nomeQuemConfirmou) {
+  const agora = new Date().toISOString();
+  db.prepare(`
+    UPDATE manutencao_corretiva
+    SET recebimento_peca_confirmado = 'Sim', recebimento_peca_confirmado_por = @nome,
+        recebimento_peca_confirmado_em = @agora, data_modificacao = @agora
+    WHERE id = @id AND recebimento_peca_confirmado != 'Sim'
+  `).run({ id, nome: nomeQuemConfirmou, agora });
 }
 
 /**
@@ -2785,28 +2857,35 @@ function marcarVisualizadoManutencaoCorretiva(id, nomeOuAdmin) {
 
 /**
  * Salva (cria ou atualiza) um chamado corretivo. IMPORTANTE: os campos de
- * aceite (aceito e pedido_peca_aceito, com seus "_por" e "_em") e os de
- * recusa (recusa_pendente, recusa_motivo, os campos "recusa_solicitado_"
- * e "recusa_revisado_", e recusa_resultado), além de "visualizado_por"/
- * "visualizado_em", NUNCA são lidos do parâmetro
- * `m` — ver comentário na CREATE TABLE, acima. Essa função sempre
- * preserva o que já estava salvo no banco (busca o registro atual antes
- * de gravar); só as rotas dedicadas (aceitarManutencaoCorretiva(),
- * aceitarPedidoPecaManutencaoCorretiva(), solicitarRecusaManutencaoCorretiva(),
+ * aceite (aceito e pedido_peca_aceito, com seus "_por" e "_em"), o de
+ * confirmação de recebimento de peça (recebimento_peca_confirmado, com
+ * seus "_por" e "_em") e os de recusa (recusa_pendente, recusa_motivo, os
+ * campos "recusa_solicitado_" e "recusa_revisado_", e recusa_resultado),
+ * além de "visualizado_por"/"visualizado_em", NUNCA são lidos do
+ * parâmetro `m` — ver comentário na CREATE TABLE, acima. Essa função
+ * sempre preserva o que já estava salvo no banco (busca o registro atual
+ * antes de gravar); só as rotas dedicadas (aceitarManutencaoCorretiva(),
+ * aceitarPedidoPecaManutencaoCorretiva(),
+ * confirmarRecebimentoPecaManutencaoCorretiva(),
+ * solicitarRecusaManutencaoCorretiva(),
  * responderRecusaManutencaoCorretiva() — todas acima) podem mudar esses
- * valores. Isso impede que qualquer perfil "aceite"/"recuse" um chamado
- * só por mandar esses campos no payload do upsert geral — tem que passar
- * pela rota de verdade, que confere a permissão e grava quem/quando agiu.
+ * valores. Isso impede que qualquer perfil "aceite"/"recuse"/"confirme"
+ * um chamado só por mandar esses campos no payload do upsert geral — tem
+ * que passar pela rota de verdade, que confere a permissão e grava
+ * quem/quando agiu.
  *
  * Exceção: se "aguardandoPecas" deixar de ser 'Sim' nesta gravação, o
- * aceite do pedido de peça é resetado pra 'Nao' — não faz sentido ficar
- * "aceito" um pedido que não existe mais (ex: técnico desmarcou por
- * engano, ou resolveu sem precisar de peça).
+ * aceite do pedido de peça E a confirmação de recebimento são resetados
+ * pra 'Nao' — não faz sentido ficar "aceito"/"confirmado" um pedido que
+ * não existe mais (ex: técnico desmarcou por engano, ou resolveu sem
+ * precisar de peça); um pedido futuro começa limpo, exigindo os 2
+ * portões de novo.
  */
 function salvarManutencaoCorretiva(m) {
   const agora = new Date().toISOString();
   const existente = db.prepare(`
     SELECT aceito, aceito_por, aceito_em, pedido_peca_aceito, pedido_peca_aceito_por, pedido_peca_aceito_em,
+           recebimento_peca_confirmado, recebimento_peca_confirmado_por, recebimento_peca_confirmado_em,
            recusa_pendente, recusa_motivo, recusa_solicitado_por, recusa_solicitado_em,
            recusa_resultado, recusa_revisado_por, recusa_revisado_em,
            visualizado_por, visualizado_em
@@ -2820,6 +2899,9 @@ function salvarManutencaoCorretiva(m) {
   const pedidoPecaAceito = mantemPedidoPeca ? existente.pedido_peca_aceito : 'Nao';
   const pedidoPecaAceitoPor = mantemPedidoPeca ? existente.pedido_peca_aceito_por : null;
   const pedidoPecaAceitoEm = mantemPedidoPeca ? existente.pedido_peca_aceito_em : null;
+  const recebimentoPecaConfirmado = mantemPedidoPeca ? existente.recebimento_peca_confirmado : 'Nao';
+  const recebimentoPecaConfirmadoPor = mantemPedidoPeca ? existente.recebimento_peca_confirmado_por : null;
+  const recebimentoPecaConfirmadoEm = mantemPedidoPeca ? existente.recebimento_peca_confirmado_em : null;
   const recusaPendente = existente ? existente.recusa_pendente : 'Nao';
   const recusaMotivo = existente ? existente.recusa_motivo : null;
   const recusaSolicitadoPor = existente ? existente.recusa_solicitado_por : null;
@@ -2873,6 +2955,9 @@ function salvarManutencaoCorretiva(m) {
     etiqueta_fechada: m.etiquetaFechada ? 1 : 0,
     aceito, aceito_por: aceitoPor, aceito_em: aceitoEm,
     pedido_peca_aceito: pedidoPecaAceito, pedido_peca_aceito_por: pedidoPecaAceitoPor, pedido_peca_aceito_em: pedidoPecaAceitoEm,
+    recebimento_peca_confirmado: recebimentoPecaConfirmado,
+    recebimento_peca_confirmado_por: recebimentoPecaConfirmadoPor,
+    recebimento_peca_confirmado_em: recebimentoPecaConfirmadoEm,
     recusa_pendente: recusaPendente, recusa_motivo: recusaMotivo,
     recusa_solicitado_por: recusaSolicitadoPor, recusa_solicitado_em: recusaSolicitadoEm,
     recusa_resultado: recusaResultado, recusa_revisado_por: recusaRevisadoPor, recusa_revisado_em: recusaRevisadoEm,
@@ -2974,6 +3059,7 @@ module.exports.obterManutencaoCorretiva = obterManutencaoCorretiva;
 module.exports.salvarManutencaoCorretiva = salvarManutencaoCorretiva;
 module.exports.aceitarManutencaoCorretiva = aceitarManutencaoCorretiva;
 module.exports.aceitarPedidoPecaManutencaoCorretiva = aceitarPedidoPecaManutencaoCorretiva;
+module.exports.confirmarRecebimentoPecaManutencaoCorretiva = confirmarRecebimentoPecaManutencaoCorretiva;
 module.exports.solicitarRecusaManutencaoCorretiva = solicitarRecusaManutencaoCorretiva;
 module.exports.responderRecusaManutencaoCorretiva = responderRecusaManutencaoCorretiva;
 module.exports.marcarVisualizadoManutencaoCorretiva = marcarVisualizadoManutencaoCorretiva;
@@ -3000,3 +3086,79 @@ function substituirManutencaoProgramada(lista) {
 
 module.exports.substituirManutencaoCorretiva = substituirManutencaoCorretiva;
 module.exports.substituirManutencaoProgramada = substituirManutencaoProgramada;
+
+// ============================================================
+//  NOTIFICAÇÕES PUSH — ver CREATE TABLE push_subscriptions, acima.
+// ============================================================
+
+const SQL_UPSERT_PUSH_SUBSCRIPTION = `
+  INSERT INTO push_subscriptions (endpoint, usuario_nome, p256dh, auth, user_agent, criado_em)
+  VALUES (@endpoint, @usuario_nome, @p256dh, @auth, @user_agent, datetime('now'))
+  ON CONFLICT(endpoint) DO UPDATE SET
+    usuario_nome = @usuario_nome, p256dh = @p256dh, auth = @auth, user_agent = @user_agent
+`;
+
+/**
+ * Salva (ou atualiza, se o endpoint já existir — ex: o navegador renovou
+ * a inscrição) uma inscrição de notificação push pra um usuário
+ * cadastrado. `subscription` é o objeto devolvido por
+ * PushManager.subscribe() no navegador: { endpoint, keys: { p256dh, auth } }.
+ */
+function salvarPushSubscription(usuarioNome, subscription, userAgent) {
+  if (!usuarioNome) throw new Error('usuarioNome é obrigatório.');
+  if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+    throw new Error('Inscrição de notificação inválida — faltam endpoint/keys.');
+  }
+  db.prepare(SQL_UPSERT_PUSH_SUBSCRIPTION).run({
+    endpoint: subscription.endpoint,
+    usuario_nome: usuarioNome,
+    p256dh: subscription.keys.p256dh,
+    auth: subscription.keys.auth,
+    user_agent: userAgent || null,
+  });
+}
+
+/** Remove 1 inscrição específica (usuário desativou pelo próprio dispositivo). */
+function removerPushSubscription(endpoint) {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+}
+
+/**
+ * Remove uma inscrição que o próprio serviço de push informou como morta
+ * (HTTP 404/410 — navegador desinstalado, permissão revogada no SO,
+ * etc.) — ver lib/notificacoes-push.js, enviarParaTodos(). Mesmo efeito
+ * de removerPushSubscription, nome separado só pra deixar claro QUEM
+ * chama (o sistema, não o próprio usuário) nos logs/leitura do código.
+ */
+function removerPushSubscriptionMorta(endpoint) {
+  removerPushSubscription(endpoint);
+}
+
+/** 1 inscrição específica, ou undefined — usado só pra checar posse antes de remover (ver POST /push/desinscrever, lib/rotas/notificacoes.js). */
+function obterPushSubscriptionPorEndpoint(endpoint) {
+  return db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint);
+}
+
+/** Todas as inscrições de 1 usuário (nome de cadastro, mesmo valor de nomeUsuario). */
+function listarPushSubscriptionsDoUsuario(usuarioNome) {
+  return db.prepare('SELECT * FROM push_subscriptions WHERE usuario_nome = ?').all(usuarioNome);
+}
+
+/**
+ * Todas as inscrições de uma LISTA de usuários — usada na hora de notificar
+ * (ver lib/notificacoes-push.js): já resolvida a lista de quem deve
+ * receber (perfil com a permissão marcada), busca de uma vez só as
+ * inscrições de todos eles.
+ */
+function listarPushSubscriptionsDosUsuarios(usuarioNomes) {
+  if (!Array.isArray(usuarioNomes) || usuarioNomes.length === 0) return [];
+  const placeholders = usuarioNomes.map(() => '?').join(',');
+  return db.prepare(`SELECT * FROM push_subscriptions WHERE usuario_nome IN (${placeholders})`).all(...usuarioNomes);
+}
+
+module.exports.salvarPushSubscription = salvarPushSubscription;
+module.exports.removerPushSubscription = removerPushSubscription;
+module.exports.removerPushSubscriptionMorta = removerPushSubscriptionMorta;
+module.exports.obterPushSubscriptionPorEndpoint = obterPushSubscriptionPorEndpoint;
+module.exports.listarPushSubscriptionsDoUsuario = listarPushSubscriptionsDoUsuario;
+module.exports.listarPushSubscriptionsDosUsuarios = listarPushSubscriptionsDosUsuarios;

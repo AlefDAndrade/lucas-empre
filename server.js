@@ -18,6 +18,15 @@ function numOuNulo(v) {
 }
 
 const PORT = process.env.PORT || 3000; // env var facilita rodar testes numa porta separada
+// HOST: por padrão só escuta em localhost (127.0.0.1) — quando há um
+// reverse proxy na frente (Caddy, ver deploy/instalar-https.sh), ninguém
+// de fora consegue bater direto em IP-EXTERNO:PORTA, só passando pelo
+// HTTPS do proxy; o próprio Caddy, rodando na mesma máquina, continua
+// alcançando normal via "localhost:PORTA" no Caddyfile. Pra voltar ao
+// comportamento antigo (aceitar conexão de qualquer interface — útil só
+// em rede local sem proxy na frente, nunca com IP público exposto), defina
+// HOST=0.0.0.0 no ambiente.
+const HOST = process.env.HOST || '127.0.0.1';
 const ROOT_DIR = __dirname; // raiz do projeto — usado pelo backup geral
 const DIR = path.join(__dirname, 'public');
 const DB_DIR = path.join(DIR, 'db'); // arquivos-de-dados (JSON usados como "banco")
@@ -40,6 +49,14 @@ const SECURITY_PATH = path.join(PRIVATE_DIR, 'security.json');
 // conhecidas"). GET /usuarios (lib/rotas/usuarios.js) nunca devolve
 // senhaHash, só {id, nomeUsuario, perfil}.
 const USUARIOS_PATH = path.join(PRIVATE_DIR, 'usuarios.json');
+// Perfis customizados (ver lib/perfis-customizados.js) — cada usuário
+// cadastrado pode referenciar um destes por id. Precisa entrar no Backup
+// Geral JUNTO com usuarios.json: restaurar um usuarios.json sem também
+// restaurar os perfis customizados que ele referencia deixa usuário(s)
+// "órfão(s)" (perfil que não existe mais em lugar nenhum), travando
+// qualquer tentativa de cadastrar/remover OUTRO usuário depois (ver
+// POST /salvar-usuarios, lib/rotas/usuarios.js).
+const PERFIS_CUSTOMIZADOS_PATH = path.join(PRIVATE_DIR, 'perfis-customizados.json');
 fs.mkdirSync(PRIVATE_DIR, { recursive: true });
 
 // Migração automática, só na 1ª vez que sobe depois desta mudança: se o
@@ -92,6 +109,16 @@ const perfisCustomizados = require('./lib/perfis-customizados.js')({ fs, path, P
 // manda — ver podeEditarArea() e podeControlarOperacao(), abaixo, que
 // consultam isto ANTES de cair no hardcoded.
 const perfisFixosOverrides = require('./lib/perfis-fixos-overrides.js')({ fs, path, PRIVATE_DIR, itensPermissao });
+
+// Notificações push (ver lib/notificacoes-push.js) — "toda vez que um
+// chamado for aberto, quem tem a permissão 'Notificar Abertura de
+// Chamado' marcada no perfil é notificado" (PC e celular, via Web
+// Push/PWA). Depende de perfis/perfisCustomizados/perfisFixosOverrides
+// (acima) pra resolver, na hora de notificar, quem tem a permissão
+// marcada — mesma cascata fixo/override/customizado de podeEditarArea.
+const notificacoesPush = require('./lib/notificacoes-push.js')({
+  fs, path, PRIVATE_DIR, db, perfis, perfisCustomizados, perfisFixosOverrides, itensPermissao,
+});
 
 // ─── PERMISSÕES DE EDIÇÃO POR ÁREA (modelo novo, ver lib/perfis.js) ────────
 // Todas as páginas são abertas pra VISUALIZAÇÃO; o que cada perfil pode
@@ -234,6 +261,38 @@ function podeAceitarPedidoPeca(req) {
   return dados.perfil === 'Supervisao' || dados.perfil === 'Encarregado';
 }
 
+// Confere se quem está fazendo a requisição pode RENOTIFICAR (reenviar a
+// notificação push de um aceite que está pendente — chamado aberto
+// aguardando aceite da Manutenção, ou pedido de peça aguardando aceite da
+// Supervisão) — pedido do usuário: só Encarregado, Administrativo, Admin
+// Master ou Supervisão (mesmo grupo de podeAceitarPedidoPeca, mas checagem
+// própria/nomeada por intenção: quem RENOTIFICA não precisa ser o mesmo
+// grupo de quem ACEITA — coincide hoje, mas são conceitos diferentes,
+// assim como podeAceitarChamado/podeAceitarPedidoPeca já são checagens
+// separadas mesmo quando os grupos se sobrepõem). Perfil Manutenção
+// propositalmente FICA DE FORA: quem cobra o aceite não é quem executa.
+function podeRenotificarManutencao(req) {
+  if (temPoderesDeAdmin(req)) return true;
+  const dados = sessaoUsuario.dadosDaSessao(req);
+  if (!dados) return false;
+  return dados.perfil === 'Supervisao' || dados.perfil === 'Encarregado';
+}
+
+// Confere se quem está fazendo a requisição pode CONFIRMAR RECEBIMENTO de
+// uma peça (ver conversa que motivou isso: 3º portão do fluxo de peça —
+// depois de "Status da Compra = Peça recebida", a Manutenção precisa
+// confirmar que recebeu a peça de verdade nas mãos, ANTES de o
+// formulário de Execução reabrir). Mesmo grupo de podeAceitarChamado
+// (Manutenção/Supervisão/Encarregado/Admin) — quem confirma é o mesmo
+// público que executa a manutenção, não um portão à parte com regras
+// próprias de quem pode agir.
+function podeConfirmarRecebimentoPeca(req) {
+  if (temPoderesDeAdmin(req)) return true;
+  const dados = sessaoUsuario.dadosDaSessao(req);
+  if (!dados) return false;
+  return dados.perfil === 'Manutencao' || dados.perfil === 'Supervisao' || dados.perfil === 'Encarregado';
+}
+
 // ── Fatias de rotas extraídas pra lib/rotas/ (ver esse arquivo pro padrão
 // seguido) — cada uma é uma factory que recebe só as dependências que
 // aquele domínio usa, e devolve uma função tentar(req,res,urlPath) que
@@ -245,9 +304,13 @@ const rotasPerfisCustomizados = require('./lib/rotas/perfis-customizados.js')({ 
 const rotasParadas = require('./lib/rotas/paradas.js')({ db, podeEditarArea, negarEdicao });
 const rotasManutencao = require('./lib/rotas/manutencao.js')({
   db, podeEditarArea, negarEdicao, podeExcluirChamado,
-  podeEditarAberturaChamado, podeAceitarChamado, podeAceitarPedidoPeca, nomeDeQuemAceita,
-  nomeParaVisualizacao,
+  podeEditarAberturaChamado, podeAceitarChamado, podeAceitarPedidoPeca,
+  podeRenotificarManutencao, podeConfirmarRecebimentoPeca, nomeDeQuemAceita,
+  nomeParaVisualizacao, notificarAberturaChamado: notificacoesPush.notificarAberturaChamado,
+  notificarPedidoPeca: notificacoesPush.notificarPedidoPeca,
+  notificarPecaRecebida: notificacoesPush.notificarPecaRecebida,
 });
+const rotasNotificacoes = require('./lib/rotas/notificacoes.js')({ db, notificacoesPush, nomeDeQuemAceita });
 const rotasQualidade = require('./lib/rotas/qualidade.js')({ db, lerOperacoesNaoAvaliadas, removerDaFilaNaoAvaliadas, podeEditarArea, negarEdicao });
 const rotasSqlAdmin = require('./lib/rotas/sql-admin.js')({ db, sessao: sessaoOuAdmin, adicionarNaFilaNaoAvaliadas, broadcastDadosSqlExcluidos });
 const rotasConsultas = require('./lib/rotas/consultas.js')({ db });
@@ -271,12 +334,12 @@ const rotasRegistroOperacao = require('./lib/rotas/registro-operacao.js')({
 });
 const rotasBackup = require('./lib/rotas/backup.js')({
   db, fs, path, JSZip,
-  ROOT_DIR, DB_DIR, SECURITY_PATH, USUARIOS_PATH,
+  ROOT_DIR, DB_DIR, SECURITY_PATH, USUARIOS_PATH, PERFIS_CUSTOMIZADOS_PATH,
   auth, sessao: sessaoOuAdmin,
   todayBrasiliaServer, horaMinutoBrasiliaServer,
   lerContadorTracosHoje, recalcularFilaNaoAvaliadasApartirDoSql,
 });
-const ROTAS_EXTRAIDAS = [rotasUsuarios, rotasPerfisCustomizados, rotasParadas, rotasManutencao, rotasQualidade, rotasSqlAdmin, rotasConsultas, rotasSobra, rotasContadorTracos, rotasLogAcesso, rotasOperacaoAndamento, rotasAutenticacao, rotasDispositivosAutorizados, rotasImportacao, rotasLeituraEAjustes, rotasEdicao, rotasRegistroOperacao, rotasBackup.tentar];
+const ROTAS_EXTRAIDAS = [rotasUsuarios, rotasPerfisCustomizados, rotasParadas, rotasManutencao, rotasNotificacoes, rotasQualidade, rotasSqlAdmin, rotasConsultas, rotasSobra, rotasContadorTracos, rotasLogAcesso, rotasOperacaoAndamento, rotasAutenticacao, rotasDispositivosAutorizados, rotasImportacao, rotasLeituraEAjustes, rotasEdicao, rotasRegistroOperacao, rotasBackup.tentar];
 
 // Migração automática Fase 2 (ver db.js) — só faz algo na primeira vez
 // que sobe com a tabela "operacoes" vazia E historico.json ainda existir
@@ -845,8 +908,8 @@ function broadcastDadosSqlExcluidos(info, origemClientId) {
   _enviarWsParaTodos({ tipo: 'dados_sql_excluidos', ...info, origemClientId });
 }
 
-server.listen(PORT, () => {
-  console.log(`Lightwall rodando em http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Lightwall rodando em http://${HOST}:${PORT}`);
 
   // Checa a cada minuto se já é "fim de dia" e falta fazer o backup
   // automático de hoje. Roda também uma vez já no boot, pro caso do

@@ -129,6 +129,52 @@
       });
     }
 
+    // Deep-link de notificação push de chamado de manutenção (ver
+    // lib/notificacoes-push.js, que agora manda a URL como
+    // "/index.html?chamado=ID", e public/service-worker.js, que repassa
+    // essa URL tanto abrindo uma aba nova quanto focando uma já aberta).
+    // Extrai só o id — usada tanto no boot (location.href) quanto na
+    // mensagem que o service worker manda pra uma aba já aberta (ver
+    // listener 'message' logo abaixo).
+    function _extrairChamadoIdDaUrl(urlStr) {
+      try {
+        return new URL(urlStr, window.location.origin).searchParams.get('chamado');
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Leva a pessoa direto pra tela de Manutenção, já com o chamado
+    // específico aberto (a mesma caixa "Aceitar/Recusar" que aparece
+    // hoje ao abrir manualmente — ver MAN.abrirChamado, manutencao.js).
+    // MAN.abrirChamado já garante os dados carregados/atualizados antes
+    // de tentar abrir (o chamado pode ter sido criado agora mesmo), então
+    // só chamamos showPage() DEPOIS, só pra deixar a aba/página visível
+    // — sem isso, o MAN.init() disparado de dentro de showPage() rodaria
+    // em paralelo com o carregamento que MAN.abrirChamado já está fazendo.
+    async function _abrirChamadoDeNotificacao(id) {
+      if (!id) return false;
+      if (!_paginaPermitida('manutencao')) return false; // perfil sem acesso à página — ignora silenciosamente, cai no boot normal
+      if (typeof MAN === 'undefined' || typeof MAN.abrirChamado !== 'function') return false;
+      await MAN.abrirChamado(id);
+      showPage('manutencao');
+      return true;
+    }
+
+    // Recebido do service worker quando a notificação é clicada com uma
+    // aba do app JÁ aberta (ver 'notificationclick', service-worker.js —
+    // nesse caso ele só FOCA a aba existente, sem recarregar a página, e
+    // avisa aqui pra gente navegar internamente até o chamado certo).
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        const dados = event.data || {};
+        if (dados.tipo !== 'lw-notificacao-clique') return;
+        const id = _extrairChamadoIdDaUrl(dados.url);
+        if (id) _abrirChamadoDeNotificacao(id);
+      });
+    }
+
+
     // Restaura, depois de um F5, a última página que a pessoa estava
     // vendo nesta aba (ver showPage, que grava sessionStorage a cada
     // navegação) — sem isso, todo refresh jogava de volta pro Menu,
@@ -496,6 +542,17 @@
 
     // ---- Boot ----
     document.addEventListener('DOMContentLoaded', async () => {
+      // Veio de um clique em notificação de chamado de manutenção? (ver
+      // _extrairChamadoIdDaUrl, acima, e lib/notificacoes-push.js) —
+      // capturado JÁ AQUI, antes de qualquer outra coisa, porque limpamos
+      // o parâmetro da URL logo abaixo (senão um F5 nesta aba reabriria o
+      // mesmo chamado de novo pra sempre).
+      const _chamadoIdDaNotificacao = _extrairChamadoIdDaUrl(window.location.href);
+      if (_chamadoIdDaNotificacao) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+
+
       // Re-renderiza Configurações → Atalhos se a resposta de
       // GET /meus-atalhos (assíncrona, ver keyboard-shortcuts.js,
       // _carregarOverrides) chegar DEPOIS que a pessoa já abriu essa aba
@@ -541,22 +598,45 @@
       });
 
       // ---- Controle de acesso por perfil ----
-      const role = sessionStorage.getItem('lw_role');
+      let role = sessionStorage.getItem('lw_role');
 
-      // Sem role nenhum (sessionStorage vazia/adulterada) — volta pro
-      // login antes de tentar mais nada. NÃO existe mais uma lista fixa
-      // de "perfis válidos" aqui — perfis CUSTOMIZADOS (Configurações →
-      // Usuários → "+ Criar novo tipo de perfil", ver
-      // lib/perfis-customizados.js) têm ids GERADOS
-      // (ex: custom_lider-de-turno_1720000000000), então qualquer lista
-      // hardcoded aqui ficaria desatualizada assim que um perfil novo
-      // fosse criado — foi exatamente isso que aconteceu (perfil
-      // customizado sendo rejeitado no boot e mandado de volta pro
-      // login, mesmo com uma sessão real e válida no servidor). A
+      // Sem role nesta aba (sessionStorage vazia — ex: PWA fechado e
+      // reaberto direto no index.html, sem passar pelo auto-login do
+      // login.html) — antes de desistir e mandar pro login, tenta
+      // restaurar a partir da sessão de USUÁRIO CADASTRADO que ainda
+      // pode estar válida no servidor (cookie lw_usuario_sessao, 12h —
+      // ver lib/sessao-usuario.js e GET /minha-sessao, logo abaixo).
+      // Propositalmente não cobre o Administrador Master aqui: aquela
+      // sessão é outro cookie (lib/sessao.js) e continua sempre pedindo
+      // a senha de novo (ver AdminAuth/login.html) — nada muda pra ele.
+      if (!role) {
+        try {
+          const resAuto = await fetch('/minha-sessao');
+          const dataAuto = await resAuto.json();
+          if (dataAuto.ok && dataAuto.perfil) {
+            sessionStorage.setItem('lw_role', dataAuto.perfil);
+            sessionStorage.setItem('lw_nome_usuario', dataAuto.nomeUsuario);
+            sessionStorage.setItem('lw_pode_iniciar_operacao', dataAuto.podeIniciarOperacao ? 'true' : 'false');
+            role = dataAuto.perfil;
+          }
+        } catch (e) { /* sem rede — trata como sessão inválida, abaixo */ }
+      }
+
+      // Ainda sem role nenhum (sessionStorage vazia/adulterada, e sem
+      // sessão de usuário válida no servidor) — volta pro login antes de
+      // tentar mais nada. NÃO existe mais uma lista fixa de "perfis
+      // válidos" aqui — perfis CUSTOMIZADOS (Configurações → Usuários →
+      // "+ Criar novo tipo de perfil", ver lib/perfis-customizados.js)
+      // têm ids GERADOS (ex: custom_lider-de-turno_1720000000000), então
+      // qualquer lista hardcoded aqui ficaria desatualizada assim que um
+      // perfil novo fosse criado — foi exatamente isso que aconteceu
+      // (perfil customizado sendo rejeitado no boot e mandado de volta
+      // pro login, mesmo com uma sessão real e válida no servidor). A
       // validação de verdade pra qualquer perfil que não seja a senha
-      // mestra é a chamada a GET /minha-sessao logo abaixo — confirma
-      // que existe uma sessão de usuário REAL pra esse role específico,
-      // o que já rejeita um valor inventado/adulterado do mesmo jeito.
+      // mestra é a chamada a GET /minha-sessao logo acima/abaixo —
+      // confirma que existe uma sessão de usuário REAL pra esse role
+      // específico, o que já rejeita um valor inventado/adulterado do
+      // mesmo jeito.
       if (!role) {
         sessionStorage.clear();
         window.location.href = 'login.html';
@@ -576,7 +656,9 @@
         document.getElementById('btn-config').style.display = 'inline-flex';
         document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = '');
         document.querySelectorAll('[data-hide-analista]').forEach(el => el.style.display = '');
-        _restaurarUltimaPagina();
+        if (!(_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao))) {
+          _restaurarUltimaPagina();
+        }
 
       } else {
         // Todo o resto (Operador, Analista, Qualidade, Manutencao,
@@ -614,25 +696,41 @@
         document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = 'none');
         document.querySelectorAll('[data-hide-analista]').forEach(el => el.style.display = 'none');
 
-        await _carregarPermissoesDoServidor();
-        _aplicarVisibilidadeDoMenu();
+        // Isolado num try/catch de propósito: uma falha aqui (ex: rede
+        // instável bem no meio do fetch de /perfis, mais fácil de
+        // acontecer logo depois de trocar pra HTTPS/reverse proxy) NÃO
+        // pode travar o resto do boot — o nome no topbar e o sino de
+        // notificações (LWPush.iniciar(), mais abaixo) SEMPRE precisam
+        // rodar, mesmo se essa etapa de permissões falhar. Sem isso, uma
+        // exceção aqui simplesmente cortava tudo que vinha depois, sem
+        // deixar rastro visível (some sem erro no console se o DevTools
+        // não estava aberto no instante exato do carregamento).
+        try {
+          await _carregarPermissoesDoServidor();
+          _aplicarVisibilidadeDoMenu();
 
-        // "⚙ Configurações" no topbar não tem mais data-admin-only (ver
-        // nav-topbar.html) — agora é revelado pra qualquer perfil que
-        // tenha PELO MENOS UMA aba liberada lá dentro (mesmo raciocínio
-        // de abrirConfig(), app-core.js — hoje sempre verdade, já que
-        // "config-atalhos" está em todos os perfis cadastráveis).
-        const temAlgumaAbaDeConfig = ['dados', 'atalhos', 'usuarios', 'automacao', 'sql'].some(s => _paginaPermitida('config-' + s));
-        document.getElementById('btn-config').style.display = temAlgumaAbaDeConfig ? 'inline-flex' : 'none';
+          // "⚙ Configurações" no topbar não tem mais data-admin-only (ver
+          // nav-topbar.html) — agora é revelado pra qualquer perfil que
+          // tenha PELO MENOS UMA aba liberada lá dentro (mesmo raciocínio
+          // de abrirConfig(), app-core.js — hoje sempre verdade, já que
+          // "config-atalhos" está em todos os perfis cadastráveis).
+          const temAlgumaAbaDeConfig = ['dados', 'atalhos', 'usuarios', 'automacao', 'sql'].some(s => _paginaPermitida('config-' + s));
+          document.getElementById('btn-config').style.display = temAlgumaAbaDeConfig ? 'inline-flex' : 'none';
 
-        if (role === 'OperadorInjetora') {
-          // Operador de Injetora sempre entra direto na tela de trabalho
-          // (Registrar Operação), mesmo comportamento de sempre — os
-          // outros perfis restauram a última página vista, ou caem no
-          // Menu Principal na 1ª vez.
-          showPage('operacao');
-        } else {
-          _restaurarUltimaPagina();
+          if (_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao)) {
+            // já navegou pro chamado — nem Operação (Operador de Injetora)
+            // nem "última página" entram em jogo neste boot específico.
+          } else if (role === 'OperadorInjetora') {
+            // Operador de Injetora sempre entra direto na tela de trabalho
+            // (Registrar Operação), mesmo comportamento de sempre — os
+            // outros perfis restauram a última página vista, ou caem no
+            // Menu Principal na 1ª vez.
+            showPage('operacao');
+          } else {
+            _restaurarUltimaPagina();
+          }
+        } catch (erroBoot) {
+          console.warn('[boot] Falha ao carregar permissões/restaurar página — o resto do boot continua mesmo assim:', erroBoot);
         }
       }
 
@@ -655,6 +753,12 @@
           nomeEl.style.display = 'none';
         }
       }
+
+      // Notificações push (ver public/js/notificacoes-push.js) — só
+      // atualiza a aparência do sino (mostra/some, "ativado" ou não);
+      // NUNCA pede permissão de notificação sozinho aqui (isso só
+      // acontece no clique explícito do usuário no botão).
+      if (window.LWPush) LWPush.iniciar();
 
       // Lógica do botão Sidebar
       const sidebar = document.querySelector('.sidebar');
@@ -750,23 +854,24 @@
     // todo fim de dia — ver server.js). Só leitura/download aqui; a criação
     // e a rotação (manter só os últimos 3) são feitas no servidor, sem
     // depender de ninguém com essa tela aberta.
-    // GET /backups-automaticos agora exige sessão de Administrador (ver
-    // lib/sessao.js) — pede a senha já ao abrir este painel (em vez de só
-    // na hora de um download específico), já que tudo aqui dentro lida
-    // com backups que incluem security.json.
+    // GET /backups-automaticos exige sessão de Administrador (ver
+    // lib/sessao.js), mas essa sessão já foi criada no login como
+    // Administrador (mesma senha, ver login.html) — não pedimos de novo
+    // aqui. Se a sessão tiver expirado (30 min, ver lib/sessao.js), o
+    // servidor responde 403 e mostramos um aviso pedindo pra relogar, em
+    // vez de reabrir o modal de senha (ficava redundante com o login).
     function _carregarBackupsAutomaticos() {
       const el = document.getElementById('backup-hub-automaticos');
       if (!el) return;
       el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Carregando...</span>';
 
-      if (typeof AdminAuth === 'undefined') {
-        el.innerHTML = '<span style="color:var(--red);font-size:.82rem">Não foi possível confirmar a senha de administrador nesta tela.</span>';
-        return;
-      }
-
-      AdminAuth.abrirModal(async function onSuccess() {
+      (async () => {
         try {
           const res = await fetch('/backups-automaticos');
+          if (res.status === 403) {
+            el.innerHTML = '<span style="color:var(--red);font-size:.82rem">Sua sessão de administrador expirou — saia e entre novamente como Administrador.</span>';
+            return;
+          }
           const json = await res.json();
           if (!json.ok) throw new Error(json.erro || 'Erro ao listar backups automáticos.');
 
@@ -785,9 +890,7 @@
         } catch (e) {
           el.innerHTML = `<span style="color:var(--red);font-size:.82rem">Erro ao carregar: ${e.message}</span>`;
         }
-      }, function onCancel() {
-        el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Cancelado — feche e reabra este painel pra tentar de novo.</span>';
-      });
+      })();
     }
 
     // ---- Backup de Dados (admin) ----
@@ -797,23 +900,24 @@
     // conversa que motivou a reformulação de Backup de Dados vs Backup
     // Geral). Só dados de produção — sem config.json/security.json/
     // usuarios.json (exclusivos do Backup Geral, abaixo).
-    // Exige sessão de Administrador (ver lib/sessao.js) — pede a senha
-    // antes de gerar/baixar o zip.
+    // Exige sessão de Administrador (ver lib/sessao.js), já criada no
+    // login como Administrador — não pedimos a senha de novo aqui (ficava
+    // redundante). Se a sessão tiver expirado nesse meio tempo, o
+    // servidor responde 403 e avisamos pra relogar.
     function fazerBackupDados() {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
-      if (typeof AdminAuth === 'undefined') {
-        LW.mostrarAlerta('Não foi possível confirmar a senha de administrador nesta tela.', { tipo: 'erro' });
-        return;
-      }
 
       const card = document.getElementById('backup-hub-card-dados');
 
-      AdminAuth.abrirModal(async function onSuccess() {
+      (async () => {
         try {
           if (card) card.style.pointerEvents = 'none';
           _statusBackupHub('Gerando backup de dados...');
 
           const res = await fetch('/backup-dados');
+          if (res.status === 403) {
+            throw new Error('Sua sessão de administrador expirou — saia e entre novamente como Administrador.');
+          }
           if (!res.ok) throw new Error('HTTP ' + res.status);
 
           const cd = res.headers.get('Content-Disposition') || '';
@@ -837,7 +941,7 @@
           if (card) card.style.pointerEvents = '';
           _statusBackupHub(null);
         }
-      });
+      })();
     }
 
     // ---- Backup Geral (admin) ----
@@ -847,23 +951,24 @@
     // Reformulado (ver conversa que motivou a mudança): ANTES incluía o
     // PROJETO INTEIRO (código-fonte) — isso saiu, já que código-fonte
     // tem controle de versão próprio (Git). GET /backup-geral exige
-    // sessão de Administrador (ver lib/sessao.js) — pede a senha aqui,
-    // antes de gerar/baixar o zip (que inclui security.json/usuarios.json).
+    // sessão de Administrador (ver lib/sessao.js), já criada no login
+    // como Administrador — não pedimos a senha de novo aqui (ficava
+    // redundante). Se a sessão tiver expirado nesse meio tempo, o
+    // servidor responde 403 e avisamos pra relogar.
     function fazerBackupGeral() {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
-      if (typeof AdminAuth === 'undefined') {
-        LW.mostrarAlerta('Não foi possível confirmar a senha de administrador nesta tela.', { tipo: 'erro' });
-        return;
-      }
 
       const card = document.getElementById('backup-hub-card-geral');
 
-      AdminAuth.abrirModal(async function onSuccess() {
+      (async () => {
         try {
           if (card) card.style.pointerEvents = 'none';
           _statusBackupHub('Gerando backup geral... pode levar alguns segundos.');
 
           const res = await fetch('/backup-geral');
+          if (res.status === 403) {
+            throw new Error('Sua sessão de administrador expirou — saia e entre novamente como Administrador.');
+          }
           if (!res.ok) throw new Error('HTTP ' + res.status);
 
           // Tenta usar o nome de arquivo sugerido pelo servidor; se não vier,
@@ -889,7 +994,7 @@
           if (card) card.style.pointerEvents = '';
           _statusBackupHub(null);
         }
-      });
+      })();
     }
 
     // ---- Restaurar Backup de Dados (admin) ----
@@ -1994,7 +2099,7 @@
       // checagem fica explícita mesmo assim, não hardcoded pra um perfil
       // só, igual sempre foi (evita ficar obsoleta se um perfil novo
       // aparecer sem nenhuma aba de config no futuro).
-      if (role !== 'Administrador' && !_paginaPermitida('config-atalhos') && !_paginaPermitida('config-dados') && !_paginaPermitida('config-automacao') && !_paginaPermitida('config-usuarios') && !_paginaPermitida('config-autorizados') && !_paginaPermitida('config-dispositivos') && !_paginaPermitida('config-sql')) return;
+      if (role !== 'Administrador' && !_paginaPermitida('config-atalhos') && !_paginaPermitida('config-dados') && !_paginaPermitida('config-automacao') && !_paginaPermitida('config-usuarios') && !_paginaPermitida('config-autorizados') && !_paginaPermitida('config-dispositivos') && !_paginaPermitida('config-sql') && !_paginaPermitida('config-notificacoes')) return;
 
       // Lê o estado atual das variáveis já carregadas pelo data.js
       // BATERIA_IDS agora é array de objetos {id, label, bercos}
@@ -2020,7 +2125,7 @@
       // sempre "dados", que era o padrão fixo de antes (só fazia sentido
       // quando só o Administrador Master via este modal).
       const primeiraAbaPermitida = role === 'Administrador' ? 'dados'
-        : ['dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'dispositivos', 'automacao', 'sql'].find(s => _paginaPermitida('config-' + s)) || 'atalhos';
+        : ['dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'dispositivos', 'automacao', 'sql', 'notificacoes'].find(s => _paginaPermitida('config-' + s)) || 'atalhos';
       cfgMostrarSecao(primeiraAbaPermitida);
       document.getElementById('config-modal').style.display = 'flex';
       if (typeof LWTour !== 'undefined') LWTour.aoAbrirModal('config');
@@ -2042,7 +2147,7 @@
       // 'autorizados' (Operação em Andamento) faltava aqui — a aba nunca
       // era escondida de ninguém, pra nenhum perfil (bug separado, pego
       // na mesma revisão do bug do cssText, acima).
-      const MAPA = { dados: 'cfg-nav-dados', paletes: 'cfg-nav-paletes', atalhos: 'cfg-nav-atalhos', usuarios: 'cfg-nav-usuarios', autorizados: 'cfg-nav-autorizados', dispositivos: 'cfg-nav-dispositivos', automacao: 'cfg-nav-automacao', sql: 'cfg-nav-sql' };
+      const MAPA = { dados: 'cfg-nav-dados', paletes: 'cfg-nav-paletes', atalhos: 'cfg-nav-atalhos', usuarios: 'cfg-nav-usuarios', autorizados: 'cfg-nav-autorizados', dispositivos: 'cfg-nav-dispositivos', automacao: 'cfg-nav-automacao', sql: 'cfg-nav-sql', notificacoes: 'cfg-nav-notificacoes' };
       Object.entries(MAPA).forEach(([secao, navId]) => {
         const el = document.getElementById(navId);
         if (el) el.style.display = _paginaPermitida('config-' + secao) ? '' : 'none';
@@ -2098,6 +2203,7 @@
       const elDispositivos = document.getElementById('cfg-secao-dispositivos');
       const elAutomacao = document.getElementById('cfg-secao-automacao');
       const elSql = document.getElementById('cfg-secao-sql');
+      const elNotificacoes = document.getElementById('cfg-secao-notificacoes');
       if (elDados) elDados.style.display = secao === 'dados' ? 'block' : 'none';
       if (elPaletes) elPaletes.style.display = secao === 'paletes' ? 'block' : 'none';
       if (elAtalhos) elAtalhos.style.display = secao === 'atalhos' ? 'block' : 'none';
@@ -2106,6 +2212,7 @@
       if (elDispositivos) elDispositivos.style.display = secao === 'dispositivos' ? 'block' : 'none';
       if (elAutomacao) elAutomacao.style.display = secao === 'automacao' ? 'block' : 'none';
       if (elSql) elSql.style.display = secao === 'sql' ? 'block' : 'none';
+      if (elNotificacoes) elNotificacoes.style.display = secao === 'notificacoes' ? 'block' : 'none';
 
       const ESTILO_ATIVO = 'text-align:left;background:var(--bg-2);border:1px solid var(--accent-dim);color:var(--accent);border-radius:var(--radius);padding:10px 14px;font-size:.85rem;cursor:pointer;font-weight:600';
       const ESTILO_INATIVO = 'text-align:left;background:none;border:1px solid transparent;color:var(--text-2);border-radius:var(--radius);padding:10px 14px;font-size:.85rem;cursor:pointer';
@@ -2117,6 +2224,7 @@
       const navDispositivos = document.getElementById('cfg-nav-dispositivos');
       const navAutomacao = document.getElementById('cfg-nav-automacao');
       const navSql = document.getElementById('cfg-nav-sql');
+      const navNotificacoes = document.getElementById('cfg-nav-notificacoes');
       if (navDados) navDados.style.cssText = secao === 'dados' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navPaletes) navPaletes.style.cssText = secao === 'paletes' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navAtalhos) navAtalhos.style.cssText = secao === 'atalhos' ? ESTILO_ATIVO : ESTILO_INATIVO;
@@ -2125,6 +2233,7 @@
       if (navDispositivos) navDispositivos.style.cssText = secao === 'dispositivos' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navAutomacao) navAutomacao.style.cssText = secao === 'automacao' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navSql) navSql.style.cssText = secao === 'sql' ? ESTILO_ATIVO : ESTILO_INATIVO;
+      if (navNotificacoes) navNotificacoes.style.cssText = secao === 'notificacoes' ? ESTILO_ATIVO : ESTILO_INATIVO;
 
       if (secao === 'atalhos') cfgRenderAtalhos();
       if (secao === 'usuarios') cfgRenderUsuarios();
@@ -2132,6 +2241,7 @@
       if (secao === 'dispositivos') cfgRenderDispositivos();
       if (secao === 'automacao') cfgRenderAutomacao();
       if (secao === 'sql') cfgSqlAoAbrirSecao();
+      if (secao === 'notificacoes') cfgRenderNotificacoes();
 
       // Reaplica por último, de propósito: os `navX.style.cssText = ...`
       // acima SUBSTITUEM o style inteiro do botão (é assim que o destaque
@@ -3192,7 +3302,18 @@
     }
 
     async function cfgRenderUsuarios() {
-      await cfgAtualizarCampoPodeIniciarOperacao(); // garante _perfisInfoCache pronto e o campo certo já visível
+      // Garante _perfisInfoCache pronto ANTES de tudo — tanto
+      // _cfgPopularSelectPerfil() (rótulos/ids das opções) quanto
+      // cfgAtualizarCampoPodeIniciarOperacao() (perfisComControleDeOperacao)
+      // dependem dele.
+      if (!_perfisInfoCache) {
+        try {
+          const res = await fetch('/perfis');
+          _perfisInfoCache = await res.json();
+        } catch (e) {
+          _perfisInfoCache = { perfisComControleDeOperacao: [] };
+        }
+      }
       // Preenche o <select> de perfil (fixos + customizados — ver
       // lib/perfis-customizados.js) e a lista de perfis customizados já
       // criados (ver public/js/perfis-customizados.js) — funções globais
@@ -3200,6 +3321,17 @@
       // módulo compartilha o mesmo escopo global da página.
       if (typeof _cfgPopularSelectPerfil === 'function') _cfgPopularSelectPerfil();
       if (typeof cfgRenderPerfisCustomizados === 'function') cfgRenderPerfisCustomizados();
+
+      // SÓ AGORA o <select> já tem opções e um valor selecionado — antes
+      // disso, document.getElementById('cfg-usuario-perfil').value vinha
+      // vazio (select ainda sem <option>), e a checagem de
+      // perfisComControleDeOperacao.includes('') sempre dava falso, então
+      // o checkbox "Pode iniciar/encerrar operações" nunca aparecia no
+      // primeiro carregamento da tela — só depois de trocar o <select>
+      // manualmente (dispara o onchange) ou de cadastrar um usuário (que
+      // re-renderiza tudo e, aí sim, o <select> já estava populado de
+      // antes). Bug relatado pelo usuário — corrigido invertendo a ordem.
+      await cfgAtualizarCampoPodeIniciarOperacao();
 
       const elStatus = document.getElementById('cfg-usuarios-status');
       const elLista = document.getElementById('cfg-usuarios-lista');

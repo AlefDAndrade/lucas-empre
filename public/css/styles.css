@@ -712,6 +712,12 @@ h4 {
   background: var(--bg-3);
   cursor: grab;
   user-select: none;
+  -webkit-user-select: none;
+  /* Sem isso, segurar o dedo no iOS Safari abre o menu de "Copiar" /
+     lupa de seleção de texto ANTES do toque virar um gesto de arraste —
+     ele "rouba" o toque, e nem touchstart chega a dar a entender que um
+     arraste começou. Ver conversa que motivou isso. */
+  -webkit-touch-callout: none;
   /* Essencial pro arraste por toque (ver _poTouchMove, paletes-ordem.js)
      — sem isso, tentar arrastar na vertical só rola a página/modal em
      vez de mover o palete; o navegador nunca chega a considerar isso
@@ -1522,6 +1528,20 @@ td.mono {
 
 .timer-display.warning {
   color: #f59e0b;
+}
+
+/* Pausa é uma exceção operacional, não um alarme — por isso só um
+   apagamento sutil (opacidade + cor neutra), sem pulsar ou chamar
+   atenção como .danger/.warning acima. */
+.timer-display.timer-pausado {
+  color: var(--text-3);
+  opacity: .7;
+  animation: none;
+}
+
+#btn-pausar-operacao.btn-pausar-ativo {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, .35);
 }
 
 @keyframes pulse-danger {
@@ -2719,12 +2739,73 @@ td.mono {
   user-select: text;
 }
 
+/* ---- Abas do Debriefing (Operação / Avaliação) ---- */
+.debriefing-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+
+.debriefing-tab-btn {
+  background: transparent;
+  color: var(--text-3);
+  border: none;
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 10px 7px;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  font-family: var(--font-body);
+}
+
+.debriefing-tab-btn:hover {
+  color: var(--text-2);
+}
+
+.debriefing-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
 /* ---- KPIs de resumo do dia ---- */
 .dbf-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-bottom: 14px;
+}
+
+/* Variante com 3 colunas — usada na aba Avaliação (6 KPIs = 2 linhas de 3,
+   cabe melhor que 4+2 na largura do popover). */
+.dbf-stats-3col {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* ---- Layout da aba Avaliação: 3 fileiras (grande / média / grande) ---- */
+.dbf-avaliacao-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.dbf-avaliacao-grid .dbf-stats {
+  margin-bottom: 0;
+}
+
+/* Fileiras "grandes" — 2 cards em destaque (topo: registros/painéis;
+   base: percentuais de refugo/aprovação). */
+.dbf-stats-lg {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* Fileira "média" — 3 cards menores no meio (1ª linha, 2ª linha, reprovado). */
+.dbf-stats-md {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .dbf-stat {
@@ -2739,12 +2820,29 @@ td.mono {
   text-align: center;
 }
 
+/* Card "grande" — mais padding e valor com fonte maior, para dar destaque
+   às fileiras do topo e da base no layout da aba Avaliação. */
+.dbf-stat-lg {
+  padding: 16px 8px;
+}
+
+.dbf-stat-lg .dbf-stat-val {
+  font-size: 1.5rem;
+}
+
 .dbf-stat-val {
   font-family: var(--font-mono);
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--accent);
 }
+
+/* Variantes de cor — mesma semântica dos kpi-card green/red do Setor de
+   Qualidade (ver setor-qualidade.js renderDashboard): aprovado/2ª linha em
+   destaque positivo, reprovado em alerta. */
+.dbf-stat-val.is-green { color: var(--green); }
+.dbf-stat-val.is-red   { color: var(--red); }
+.dbf-stat-val.is-blue  { color: var(--sq-cor-azul, var(--blue)); }
 
 .dbf-stat-label {
   font-size: .64rem;
@@ -3273,4 +3371,15 @@ td.mono {
    No touch não existe cursor, então isso é inofensivo lá. */
 [data-tooltip] {
   cursor: help;
+}
+
+/* Sino de notificações push (topbar) — estado "ativado neste
+   dispositivo" (ver public/js/notificacoes-push.js). Reaproveita
+   --accent/--accent-dim, mesmo par de cores usado no badge de fila
+   pendente (nav-topbar.html), pra sinalizar "ligado" sem introduzir uma
+   cor nova ao tema. */
+#btn-notificacoes-push.btn-push-ativo {
+  background: rgba(245, 158, 11, .12);
+  border-color: var(--accent-dim);
+  color: var(--accent);
 }
