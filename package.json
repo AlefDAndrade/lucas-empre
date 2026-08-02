@@ -9,7 +9,10 @@
     "start": "node server.js",
     "predev": "node build-index.js",
     "dev": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:serial": "node --test --test-concurrency=1",
+    "lint": "eslint .",
+    "vendorizar:sheetjs": "node scripts/vendorizar-sheetjs.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -18,10 +21,11 @@
     "better-sqlite3": "^12.11.1",
     "jszip": "^3.10.1",
     "web-push": "^3.6.7",
-    "ws": "^8.21.0",
-    "xlsx": "^0.18.5"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
     "jsdom": "^29.1.1"
   }
 }

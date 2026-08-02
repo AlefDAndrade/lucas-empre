@@ -56,6 +56,15 @@ db.exec(`
     -- (tamanho fixo = capacidade da bateria) e nunca é consultado sozinho,
     -- só lido junto com a operação inteira.
     bercos_personalizados TEXT,
+    -- Override de Dimensão por berço específico (ver "📋 Detalhes do
+    -- Berço", bateria-atual.js) — 1 array JSON, 1 item por berço
+    -- (null = usa a coluna "dimensao" acima, a dimensão geral da
+    -- operação, pra aquele berço). Normalmente toda bateria tem berços
+    -- fisicamente idênticos, mas isso permite corrigir/registrar a
+    -- dimensão de UM berço específico sem afetar os demais. Mesmo
+    -- padrão de bercos_personalizados, acima (tamanho fixo = capacidade
+    -- da bateria, nunca consultado sozinho).
+    bercos_dimensoes      TEXT,
     total_paineis         INTEGER,
     m2_total              REAL,
     placas_cimenticia     INTEGER,
@@ -336,6 +345,11 @@ db.exec(`
     dados         TEXT NOT NULL  -- JSON: avaliação inteira, incluindo a lista de painéis
   );
   CREATE INDEX IF NOT EXISTS idx_avaliacoes_qualidade_operacao ON avaliacoes_qualidade(id_operacao);
+  -- Usado por _totalAvaliacoesNoDia (lib/db/operacoes-qualidade.js) pra
+  -- calcular a Sequência do Dia automática (conta quantas avaliações já
+  -- foram registradas no dia, via range de registrado_em) sem varrer a
+  -- tabela inteira a cada registro novo.
+  CREATE INDEX IF NOT EXISTS idx_avaliacoes_qualidade_registrado_em ON avaliacoes_qualidade(registrado_em);
 
   -- ============================================================
   --  Painéis da Avaliação de Qualidade — MESMOS dados que já vivem
@@ -587,7 +601,16 @@ db.exec(`
     -- JSON opcional — ver comentário acima da tabela.
     execucao              TEXT,
     autor_nome            TEXT,
-    data_criacao          TEXT NOT NULL DEFAULT (datetime('now'))
+    data_criacao          TEXT NOT NULL DEFAULT (datetime('now')),
+    -- Marca se o LEMBRETE do dia (às 09h da data agendada, ver
+    -- executarLembreteManutencaoProgramadaSeNecessario,
+    -- lib/notificacoes-push.js) já foi disparado pra este agendamento —
+    -- evita reenviar a cada checagem do setInterval (roda a cada minuto).
+    -- Um novo registro sempre nasce com o default 0. Reseta sozinho pra
+    -- 0 se a "data" do agendamento mudar (ver CASE em
+    -- SQL_UPSERT_MANUTENCAO_PROGRAMADA, abaixo) — reagendar pra outro
+    -- dia e voltar pro mesmo dia de novo volta a ser elegível.
+    lembrete_dia_enviado  INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_manutencao_programada_data ON manutencao_programada(data);
   CREATE INDEX IF NOT EXISTS idx_manutencao_programada_status ON manutencao_programada(status);
@@ -625,7 +648,59 @@ db.exec(`
     criado_em     TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_push_subscriptions_usuario ON push_subscriptions(usuario_nome);
+
+  -- ============================================================
+  --  SESSÕES — Admin Master e Usuário Cadastrado
+  --
+  --  Antes viviam só num Map em memória (lib/sessao.js e
+  --  lib/sessao-usuario.js) — todo mundo era deslogado a cada restart/
+  --  deploy do servidor (no caso do usuário cadastrado, isso podia
+  --  acontecer NO MEIO DE UM TURNO de 12h). Persistir aqui (mesmo banco
+  --  que já existe pros dados de produção, sem dependência nova) resolve
+  --  isso: um restart do processo não derruba mais ninguém, só expira no
+  --  horário normal de cada uma. "expira_em" é epoch ms (Date.now()),
+  --  não TEXT, pra comparar direto com Date.now() nas queries sem
+  --  conversão.
+  CREATE TABLE IF NOT EXISTS sessoes_admin (
+    token      TEXT PRIMARY KEY,
+    expira_em  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessoes_admin_expira ON sessoes_admin(expira_em);
+
+  -- "dados_json" guarda {usuarioId, nomeUsuario, perfil,
+  -- podeIniciarOperacao} serializado — mesmo raciocínio de outras colunas
+  -- *_json deste arquivo (ex: bercos_personalizados): um dicionário
+  -- pequeno e fechado, nunca consultado por campo individual (só lido
+  -- inteiro, ver lib/sessao-usuario.js), então não vale a pena virar
+  -- colunas próprias.
+  CREATE TABLE IF NOT EXISTS sessoes_usuario (
+    token      TEXT PRIMARY KEY,
+    dados_json TEXT NOT NULL,
+    expira_em  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessoes_usuario_expira ON sessoes_usuario(expira_em);
+
+  -- Rate limit de tentativas de senha/chave de recuperação por IP (ver
+  -- lib/auth.js) — protege /verificar-senha, /verificar-recovery e as 3
+  -- rotas mais destrutivas do sistema (/mesclar-backup-dados,
+  -- /restaurar-backup-dados, /restaurar-backup-geral), todas usando a
+  -- MESMA senha compartilhada do Administrador. Antes vivia só num Map em
+  -- memória — um restart do processo (deploy, reboot, crash) zerava o
+  -- contador de qualquer IP, dando a quem estivesse tentando força bruta
+  -- uma folga completa de novo a cada restart. Persistir aqui (mesmo banco
+  -- que já existe, sem dependência nova) fecha essa brecha: só expira pelo
+  -- tempo normal (RATE_LIMIT_JANELA_MS/RATE_LIMIT_BLOQUEIO_MS), nunca por
+  -- reiniciar o servidor — mesmo raciocínio de sessoes_admin/
+  -- sessoes_usuario, acima. "ip" como chave (não por usuário — não há
+  -- login de usuário nessas rotas, só a senha compartilhada).
+  CREATE TABLE IF NOT EXISTS tentativas_senha_ip (
+    ip            TEXT PRIMARY KEY,
+    tentativas    INTEGER NOT NULL,
+    primeira_em   INTEGER NOT NULL, -- epoch ms — início da janela atual
+    bloqueado_ate INTEGER           -- epoch ms, ou NULL se ainda não bloqueado
+  );
 `);
+
 
 // ------------------------------------------------------------
 //  Migração: bercos_visuais -> 1 LINHA POR OPERAÇÃO (berços em JSON)
@@ -782,6 +857,13 @@ if (!_colunasOperacoes.includes('operador_nome')) {
   db.exec('ALTER TABLE operacoes ADD COLUMN operador_nome TEXT');
   console.log('[migração] Coluna "operador_nome" adicionada à tabela operacoes.');
 }
+// bercos_dimensoes — ver comentário na CREATE TABLE operacoes, acima.
+// Adicionada depois da primeira versão da tabela, daí a migração leve,
+// mesmo padrão das demais.
+if (!_colunasOperacoes.includes('bercos_dimensoes')) {
+  db.exec('ALTER TABLE operacoes ADD COLUMN bercos_dimensoes TEXT');
+  console.log('[migração] Coluna "bercos_dimensoes" adicionada à tabela operacoes.');
+}
 const _colunasParadas = db.prepare("PRAGMA table_info(paradas)").all().map(c => c.name);
 if (!_colunasParadas.includes('operador_nome')) {
   db.exec('ALTER TABLE paradas ADD COLUMN operador_nome TEXT');
@@ -801,6 +883,12 @@ if (!_colunasManutencaoProgramada.includes('execucao_data_inicio')) {
   db.exec('ALTER TABLE manutencao_programada ADD COLUMN execucao_data_inicio TEXT');
   db.exec('ALTER TABLE manutencao_programada ADD COLUMN execucao_hora_inicio TEXT');
   console.log('[migração] Colunas "execucao_data_inicio"/"execucao_hora_inicio" adicionadas à tabela manutencao_programada.');
+}
+// lembrete_dia_enviado — ver comentário na CREATE TABLE manutencao_programada
+// (acima). Adicionada depois da primeira versão da tabela, daí a migração.
+if (!_colunasManutencaoProgramada.includes('lembrete_dia_enviado')) {
+  db.exec('ALTER TABLE manutencao_programada ADD COLUMN lembrete_dia_enviado INTEGER NOT NULL DEFAULT 0');
+  console.log('[migração] Coluna "lembrete_dia_enviado" adicionada à tabela manutencao_programada.');
 }
 // Fluxo de aceite de chamado / aceite de pedido de peça (ver comentário
 // na CREATE TABLE manutencao_corretiva, acima) — adicionadas depois da
@@ -838,898 +926,28 @@ if (!_colunasManutencaoCorretiva.includes('recebimento_peca_confirmado')) {
   console.log('[migração] Colunas de confirmação de recebimento de peça adicionadas à tabela manutencao_corretiva.');
 }
 
-// ------------------------------------------------------------
-//  Migração única: popula "operacoes_avaliadas" a partir da coluna
-//  legada "operacoes.avaliado" — sem isso, toda operação que já tivesse
-//  sido marcada avaliado=1 ANTES desta tabela existir voltaria a
-//  aparecer na fila de "não avaliadas" (que passa a consultar só esta
-//  tabela, nunca mais a coluna). INSERT OR IGNORE — idempotente, roda
-//  toda subida do servidor sem duplicar nem sobrescrever o
-//  "avaliado_em" de quem já foi migrado numa subida anterior.
-// ------------------------------------------------------------
-const _operacoesAvaliadoLegado = db.prepare(
-  'SELECT id FROM operacoes WHERE avaliado = 1'
-).all();
-if (_operacoesAvaliadoLegado.length) {
-  const _inserirLegado = db.prepare(
-    'INSERT OR IGNORE INTO operacoes_avaliadas (id_operacao) VALUES (?)'
-  );
-  const _migrarLegado = db.transaction((linhas) => {
-    for (const r of linhas) _inserirLegado.run(r.id);
-  });
-  _migrarLegado(_operacoesAvaliadoLegado);
-  console.log(`[migração] ${_operacoesAvaliadoLegado.length} operação(ões) com "avaliado=1" (coluna legada) migrada(s) para "operacoes_avaliadas".`);
-}
-
-// ------------------------------------------------------------
-//  Migração única: corrige avaliações AVULSAS registradas ANTES da
-//  correção do bug em marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada
-//  (ver comentário lá) — essas avaliações já tiraram a operação certa
-//  da fila (existe uma linha em "operacoes_avaliadas"), mas nunca
-//  ganharam id_operacao em "avaliacoes_qualidade" (ficou NULL pra
-//  sempre), o que fazia a Análise Focada nunca encontrar o resultado
-//  pra essas operações.
+// ─── Operações / Berços / Avaliação de Qualidade ───────────────────────
+// Fase 9 do fatiamento de db.js (ver README, "Fatiamento de db.js
+// (plano)") — extraída pra lib/db/operacoes-qualidade.js, sem mudar
+// lógica nenhuma, só onde o código mora. O módulo recebe a conexão `db`
+// já aberta (mesmo padrão de factory de lib/rotas/ e das fases
+// anteriores) e devolve as funções do domínio, que penduramos de volta
+// aqui no objeto `db` (module.exports = db, logo abaixo) — todo
+// consumidor existente (lib/rotas/consultas.js, lib/rotas/qualidade.js,
+// lib/rotas/registro-operacao.js, lib/rotas/backup.js, lib/rotas/
+// sql-admin.js) continua chamando db.detalheOperacao(),
+// db.salvarAvaliacaoQualidade() etc. sem precisar mudar nada. O schema
+// (CREATE TABLE operacoes/bercos_visuais/avaliacoes_qualidade/
+// avaliacao_paineis/operacoes_avaliadas) continua acima, em db.js.
 //
-//  Conservador de propósito: só liga os pontos quando a resposta é
-//  INEQUÍVOCA — 1 avaliação avulsa (id_operacao NULL) e 1 operação
-//  daquela mesma bateria já marcada como avaliada mas ainda sem
-//  NENHUMA avaliação vinculada (nem desta nem de nenhuma outra). Se
-//  houver mais de uma avaliação avulsa OU mais de uma operação
-//  candidata pra mesma bateria, pula (ambíguo demais pra adivinhar) —
-//  melhor deixar sem vincular do que vincular errado.
-// ------------------------------------------------------------
-(function _migrarAvaliacoesAvulsasOrfas() {
-  const avulsas = db.prepare(`
-    SELECT id, id_bateria FROM avaliacoes_qualidade
-    WHERE id_operacao IS NULL AND id_bateria IS NOT NULL
-  `).all();
-  if (!avulsas.length) return;
-
-  const porBateria = new Map();
-  for (const a of avulsas) {
-    if (!porBateria.has(a.id_bateria)) porBateria.set(a.id_bateria, []);
-    porBateria.get(a.id_bateria).push(a.id);
-  }
-
-  let vinculadas = 0;
-  const executar = db.transaction(() => {
-    for (const [idBateria, idsAvaliacao] of porBateria) {
-      if (idsAvaliacao.length !== 1) continue; // mais de uma avulsa pra mesma bateria — ambíguo, pula
-
-      const candidatas = db.prepare(`
-        SELECT o.id FROM operacoes o
-        JOIN operacoes_avaliadas oa ON oa.id_operacao = o.id
-        WHERE o.id_bateria = ?
-          AND o.id NOT IN (SELECT id_operacao FROM avaliacoes_qualidade WHERE id_operacao IS NOT NULL)
-      `).all(idBateria);
-      if (candidatas.length !== 1) continue; // 0 ou >1 operação candidata — ambíguo, pula
-
-      _vincularAvaliacaoAOperacao(idsAvaliacao[0], candidatas[0].id);
-      vinculadas++;
-    }
-  });
-  executar();
-  if (vinculadas) console.log(`[migração] ${vinculadas} avaliação(ões) avulsa(s) retro-vinculada(s) à operação correta (bug da Análise Focada corrigido para dados já existentes).`);
-})();
-
-/**
- * Cria a linha inicial de bercos_visuais pra uma operação recém-
- * registrada — 1 linha pra bateria INTEIRA, com todos os berços
- * (B1..B<quantidade>) e seus 2 estados dentro da lista JSON da coluna
- * "bercos". Chamada por POST /registrar-operacao (server.js), logo
- * depois de inserir a operação em si.
- *
- * @param {string} idOperacao
- * @param {number} quantidade
- * @param {Object<string,{esquerda?:string,direita?:string}>} [estadosMarcados] -
- *   mapa esparso vindo do snapshot ao vivo de "Bateria Atual" (ver
- *   GET/POST /bercos-andamento, server.js) — lado ausente do mapa =
- *   'okay'. Se quem estava acompanhando a operação marcou algum lado de
- *   algum berço como 'baixou' ANTES do registro, esse estado entra aqui
- *   já na criação, em vez de nascer 'okay' e precisar de uma segunda
- *   chamada pra corrigir.
- *
- * INSERT OR IGNORE (via PRIMARY KEY id_operacao): se por algum motivo já
- * existir uma linha pra essa operação, não duplica nem sobrescreve
- * estados que porventura já tenham mudado — idempotente.
- */
-const SQL_INSERIR_BERCOS_VISUAIS = `
-  INSERT OR IGNORE INTO bercos_visuais (id_operacao, bercos, atualizado_em)
-  VALUES (@id_operacao, @bercos, @atualizado_em)
-`;
-function criarBercosVisuaisIniciais(idOperacao, quantidade, estadosMarcados) {
-  const mapa = (estadosMarcados && typeof estadosMarcados === 'object') ? estadosMarcados : {};
-  const n = Math.max(0, parseInt(quantidade) || 0);
-  const bercos = [];
-  for (let i = 1; i <= n; i++) {
-    const berco = 'B' + i;
-    const marcadoBerco = mapa[berco] || {};
-    bercos.push({
-      berco, ordem: i,
-      estado_esquerda: marcadoBerco.esquerda || 'okay',
-      estado_direita: marcadoBerco.direita || 'okay',
-    });
-  }
-  db.prepare(SQL_INSERIR_BERCOS_VISUAIS).run({
-    id_operacao: idOperacao,
-    bercos: JSON.stringify(bercos),
-    atualizado_em: new Date().toISOString(),
-  });
-}
-
-/**
- * Converte um registro no formato histórico (historico.json) pros
- * parâmetros nomeados do INSERT/UPDATE de "operacoes" — usado tanto pela
- * migração automática quanto pelas rotas /registrar-operacao e
- * /editar-operacao, pra nunca ter 2 versões da mesma conversão.
- */
-function operacaoParaRow(r) {
-  return {
-    id: r.id,
-    data: r.data,
-    turno: r.turno ?? null,
-    dimensao: r.dimensao ?? null,
-    capacidade: r.capacidade ?? null,
-    id_bateria: r.id_bateria ?? null,
-    inicio: r.inicio ?? null,
-    fim: r.fim ?? null,
-    desemplaque: r.desemplaque ?? null,
-    tempo_min: r.tempo_min ?? null,
-    qtd_tracos: r.qtd_tracos ?? null,
-    houve_atraso: r.houve_atraso ?? null,
-    motivo_atraso: r.motivo_atraso ?? null,
-    tipo_montagem: r.tipo_montagem ?? null,
-    bercos_reais: r.bercos_reais ?? null,
-    bercos_personalizados: r.bercos_personalizados ? JSON.stringify(r.bercos_personalizados) : null,
-    total_paineis: r.total_paineis ?? null,
-    m2_total: r.m2_total ?? null,
-    placas_cimenticia: r.placas_cimenticia ?? null,
-    paineis_por_tipo: r.paineis_por_tipo ? JSON.stringify(r.paineis_por_tipo) : null,
-    m2_por_tipo: r.m2_por_tipo ? JSON.stringify(r.m2_por_tipo) : null,
-    paineis_2p: r.paineis_2p ?? 0,
-    paineis_sp: r.paineis_sp ?? 0,
-    m2_2p: r.m2_2p ?? 0,
-    m2_sp: r.m2_sp ?? 0,
-    tracos_json: r.tracos ? JSON.stringify(r.tracos) : null,
-    // !! só vira 1 quando explicitamente true (migração de registro já
-    // avaliado, por ex.) — nunca por acidente de um campo truthy qualquer
-    // vindo do JSON antigo.
-    avaliado: r.avaliado === true || r.avaliado === 1 ? 1 : 0,
-    // Ver comentário em operacoes.operador_nome (CREATE TABLE, acima) —
-    // nunca obrigatório, fica NULL se não vier.
-    operador_nome: r.operador_nome || null,
-  };
-}
-
-/** Caminho inverso: 1 linha da tabela "operacoes" -> objeto no formato historico.json. */
-function rowParaOperacao(row) {
-  return {
-    id: row.id,
-    data: row.data,
-    turno: row.turno,
-    dimensao: row.dimensao,
-    capacidade: row.capacidade,
-    id_bateria: row.id_bateria,
-    inicio: row.inicio,
-    fim: row.fim,
-    desemplaque: row.desemplaque,
-    tempo_min: row.tempo_min,
-    qtd_tracos: row.qtd_tracos,
-    houve_atraso: row.houve_atraso,
-    motivo_atraso: row.motivo_atraso,
-    tipo_montagem: row.tipo_montagem,
-    bercos_reais: row.bercos_reais,
-    ...(row.bercos_personalizados ? { bercos_personalizados: JSON.parse(row.bercos_personalizados) } : {}),
-    total_paineis: row.total_paineis,
-    m2_total: row.m2_total,
-    placas_cimenticia: row.placas_cimenticia,
-    paineis_por_tipo: row.paineis_por_tipo ? JSON.parse(row.paineis_por_tipo) : {},
-    m2_por_tipo: row.m2_por_tipo ? JSON.parse(row.m2_por_tipo) : {},
-    paineis_2p: row.paineis_2p,
-    paineis_sp: row.paineis_sp,
-    m2_2p: row.m2_2p,
-    m2_sp: row.m2_sp,
-    tracos: row.tracos_json ? JSON.parse(row.tracos_json) : [],
-    avaliado: !!row.avaliado,
-    operador_nome: row.operador_nome || null,
-  };
-}
-
-const SQL_INSERIR_OPERACAO = `
-  INSERT INTO operacoes (
-    id, data, turno, dimensao, capacidade, id_bateria, inicio, fim, desemplaque,
-    tempo_min, qtd_tracos, houve_atraso, motivo_atraso, tipo_montagem, bercos_reais,
-    bercos_personalizados, total_paineis, m2_total, placas_cimenticia,
-    paineis_por_tipo, m2_por_tipo, paineis_2p, paineis_sp, m2_2p, m2_sp,
-    tracos_json, avaliado, modo_teste, operador_nome, criado_em
-  ) VALUES (
-    @id, @data, @turno, @dimensao, @capacidade, @id_bateria, @inicio, @fim, @desemplaque,
-    @tempo_min, @qtd_tracos, @houve_atraso, @motivo_atraso, @tipo_montagem, @bercos_reais,
-    @bercos_personalizados, @total_paineis, @m2_total, @placas_cimenticia,
-    @paineis_por_tipo, @m2_por_tipo, @paineis_2p, @paineis_sp, @m2_2p, @m2_sp,
-    @tracos_json, @avaliado, @modo_teste, @operador_nome, @criado_em
-  )
-`;
-
-/**
- * Lista todas as linhas de bercos_visuais (1 por operação), com "bercos"
- * já desserializado — usado pelo Backup de Dados (manual/automático), que
- * antes desta mudança não cobria esta tabela (berços visuais e avaliações
- * de qualidade ficavam de fora dos dois backups baseados em public/db/,
- * só entravam no Backup Geral por este zipar o .sqlite inteiro).
- */
-function todosOsBercosVisuais() {
-  const rows = db.prepare('SELECT id_operacao, bercos, atualizado_em FROM bercos_visuais ORDER BY id_operacao ASC').all();
-  return rows.map(r => ({ id_operacao: r.id_operacao, bercos: JSON.parse(r.bercos), atualizado_em: r.atualizado_em }));
-}
-
-/**
- * Substitui TODO o conteúdo de bercos_visuais pelo array informado (mesmo
- * formato de todosOsBercosVisuais) — usado por /restaurar-backup-dados,
- * mesmo padrão "apaga tudo e reinsere dentro de 1 transação" já usado por
- * operações/paradas. Quem chama é responsável por envolver numa
- * db.transaction(), igual às outras rotas de restore.
- */
-const SQL_INSERIR_BERCO_VISUAL_BACKUP = `
-  INSERT INTO bercos_visuais (id_operacao, bercos, atualizado_em)
-  VALUES (@id_operacao, @bercos, @atualizado_em)
-`;
-function substituirBercosVisuais(lista) {
-  db.prepare('DELETE FROM bercos_visuais').run();
-  const inserir = db.prepare(SQL_INSERIR_BERCO_VISUAL_BACKUP);
-  for (const item of (lista || [])) {
-    inserir.run({
-      id_operacao: item.id_operacao,
-      bercos: JSON.stringify(item.bercos || []),
-      atualizado_em: item.atualizado_em || new Date().toISOString(),
-    });
-  }
-}
-
+// module.exports = db precisa continuar aqui (é a 1ª atribuição de
+// module.exports no arquivo inteiro — ver README, "Diferença importante
+// em relação ao fatiamento de server.js"): tudo que db.js exporta depois
+// disso (inclusive as fases já fatiadas mais abaixo — paradas, sobra/
+// contador de traços, manutenção, push, sessões) é pendurado neste mesmo
+// objeto via Object.assign.
 module.exports = db;
-module.exports.operacaoParaRow = operacaoParaRow;
-module.exports.rowParaOperacao = rowParaOperacao;
-module.exports.SQL_INSERIR_OPERACAO = SQL_INSERIR_OPERACAO;
-/**
- * Relatório de Berços — 1 linha por operação, juntando bercos_visuais com
- * os dados da bateria (operacoes) que a tela precisa pra identificar cada
- * linha (ID da bateria, tipo de montagem) — usado pela página "Relatório
- * de Berços" (ver public/js/relatorio-bercos.js). Cada berço mantém seu
- * "ordem" (1-based); a página usa isso pra montar as colunas B1..B22,
- * deixando em branco os berços que aquela bateria específica não teve
- * (nem toda bateria usa as 22 posições).
- */
-function relatorioBercos() {
-  const rows = db.prepare(`
-    SELECT o.id AS id_operacao, o.data, o.turno, o.id_bateria, o.tipo_montagem,
-           o.capacidade, o.bercos_reais, o.houve_atraso, o.motivo_atraso,
-           o.bercos_personalizados, bv.bercos
-    FROM bercos_visuais bv
-    JOIN operacoes o ON o.id = bv.id_operacao
-    ORDER BY o.data ASC, o.turno ASC, o.criado_em ASC
-  `).all();
-  return rows.map(r => ({
-    id_operacao: r.id_operacao,
-    data: r.data,
-    turno: r.turno,
-    id_bateria: r.id_bateria,
-    tipo_montagem: r.tipo_montagem,
-    capacidade: r.capacidade,
-    bercos_reais: r.bercos_reais,
-    // Só preenchido quando tipo_montagem === 'PERSONALIZADA' (ver
-    // coluna operacoes.bercos_personalizados) — usado pelo Modo Visual do
-    // Relatório de Berços (relatorio-bercos.js) pra colorir CADA berço
-    // pelo seu próprio tipo, em vez de um tipo único pra bateria inteira.
-    bercos_personalizados: r.bercos_personalizados ? JSON.parse(r.bercos_personalizados) : null,
-    // Adicionados pra cruzar com a tabela de Pontos de Atenção (Análise
-    // de Berços): confirma se o vazamento marcado no berço bate com um
-    // atraso já registrado com esse motivo (ver _mapaAtrasoVazamento, em
-    // analise-bercos.js, e normalizarMotivo em analise-operacional.js —
-    // mesmos termos de busca, "vazamento/vasamento/reinjeção").
-    houve_atraso: r.houve_atraso,
-    motivo_atraso: r.motivo_atraso,
-    bercos: JSON.parse(r.bercos), // [{berco, ordem, estado_esquerda, estado_direita}, ...]
-  }));
-}
-
-module.exports.criarBercosVisuaisIniciais = criarBercosVisuaisIniciais;
-module.exports.todosOsBercosVisuais = todosOsBercosVisuais;
-module.exports.substituirBercosVisuais = substituirBercosVisuais;
-
-/**
- * Berços visuais de um CONJUNTO específico de operações — usado por
- * GET /operacoes-nao-avaliadas (ver lib/rotas/qualidade.js) pra saber
- * quais berços foram marcados "não enchido" (estado_esquerda/
- * estado_direita === 'nao_enchido', ver POST /marcar-berco-andamento)
- * ANTES da operação ser registrada, e refletir isso na grade do Setor de
- * Qualidade (painel correspondente nem entra na contagem — ver
- * _paineisNaoEnchidosDaOperacao, setor-qualidade.js). Diferente de
- * todosOsBercosVisuais (backup, traz a tabela inteira): aqui só as
- * operações pedidas, e devolve um MAPA por id_operacao (mais direto pro
- * front cruzar com a lista da fila) em vez de array.
- */
-function bercosVisuaisPorOperacoes(ids) {
-  const lista = Array.isArray(ids) ? ids.filter(Boolean) : [];
-  if (!lista.length) return {};
-  const placeholders = lista.map(() => '?').join(',');
-  const rows = db.prepare(`SELECT id_operacao, bercos FROM bercos_visuais WHERE id_operacao IN (${placeholders})`).all(...lista);
-  const mapa = {};
-  rows.forEach(r => { mapa[r.id_operacao] = JSON.parse(r.bercos); });
-  return mapa;
-}
-module.exports.bercosVisuaisPorOperacoes = bercosVisuaisPorOperacoes;
-
-/**
- * Correlação Traço × Berço — para cada USO de traço com berço_inicio/fim
- * preenchidos (ver traco_usos: berco_inicio/berco_finalizacao — o range
- * de berços que aquele traço específico encheu), calcula a taxa de
- * vazamento (bercos_visuais) SÓ dos berços daquele range, e junta com o
- * nº de ajustes de receita daquele traço (indicador de instabilidade) e
- * a densidade/flow FINAIS dele (mesma regra de "original + última
- * remedição" usada em rowParaTraco/todosOsTracos — ver acima). Usado
- * pelo gráfico de dispersão e pela tabela "Traço × Berço" (piores casos
- * + receita, pra comparar com os traços sem vazamento) na Análise de
- * Berços (ver public/js/analise-bercos.js).
- *
- * Cada linha devolvida é 1 USO (traço + operação específicos), não 1
- * traço só — o mesmo traço pode ser reaproveitado em baterias diferentes
- * (ver traco_usos), e cada reaproveitamento encheu berços diferentes,
- * com resultado de vazamento diferente. INNER JOIN com operacoes e
- * bercos_visuais already exclui usos de traços importados em lote (id_
- * operacao sintético, sem operação/berços visuais reais por trás — ver
- * comentário em CREATE TABLE traco_usos, acima).
- */
-function correlacaoTracoBerco() {
-  const rows = db.prepare(`
-    SELECT tu.id_traco, tu.id_operacao, tu.berco_inicio, tu.berco_finalizacao,
-           o.data, o.turno, o.id_bateria, o.tipo_montagem, bv.bercos,
-           t.densidade_original, t.flow_original,
-           (SELECT COUNT(*) FROM ajustes a WHERE a.id_traco = tu.id_traco) AS num_ajustes,
-           (SELECT valor FROM leituras_resultado lr WHERE lr.id_traco = tu.id_traco
-              AND lr.campo = 'densidade' ORDER BY lr.ordem DESC LIMIT 1) AS densidade_remedida,
-           (SELECT valor FROM leituras_resultado lr WHERE lr.id_traco = tu.id_traco
-              AND lr.campo = 'flow' ORDER BY lr.ordem DESC LIMIT 1) AS flow_remedido
-    FROM traco_usos tu
-    JOIN operacoes o ON o.id = tu.id_operacao
-    JOIN bercos_visuais bv ON bv.id_operacao = tu.id_operacao
-    JOIN tracos t ON t.id_traco = tu.id_traco
-    WHERE tu.berco_inicio IS NOT NULL AND tu.berco_inicio != ''
-      AND tu.berco_finalizacao IS NOT NULL AND tu.berco_finalizacao != ''
-    ORDER BY o.data ASC
-  `).all();
-
-  return rows.map(r => {
-    // Math.min/max: cobre o caso raro de alguém digitar início > fim.
-    const ini = Math.min(parseInt(r.berco_inicio, 10), parseInt(r.berco_finalizacao, 10));
-    const fim = Math.max(parseInt(r.berco_inicio, 10), parseInt(r.berco_finalizacao, 10));
-    const todos = JSON.parse(r.bercos);
-    // ini/fim viram NaN se berco_inicio/fim não for numérico (digitação
-    // inválida) — b.ordem >= NaN é sempre false, então "doTraco" fica
-    // vazio e a linha é descartada no .filter() abaixo, sem lançar erro.
-    const doTraco = todos.filter(b => b.ordem >= ini && b.ordem <= fim);
-    let total = 0, vazamentos = 0;
-    doTraco.forEach(b => {
-      total += 2; // 2 lados por berço (esquerda + direita)
-      if (b.estado_esquerda === 'baixou') vazamentos++;
-      if (b.estado_direita === 'baixou') vazamentos++;
-    });
-    return {
-      id_traco: r.id_traco, id_operacao: r.id_operacao,
-      data: r.data, turno: r.turno, id_bateria: r.id_bateria, tipo_montagem: r.tipo_montagem,
-      berco_inicio: ini, berco_finalizacao: fim,
-      num_ajustes: r.num_ajustes,
-      // Final = última remedição (leituras_resultado), se houve alguma;
-      // senão o valor original do traço. Mesma regra de "original +
-      // ajustes/leituras" usada no resto do sistema (ver rowParaTraco).
-      densidade: r.densidade_remedida ?? r.densidade_original ?? null,
-      flow: r.flow_remedido ?? r.flow_original ?? null,
-      bercos_avaliados: doTraco.length,
-      total_lados: total, vazamentos,
-      taxa_vazamento: total ? (vazamentos / total) * 100 : null,
-    };
-  }).filter(r => r.bercos_avaliados > 0);
-}
-
-module.exports.relatorioBercos = relatorioBercos;
-module.exports.correlacaoTracoBerco = correlacaoTracoBerco;
-
-/**
- * Detalhe completo de UMA operação — junta tudo que se liga por
- * id_operacao (o elo comum entre histórico, relatório de injeção e
- * berços visuais): a operação em si, os berços visuais (se já tiverem
- * sido registrados), a receita de cada traço usado (com os ajustes que
- * teve, se algum) e a avaliação de qualidade vinculada (se já tiver
- * sido feita). Usado pela "Análise Focada" (ver public/js/
- * analise-focada.js), acessada clicando numa linha do Registro de
- * Baterias com o modo de foco ligado.
- *
- * Devolve null se a operação não existir.
- */
-function detalheOperacao(idOperacao) {
-  const operacao = db.prepare('SELECT * FROM operacoes WHERE id = ?').get(idOperacao);
-  if (!operacao) return null;
-
-  const bvRow = db.prepare('SELECT bercos FROM bercos_visuais WHERE id_operacao = ?').get(idOperacao);
-  const bercosVisuais = bvRow ? JSON.parse(bvRow.bercos) : null;
-
-  // Traços usados nesta operação, cada um com a receita ORIGINAL, os
-  // ajustes (se algum) e a densidade/flow FINAIS (última remedição, ou
-  // o original se nunca foi remedido — mesma regra usada em
-  // rowParaTraco/correlacaoTracoBerco). Ordenado pelo berço inicial —
-  // mesma ordem em que os traços foram usados na bateria.
-  const usos = db.prepare(`
-    SELECT tu.id_traco, tu.berco_inicio, tu.berco_finalizacao, tu.obs,
-           t.num_traco, t.cimento_original, t.agua_original, t.eps_original,
-           t.superplast_original, t.incorporador_original, t.tempo_batida_original,
-           t.densidade_original, t.flow_original, t.silo, t.expansao, t.densidade_eps
-    FROM traco_usos tu
-    JOIN tracos t ON t.id_traco = tu.id_traco
-    WHERE tu.id_operacao = ?
-  `).all(idOperacao).sort((a, b) => parseInt(a.berco_inicio, 10) - parseInt(b.berco_inicio, 10));
-
-  const tracos = usos.map(u => {
-    const ajustes = db.prepare(
-      'SELECT ordem, tempo_batida, cimento, agua, eps, superplast, incorporador, registrado_em FROM ajustes WHERE id_traco = ? ORDER BY ordem ASC'
-    ).all(u.id_traco);
-    const densidadeRemedida = db.prepare(
-      "SELECT valor FROM leituras_resultado WHERE id_traco=? AND campo='densidade' ORDER BY ordem DESC LIMIT 1"
-    ).get(u.id_traco);
-    const flowRemedido = db.prepare(
-      "SELECT valor FROM leituras_resultado WHERE id_traco=? AND campo='flow' ORDER BY ordem DESC LIMIT 1"
-    ).get(u.id_traco);
-    return {
-      id_traco: u.id_traco,
-      num_traco: u.num_traco,
-      berco_inicio: u.berco_inicio,
-      berco_finalizacao: u.berco_finalizacao,
-      obs: u.obs,
-      original: {
-        cimento: u.cimento_original, agua: u.agua_original, eps: u.eps_original,
-        superplast: u.superplast_original, incorporador: u.incorporador_original,
-        tempo_batida: u.tempo_batida_original,
-      },
-      densidade: densidadeRemedida ? densidadeRemedida.valor : u.densidade_original,
-      flow: flowRemedido ? flowRemedido.valor : u.flow_original,
-      silo: u.silo, expansao: u.expansao, densidade_eps: u.densidade_eps,
-      ajustes,
-      num_ajustes: ajustes.length,
-    };
-  });
-
-  // Avaliação de qualidade vinculada — se uma bateria (raro, mas
-  // possível) tiver mais de uma avaliação registrada pra mesma operação,
-  // pega a mais recente. "dados" já traz os painéis embutidos.
-  const avRow = db.prepare(
-    'SELECT dados FROM avaliacoes_qualidade WHERE id_operacao = ? ORDER BY registrado_em DESC LIMIT 1'
-  ).get(idOperacao);
-  const avaliacao = avRow ? JSON.parse(avRow.dados) : null;
-
-  return { operacao, bercosVisuais, tracos, avaliacao };
-}
-module.exports.detalheOperacao = detalheOperacao;
-
-/**
- * Grava uma avaliação de qualidade JÁ REGISTRADA (definitiva, não
- * rascunho) — 1 linha, com a avaliação inteira (painéis inclusos) em
- * JSON na coluna "dados". Chamada por POST /registrar-avaliacao-qualidade
- * (server.js). INSERT OR REPLACE: se o id já existir (reenvio depois de
- * uma falha de rede, por exemplo), sobrescreve em vez de duplicar ou
- * rejeitar — idempotente, mesmo espírito das outras rotas de baixa
- * fricção do sistema.
- *
- * Grava TAMBÉM em avaliacao_paineis, na mesma transação — mesmos dados,
- * só que extraídos numa tabela própria pra dar pra consultar em SQL
- * direto (ver comentário na CREATE TABLE, acima). "dados" continua
- * sendo a fonte de verdade (é o que o front lê de volta); avaliacao_
- * paineis é só uma cópia derivada, pra consulta — se um dia os dois
- * ficarem inconsistentes por qualquer motivo, dados é quem manda.
- * @param {object} avaliacao - objeto inteiro vindo do front (evalObj + paineis)
- */
-const SQL_SALVAR_AVALIACAO_QUALIDADE = `
-  INSERT OR REPLACE INTO avaliacoes_qualidade (id, id_operacao, id_bateria, turno, registrado_em, avaliador_nome, dados)
-  VALUES (@id, @id_operacao, @id_bateria, @turno, @registrado_em, @avaliador_nome, @dados)
-`;
-const SQL_SALVAR_PAINEIS_AVALIACAO = `
-  INSERT OR REPLACE INTO avaliacao_paineis (id_avaliacao, id_operacao, id_bateria, registrado_em, paineis)
-  VALUES (@id_avaliacao, @id_operacao, @id_bateria, @registrado_em, @paineis)
-`;
-// Deixa cada painel só com os campos que interessam pra consulta — evita
-// carregar "avaliacaoId" repetido em cada item (já é a chave da linha
-// toda, ver id_avaliacao) e qualquer campo extra que apareça no futuro
-// sem que aqui saiba o que fazer com ele.
-function _normalizarPaineisParaSql(paineis) {
-  return (paineis || []).map(p => ({
-    pallet: p.pallet, posicao: p.posicao,
-    tipoEsperado: p.tipoEsperado || null, tipoObtido: p.tipoObtido || null,
-    resultado: p.resultado || null, linha: p.linha || null,
-    marcas: p.marcas || [],
-    // Código do motivo do defeito (ver MOTIVOS_DEFEITO, setor-qualidade.js)
-    // — só existe (não-null) em painéis 2ª linha ou reprovados.
-    motivo: p.motivo || null,
-    // Descrição livre — só existe quando motivo === 'OT' ("Outros").
-    motivoDescricao: p.motivoDescricao || null,
-  }));
-}
-function salvarAvaliacaoQualidade(avaliacao) {
-  const params = {
-    id: avaliacao.id,
-    id_operacao: avaliacao.linkedOperacaoId || null,
-    id_bateria: avaliacao.batteryId || null,
-    turno: avaliacao.turno || null,
-    registrado_em: avaliacao.registeredAt || new Date().toISOString(),
-    // Ver comentário em avaliacoes_qualidade.avaliador_nome (CREATE
-    // TABLE, acima) — nunca obrigatório, fica NULL se não vier.
-    avaliador_nome: avaliacao.avaliadorNome || null,
-    dados: JSON.stringify(avaliacao),
-  };
-  const gravarTudo = db.transaction(() => {
-    db.prepare(SQL_SALVAR_AVALIACAO_QUALIDADE).run(params);
-    db.prepare(SQL_SALVAR_PAINEIS_AVALIACAO).run({
-      id_avaliacao: params.id,
-      id_operacao: params.id_operacao,
-      id_bateria: params.id_bateria,
-      registrado_em: params.registrado_em,
-      paineis: JSON.stringify(_normalizarPaineisParaSql(avaliacao.paineis)),
-    });
-  });
-  gravarTudo();
-}
-
-/**
- * Lista os painéis já normalizados (avaliacao_paineis), 1 item por
- * avaliação — usado por futuras telas de análise/cruzamento (mesmo
- * padrão de relatorioBercos()/correlacaoTracoBerco()), sem precisar
- * carregar avaliacoes_qualidade.dados inteiro (que tem também
- * observações, datas de montagem/enchimento/desmoldagem etc. — dados
- * que quem só quer os painéis não precisa processar).
- */
-function listarPaineisAvaliacao() {
-  const rows = db.prepare(
-    'SELECT id_avaliacao, id_operacao, id_bateria, registrado_em, paineis FROM avaliacao_paineis ORDER BY registrado_em DESC'
-  ).all();
-  return rows.map(r => ({
-    id_avaliacao: r.id_avaliacao,
-    id_operacao: r.id_operacao,
-    id_bateria: r.id_bateria,
-    registrado_em: r.registrado_em,
-    paineis: JSON.parse(r.paineis),
-  }));
-}
-
-/**
- * Migração única: preenche avaliacao_paineis a partir de avaliações que
- * já estavam em avaliacoes_qualidade ANTES desta tabela existir — sem
- * isso, só avaliações registradas DAQUI PRA FRENTE apareceriam nela; as
- * já registradas ficariam de fora até alguém reabrir/regravar cada uma
- * manualmente. Roda 1 vez (INSERT OR IGNORE — não sobrescreve linhas que
- * já existirem, então rodar de novo em outra subida do servidor não faz
- * nada além de reconferir).
- */
-function _migrarPaineisAvaliacaoExistentes() {
-  const jaExistem = new Set(
-    db.prepare('SELECT id_avaliacao FROM avaliacao_paineis').all().map(r => r.id_avaliacao)
-  );
-  const pendentes = db.prepare('SELECT id, id_operacao, id_bateria, registrado_em, dados FROM avaliacoes_qualidade').all()
-    .filter(r => !jaExistem.has(r.id));
-  if (!pendentes.length) return;
-
-  const migrarTudo = db.transaction((linhas) => {
-    const inserir = db.prepare(SQL_SALVAR_PAINEIS_AVALIACAO);
-    for (const r of linhas) {
-      let avaliacao;
-      try { avaliacao = JSON.parse(r.dados); } catch (e) { continue; } // linha corrompida — pula, não trava a migração inteira
-      inserir.run({
-        id_avaliacao: r.id,
-        id_operacao: r.id_operacao,
-        id_bateria: r.id_bateria,
-        registrado_em: r.registrado_em,
-        paineis: JSON.stringify(_normalizarPaineisParaSql(avaliacao.paineis)),
-      });
-    }
-  });
-  migrarTudo(pendentes);
-  console.log(`[avaliacao_paineis] Migração: ${pendentes.length} avaliação(ões) já registrada(s) antes desta tabela existir foram preenchidas agora.`);
-}
-_migrarPaineisAvaliacaoExistentes();
-
-/**
- * Mesmo cálculo de _montagemDoRegistro (setor-qualidade.js, frontend) —
- * duplicado aqui de propósito, pra rodar como migração server-side sem
- * depender de JS de front-end. Junta tipos DIFERENTES no mesmo palete com
- * "/" (ex: "3T/5T"), em vez de mostrar só um ou nenhum.
- */
-function _montagemDeAvaliacaoPaineis(paineis) {
-  const montagem = {};
-  for (let n = 1; n <= 4; n++) {
-    const tipos = [];
-    (paineis || []).filter(p => p.pallet === n).forEach(p => {
-      const t = (p.tipoEsperado || '').toString().toUpperCase();
-      if (t && !tipos.includes(t)) tipos.push(t);
-    });
-    montagem[`pallet${n}`] = tipos.join('/');
-  }
-  return montagem;
-}
-
-/**
- * Migração única: recalcula avaliacao.montagem (o que aparece nas colunas
- * Pallet 1..4 da tela "Registros", Setor de Qualidade) a partir dos
- * painéis DE VERDADE de cada avaliação já registrada — sem isso, um
- * registro salvo ANTES da correção que passou a calcular isso no ato do
- * registro (ver conversa que motivou: "Registros" mostrando só "—" pra
- * qualquer tipo de montagem em modo Personalizada) continuaria mostrando
- * "—" pra sempre, mesmo depois da correção valer pra registros novos.
- * Só REESCREVE quando o valor calculado é diferente do que já estava
- * salvo — idempotente, roda de novo em toda subida do servidor sem custo
- * real (registro já corrigido não muda de novo).
- */
-function _migrarMontagemDasAvaliacoesExistentes() {
-  const rows = db.prepare('SELECT id, dados FROM avaliacoes_qualidade').all();
-  const atualizarUma = db.prepare('UPDATE avaliacoes_qualidade SET dados = @dados WHERE id = @id');
-  let atualizadas = 0;
-  const migrarTudo = db.transaction(() => {
-    for (const r of rows) {
-      let avaliacao;
-      try { avaliacao = JSON.parse(r.dados); } catch (e) { continue; } // linha corrompida — pula, não trava a migração inteira
-      if (!Array.isArray(avaliacao.paineis) || !avaliacao.paineis.length) continue;
-      const montagemCalculada = _montagemDeAvaliacaoPaineis(avaliacao.paineis);
-      const montagemAtual = avaliacao.montagem || {};
-      const mudou = [1, 2, 3, 4].some(n => (montagemAtual[`pallet${n}`] || '') !== (montagemCalculada[`pallet${n}`] || ''));
-      if (!mudou) continue;
-      avaliacao.montagem = montagemCalculada;
-      atualizarUma.run({ id: r.id, dados: JSON.stringify(avaliacao) });
-      atualizadas++;
-    }
-  });
-  migrarTudo();
-  if (atualizadas) {
-    console.log(`[avaliacoes_qualidade] Migração: recalculado o tipo de montagem (montagem.palletN) de ${atualizadas} avaliação(ões) já registrada(s), a partir dos painéis de verdade.`);
-  }
-}
-_migrarMontagemDasAvaliacoesExistentes();
-
-/**
- * Lista todas as avaliações de qualidade já registradas, mais recentes
- * primeiro — cada item já vem desserializado (JSON.parse de "dados"),
- * pronto pro front usar direto, painéis inclusos. Usado por GET
- * /avaliacoes-qualidade (Dashboard e Registros do Setor de Qualidade).
- */
-function listarAvaliacoesQualidade() {
-  const rows = db.prepare(
-    'SELECT avaliador_nome, dados FROM avaliacoes_qualidade ORDER BY registrado_em DESC'
-  ).all();
-  return rows.map(r => {
-    const avaliacao = JSON.parse(r.dados);
-    // Coluna SQL prevalece sobre o que estiver dentro do JSON — cobre o
-    // caso de uma avaliação salva ANTES da coluna avaliador_nome existir
-    // (nesse caso, r.avaliador_nome é null, então avaliacao.avaliadorNome,
-    // se já tiver algo, continua valendo).
-    if (r.avaliador_nome) avaliacao.avaliadorNome = r.avaliador_nome;
-    return avaliacao;
-  });
-}
-/**
- * Substitui TODO o conteúdo de avaliacoes_qualidade pelo array informado
- * (mesmo formato de listarAvaliacoesQualidade — cada item é a avaliação
- * inteira, painéis inclusos) — usado por /restaurar-backup-dados, mesmo
- * padrão "apaga tudo e reinsere" das outras tabelas. Quem chama é
- * responsável por envolver numa db.transaction().
- */
-function substituirAvaliacoesQualidade(lista) {
-  db.prepare('DELETE FROM avaliacoes_qualidade').run();
-  // avaliacao_paineis não é apagada em cascata automaticamente (SQLite
-  // só reforça FK se PRAGMA foreign_keys estiver ligado, e mesmo assim
-  // isso é REFERENCES, não "ON DELETE CASCADE") — sem esta linha, uma
-  // restauração com MENOS avaliações do que existia antes deixaria
-  // painéis órfãos de avaliações que não voltaram no backup.
-  db.prepare('DELETE FROM avaliacao_paineis').run();
-  for (const avaliacao of (lista || [])) {
-    salvarAvaliacaoQualidade(avaliacao); // já grava nas 2 tabelas, ver acima
-  }
-  // Roda a migração de montagem (ver _migrarMontagemDasAvaliacoesExistentes,
-  // acima) IMEDIATAMENTE após restaurar — sem isso, um backup ANTIGO
-  // (com registros salvos antes da correção que calcula montagem a
-  // partir dos painéis) só ficaria corrigido no PRÓXIMO reinício do
-  // servidor, deixando "Registros" mostrando "—" logo depois de uma
-  // restauração, até alguém reiniciar por outro motivo.
-  _migrarMontagemDasAvaliacoesExistentes();
-}
-
-/**
- * Marca uma operação como avaliada — INSERT (idempotente) em
- * "operacoes_avaliadas", nunca mais um UPDATE na própria linha de
- * "operacoes" (ver comentário na CREATE TABLE, acima). Usada por
- * POST /marcar-operacao-avaliada (server.js) quando a avaliação vem
- * vinculada a uma operação da fila (linkedOperacaoId presente).
- *
- * FK (operacoes_avaliadas.id_operacao REFERENCES operacoes(id), com
- * PRAGMA foreign_keys=ON) faz o SQLite recusar silenciosamente um id que
- * não exista em "operacoes" — por isso quem chama (a rota) confere a
- * existência ANTES de chamar esta função, se precisar de um erro
- * explícito pro front (ver server.js).
- *
- * @param {string} idOperacao
- * @returns {boolean} true se inseriu (1ª vez); false se já estava
- *   marcada (chamada repetida, idempotente) ou se o id não existe.
- */
-function marcarOperacaoAvaliada(idOperacao) {
-  if (!idOperacao) return false;
-  const info = db.prepare(
-    'INSERT OR IGNORE INTO operacoes_avaliadas (id_operacao) VALUES (?)'
-  ).run(idOperacao);
-  return info.changes > 0;
-}
-
-/**
- * Desfaz COMPLETAMENTE a avaliação de qualidade de uma operação — usada
- * por POST /admin/sql-excluir-linha (Configurações → Dados SQL) quando a
- * linha excluída é de "operacoes_avaliadas": em vez de só tirar a
- * operação da lista de avaliadas (o que deixaria avaliacoes_qualidade e
- * avaliacao_paineis "órfãs" — a avaliação continuaria existindo, só que
- * de uma operação que voltou a aparecer como pendente), remove os 3
- * rastros da avaliação de uma vez, numa transação só:
- *
- *   1) avaliacao_paineis   (referencia avaliacoes_qualidade via FK — por
- *                            isso sai PRIMEIRO, senão o DELETE de
- *                            avaliacoes_qualidade seria bloqueado)
- *   2) avaliacoes_qualidade (a avaliação em si, com o JSON completo)
- *   3) operacoes_avaliadas  (a marcação "esta operação já foi avaliada")
- *
- * Depois disso, a operação passa a aparecer de novo em
- * GET /operacoes-nao-avaliadas (a fila do Setor de Qualidade) — não por
- * nenhuma ação extra aqui, mas porque essa fila já é definida como "toda
- * operação cujo id NÃO esteja em operacoes_avaliadas" (ver comentário na
- * CREATE TABLE operacoes_avaliadas, acima).
- *
- * @returns {{avaliacaoPaineis:number, avaliacoesQualidade:number, operacoesAvaliadas:number}}
- *   nº de linhas removidas em cada tabela (todos 0 se o id_operacao não
- *   tinha avaliação nenhuma).
- */
-function desfazerAvaliacaoOperacao(idOperacao) {
-  const excluirTudo = db.transaction(() => {
-    const r1 = db.prepare('DELETE FROM avaliacao_paineis WHERE id_operacao = ?').run(idOperacao);
-    const r2 = db.prepare('DELETE FROM avaliacoes_qualidade WHERE id_operacao = ?').run(idOperacao);
-    const r3 = db.prepare('DELETE FROM operacoes_avaliadas WHERE id_operacao = ?').run(idOperacao);
-    return {
-      avaliacaoPaineis: r1.changes,
-      avaliacoesQualidade: r2.changes,
-      operacoesAvaliadas: r3.changes,
-    };
-  });
-  return excluirTudo();
-}
-module.exports.desfazerAvaliacaoOperacao = desfazerAvaliacaoOperacao;
-
-/**
- * Marca como avaliada a operação PENDENTE mais antiga de uma bateria —
- * usada quando uma avaliação de qualidade é registrada SEM vir vinculada
- * a uma operação da fila (linkedOperacaoId ausente, ver
- * /registrar-avaliacao-qualidade, server.js).
- *
- * Por quê isso existe: uma avaliação AVULSA (o operador digita/seleciona
- * só o ID da bateria, sem escolher da fila) não tinha como marcar
- * nenhuma operação como avaliada — a operação real daquela bateria, se
- * houvesse alguma pendente, ficava "não avaliada" pra sempre, mesmo já
- * avaliada de verdade. Isso classificava a bateria errado (continuava
- * aparecendo na fila do Setor de Qualidade, sujeita a ser avaliada de
- * novo) e podia gerar avaliação duplicada pra mesma operação.
- *
- * Mesmo critério FIFO de GET /operacoes-nao-avaliadas (mais antiga
- * primeiro: "data ASC, fim ASC") — se a bateria tiver mais de uma
- * operação pendente, marca só a mais antiga (a que, na prática, é a
- * próxima da fila) e nunca mexe numa avaliação que já veio vinculada
- * (essa continua só pelo marcarOperacaoAvaliada explícito, acima,
- * chamado pelo front com o id_operacao exato).
- *
- * Nunca considera operações de Modo de Teste (modo_teste=0) — mesmo
- * motivo de /operacoes-nao-avaliadas: o Setor de Qualidade não tem
- * noção de Modo de Teste.
- *
- * BUG CORRIGIDO: esta função só tirava a operação da FILA (INSERT em
- * "operacoes_avaliadas"), mas nunca vinculava a própria avaliação
- * avulsa a essa operação (avaliacoes_qualidade.id_operacao continuava
- * NULL). Resultado: a bateria sumia da fila (parecia "avaliada"), mas
- * a Análise Focada — que busca a avaliação estritamente por
- * id_operacao (ver db.detalheOperacao) — nunca encontrava nada pra
- * essa operação, mesmo a avaliação certa já existindo. Agora, quando
- * o FIFO identifica qual operação pendente é essa (`pendente.id`),
- * também retro-vincula a avaliação avulsa a ela (ver
- * _vincularAvaliacaoAOperacao), na mesma transação.
- *
- * @param {string} idBateria
- * @param {string} [idAvaliacao] - id da avaliação avulsa que disparou
- *   esta chamada (ver POST /registrar-avaliacao-qualidade, server.js) —
- *   usado só pra retro-vincular essa avaliação à operação encontrada.
- *   Sem isso (chamada legada, sem o 2º argumento), o comportamento
- *   volta a ser só o antigo (tira da fila, sem vincular).
- * @returns {string|false} o id da operação marcada, ou false se não havia
- *   nenhuma pendente pra essa bateria. Quem chama (server.js) usa esse id
- *   pra também tirar a operação da fila em arquivo (ver
- *   removerDaFilaNaoAvaliadas, server.js) — CONTINUA truthy como antes
- *   (era `true`), então nenhuma chamada existente que só faz `if (...)`
- *   com o retorno precisa mudar.
- */
-function marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada(idBateria, idAvaliacao) {
-  if (!idBateria) return false;
-  const pendente = db.prepare(`
-    SELECT id FROM operacoes
-    WHERE id_bateria = ? AND modo_teste = 0
-      AND id NOT IN (SELECT id_operacao FROM operacoes_avaliadas)
-    ORDER BY data ASC, fim ASC
-    LIMIT 1
-  `).get(idBateria);
-  if (!pendente) return false;
-
-  const executar = db.transaction(() => {
-    marcarOperacaoAvaliada(pendente.id);
-    if (idAvaliacao) _vincularAvaliacaoAOperacao(idAvaliacao, pendente.id);
-  });
-  executar();
-  return pendente.id;
-}
-
-/**
- * Vincula, DEPOIS de já registrada, uma avaliação de qualidade a uma
- * operação — usado só por marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada
- * (acima), pra fechar a lacuna de uma avaliação AVULSA cuja operação
- * correspondente só é descoberta depois (pelo FIFO de bateria), não no
- * momento do registro.
- *
- * Atualiza id_operacao em avaliacoes_qualidade E avaliacao_paineis
- * (mesma coluna nas duas tabelas — ver CREATE TABLE), e também
- * "linkedOperacaoId" DENTRO do JSON "dados" — "dados" é quem o front
- * lê de volta (ver listarAvaliacoesQualidade/editarAvaliacaoDoEspelho),
- * então precisa continuar consistente com a coluna, senão a avaliação
- * passaria a ser encontrada pela Análise Focada mas ainda apareceria
- * como "avulsa" (sem vínculo) em qualquer tela que leia o JSON direto.
- */
-function _vincularAvaliacaoAOperacao(idAvaliacao, idOperacao) {
-  const row = db.prepare('SELECT dados FROM avaliacoes_qualidade WHERE id = ?').get(idAvaliacao);
-  if (!row) return; // avaliação não existe (não deveria acontecer, mas não quebra a marcação da fila por causa disso)
-  const dados = JSON.parse(row.dados);
-  if (dados.linkedOperacaoId === idOperacao) return; // já vinculada a esta mesma operação — nada a fazer
-  dados.linkedOperacaoId = idOperacao;
-  db.prepare('UPDATE avaliacoes_qualidade SET id_operacao = ?, dados = ? WHERE id = ?')
-    .run(idOperacao, JSON.stringify(dados), idAvaliacao);
-  db.prepare('UPDATE avaliacao_paineis SET id_operacao = ? WHERE id_avaliacao = ?')
-    .run(idOperacao, idAvaliacao);
-}
-
-/**
- * Lista todo o conteúdo de "operacoes_avaliadas" — usado por GET
- * /db/operacoes_avaliadas.json (Backup de Dados) e pelo backup automático
- * do servidor (gerarZipDadosServidor, server.js). Formato simples:
- * [{ id_operacao, avaliado_em }, ...].
- */
-function todosOsOperacoesAvaliadas() {
-  return db.prepare('SELECT id_operacao, avaliado_em FROM operacoes_avaliadas ORDER BY avaliado_em ASC').all();
-}
-
-/**
- * Substitui TODO o conteúdo de "operacoes_avaliadas" pelo array informado
- * — usado por /restaurar-backup-dados, mesmo padrão "apaga tudo e
- * reinsere" das outras tabelas (ver substituirBercosVisuais/
- * substituirAvaliacoesQualidade). Quem chama é responsável por já ter
- * limpado esta tabela ANTES de mexer em "operacoes" (ver comentário em
- * /restaurar-backup-dados, server.js, sobre a ordem por causa da FK) —
- * aqui só limpa de novo (idempotente, não custa nada) e reinsere.
- */
-function substituirOperacoesAvaliadas(lista) {
-  const inserir = db.prepare('INSERT OR IGNORE INTO operacoes_avaliadas (id_operacao, avaliado_em) VALUES (?, ?)');
-  db.prepare('DELETE FROM operacoes_avaliadas').run();
-  for (const item of (lista || [])) {
-    if (item && item.id_operacao) inserir.run(item.id_operacao, item.avaliado_em || new Date().toISOString());
-  }
-}
-
-module.exports.salvarAvaliacaoQualidade = salvarAvaliacaoQualidade;
-module.exports.listarAvaliacoesQualidade = listarAvaliacoesQualidade;
-module.exports.listarPaineisAvaliacao = listarPaineisAvaliacao;
-module.exports.substituirAvaliacoesQualidade = substituirAvaliacoesQualidade;
-module.exports.marcarOperacaoAvaliada = marcarOperacaoAvaliada;
-module.exports.marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada = marcarOperacaoMaisAntigaNaoAvaliadaComoAvaliada;
-module.exports.todosOsOperacoesAvaliadas = todosOsOperacoesAvaliadas;
-module.exports.substituirOperacoesAvaliadas = substituirOperacoesAvaliadas;
+Object.assign(module.exports, require('./lib/db/operacoes-qualidade.js')(db));
 
 // ============================================================
 //  Migração automática (Fase 2): historico.json -> tabela operacoes
@@ -1763,16 +981,18 @@ function migrarHistoricoSeNecessario(dbDir) {
   if (!Array.isArray(historico) || !historico.length) {
     // Arquivo existe mas está vazio — nada pra migrar, mas ainda renomeia
     // (evita ficar checando um arquivo vazio em todo boot futuro).
+    // Se o rename falhar (ex.: sem permissão de escrita), não é crítico —
+    // não havia nada a migrar mesmo; só volta a tentar no próximo boot.
     try { fs.renameSync(historicoPath, historicoPath + '.migrado-' + Date.now()); } catch (_) {}
     return;
   }
 
-  const inserirOperacao = db.prepare(SQL_INSERIR_OPERACAO);
+  const inserirOperacao = db.prepare(db.SQL_INSERIR_OPERACAO);
 
   const migrarTudo = db.transaction((registros) => {
     for (const r of registros) {
       inserirOperacao.run({
-        ...operacaoParaRow(r),
+        ...db.operacaoParaRow(r),
         modo_teste: 0,
         // criado_em "real" não existe no JSON de origem — usa fim/inicio
         // da própria operação como melhor aproximação disponível.
@@ -1825,1336 +1045,84 @@ module.exports.migrarHistoricoSeNecessario = migrarHistoricoSeNecessario;
 // ============================================================
 //  FASE 3 — paradas.json -> tabela paradas
 // ============================================================
-
-/** Converte uma parada no formato paradas.json pros parâmetros nomeados do INSERT/UPDATE. */
-function paradaParaRow(p) {
-  return {
-    id: p.id,
-    inicio: p.inicio,
-    fim: p.fim,
-    duracao_min: p.duracao_min ?? null,
-    motivo: p.motivo ?? null,
-    equipamento: p.equipamento ?? null,
-    classificacao: p.classificacao ?? null,
-    obs: p.obs ?? null,
-    registrado_em: p.registrado_em ?? null,
-    // Ver comentário em paradas.operador_nome (CREATE TABLE, acima).
-    operador_nome: p.operador_nome || null,
-  };
-}
-
-/** Caminho inverso: 1 linha da tabela "paradas" -> objeto no formato paradas.json. */
-function rowParaParada(row) {
-  return {
-    id: row.id,
-    inicio: row.inicio,
-    fim: row.fim,
-    duracao_min: row.duracao_min,
-    motivo: row.motivo,
-    equipamento: row.equipamento,
-    classificacao: row.classificacao,
-    obs: row.obs,
-    registrado_em: row.registrado_em,
-    operador_nome: row.operador_nome || null,
-  };
-}
-
-const SQL_INSERIR_PARADA = `
-  INSERT INTO paradas (id, inicio, fim, duracao_min, motivo, equipamento, classificacao, obs, registrado_em, operador_nome)
-  VALUES (@id, @inicio, @fim, @duracao_min, @motivo, @equipamento, @classificacao, @obs, @registrado_em, @operador_nome)
-`;
-
-module.exports.paradaParaRow = paradaParaRow;
-module.exports.rowParaParada = rowParaParada;
-module.exports.SQL_INSERIR_PARADA = SQL_INSERIR_PARADA;
-
-/**
- * Migração automática (Fase 3) — mesmo critério/padrão de
- * migrarHistoricoSeNecessario(): só faz algo se a tabela "paradas"
- * estiver vazia E paradas.json ainda existir com esse nome; renomeia
- * pra ".migrado-<timestamp>" depois (nunca apaga).
- */
-function migrarParadasSeNecessario(dbDir) {
-  const path = require('path');
-  const fs = require('fs');
-
-  const jaTemDados = db.prepare('SELECT COUNT(*) AS n FROM paradas').get().n > 0;
-  if (jaTemDados) return;
-
-  const paradasPath = path.join(dbDir, 'paradas.json');
-  if (!fs.existsSync(paradasPath)) return;
-
-  let paradas = [];
-  try {
-    const texto = fs.readFileSync(paradasPath, 'utf8').trim();
-    paradas = texto ? JSON.parse(texto) : [];
-  } catch (e) {
-    console.error('[migração] Não consegui ler paradas.json — abortando migração:', e.message);
-    return;
-  }
-  if (!Array.isArray(paradas) || !paradas.length) {
-    try { fs.renameSync(paradasPath, paradasPath + '.migrado-' + Date.now()); } catch (_) {}
-    return;
-  }
-
-  const inserirParada = db.prepare(SQL_INSERIR_PARADA);
-  const migrarTudo = db.transaction((registros) => {
-    for (const p of registros) inserirParada.run(paradaParaRow(p));
-  });
-  migrarTudo(paradas);
-  console.log(`[migração] ${paradas.length} parada(s) migrada(s) de paradas.json pra SQLite.`);
-
-  try {
-    fs.renameSync(paradasPath, paradasPath + '.migrado-' + Date.now());
-  } catch (e) {
-    console.error('[migração] Migrei os dados, mas não consegui renomear paradas.json:', e.message);
-  }
-}
-
-module.exports.migrarParadasSeNecessario = migrarParadasSeNecessario;
+// Fase 7 do fatiamento de db.js (ver README) — os conversores de formato
+// e a migração deste domínio moram agora em lib/db/paradas.js, sem
+// mudar lógica nenhuma. Continuam pendurados aqui no objeto `db`
+// (module.exports = db, acima) — lib/rotas/paradas.js e
+// lib/rotas/backup.js continuam usando db.paradaParaRow/db.rowParaParada/
+// db.SQL_INSERIR_PARADA sem precisar mudar nada, e server.js continua
+// chamando db.migrarParadasSeNecessario(DB_DIR) no boot, como sempre.
+Object.assign(module.exports, require('./lib/db/paradas.js')(db));
 
 // ============================================================
 //  FASE 4 — sobra.json -> tabela sobra; contador_tracos.json -> tabela
 //  contador_tracos (essa última já tinha schema desde a Fase 1)
 // ============================================================
-
-/** Converte o objeto sobra.json (camelCase) pros parâmetros nomeados do upsert. */
-function sobraParaRow(s) {
-  return {
-    ativa: s.ativa ? 1 : 0,
-    traco_id: s.tracoId ?? null,
-    num_traco: s.numTraco ?? null,
-    operacao_origem: s.operacaoOrigem ?? null,
-    flow: (s.flow === '' || s.flow === undefined) ? null : s.flow,
-    densidade: (s.densidade === '' || s.densidade === undefined) ? null : s.densidade,
-    receita: s.receita ? JSON.stringify(s.receita) : null,
-    data: s.data ?? null,
-    status: s.status ?? null,
-    data_encerramento: s.dataEncerramento ?? null,
-  };
-}
-
-/** Caminho inverso: a linha da tabela "sobra" -> objeto no formato sobra.json (camelCase). */
-function rowParaSobra(row) {
-  if (!row) return {}; // nunca houve nenhuma sobra ainda — mesmo default de DEFAULT_SE_VAZIO_BACKUP_DADOS
-  return {
-    ativa: !!row.ativa,
-    tracoId: row.traco_id,
-    numTraco: row.num_traco,
-    operacaoOrigem: row.operacao_origem,
-    flow: row.flow,
-    densidade: row.densidade,
-    receita: row.receita ? JSON.parse(row.receita) : {},
-    data: row.data,
-    status: row.status,
-    dataEncerramento: row.data_encerramento,
-  };
-}
-
-const SQL_UPSERT_SOBRA = `
-  INSERT INTO sobra (id, ativa, traco_id, num_traco, operacao_origem, flow, densidade, receita, data, status, data_encerramento)
-  VALUES (1, @ativa, @traco_id, @num_traco, @operacao_origem, @flow, @densidade, @receita, @data, @status, @data_encerramento)
-  ON CONFLICT(id) DO UPDATE SET
-    ativa = @ativa, traco_id = @traco_id, num_traco = @num_traco, operacao_origem = @operacao_origem,
-    flow = @flow, densidade = @densidade, receita = @receita, data = @data, status = @status,
-    data_encerramento = @data_encerramento
-`;
-
-module.exports.sobraParaRow = sobraParaRow;
-module.exports.rowParaSobra = rowParaSobra;
-module.exports.SQL_UPSERT_SOBRA = SQL_UPSERT_SOBRA;
-
-function migrarSobraSeNecessario(dbDir) {
-  const path = require('path');
-  const fs = require('fs');
-
-  const jaTemDados = db.prepare('SELECT COUNT(*) AS n FROM sobra').get().n > 0;
-  if (jaTemDados) return;
-
-  const sobraPath = path.join(dbDir, 'sobra.json');
-  if (!fs.existsSync(sobraPath)) return;
-
-  let sobra = null;
-  try {
-    const texto = fs.readFileSync(sobraPath, 'utf8').trim();
-    sobra = texto ? JSON.parse(texto) : null;
-  } catch (e) {
-    console.error('[migração] Não consegui ler sobra.json — abortando migração:', e.message);
-    return;
-  }
-  if (!sobra || typeof sobra !== 'object' || !Object.keys(sobra).length) {
-    try { fs.renameSync(sobraPath, sobraPath + '.migrado-' + Date.now()); } catch (_) {}
-    return;
-  }
-
-  db.prepare(SQL_UPSERT_SOBRA).run(sobraParaRow(sobra));
-  console.log('[migração] sobra migrada de sobra.json pra SQLite.');
-
-  try {
-    fs.renameSync(sobraPath, sobraPath + '.migrado-' + Date.now());
-  } catch (e) {
-    console.error('[migração] Migrei a sobra, mas não consegui renomear sobra.json:', e.message);
-  }
-}
-
-module.exports.migrarSobraSeNecessario = migrarSobraSeNecessario;
-
-/**
- * Migração automática do contador_tracos.json -> tabela contador_tracos.
- * Diferente das outras, a tabela aceita várias linhas (1 por dia) — mas o
- * arquivo de origem só guardava o dia mais recente, então é só 1 linha pra
- * importar mesmo (ver "Banco de Dados (SQLite)" no README).
- */
-function migrarContadorTracosSeNecessario(dbDir) {
-  const path = require('path');
-  const fs = require('fs');
-
-  const jaTemDados = db.prepare('SELECT COUNT(*) AS n FROM contador_tracos').get().n > 0;
-  if (jaTemDados) return;
-
-  const contadorPath = path.join(dbDir, 'contador_tracos.json');
-  if (!fs.existsSync(contadorPath)) return;
-
-  let contador = null;
-  try {
-    const texto = fs.readFileSync(contadorPath, 'utf8').trim();
-    contador = texto ? JSON.parse(texto) : null;
-  } catch (e) {
-    console.error('[migração] Não consegui ler contador_tracos.json — abortando migração:', e.message);
-    return;
-  }
-  if (!contador || !contador.data) {
-    try { fs.renameSync(contadorPath, contadorPath + '.migrado-' + Date.now()); } catch (_) {}
-    return;
-  }
-
-  db.prepare('INSERT INTO contador_tracos (data, total) VALUES (?, ?)').run(contador.data, contador.total || 0);
-  console.log('[migração] contador de traços migrado de contador_tracos.json pra SQLite.');
-
-  try {
-    fs.renameSync(contadorPath, contadorPath + '.migrado-' + Date.now());
-  } catch (e) {
-    console.error('[migração] Migrei o contador, mas não consegui renomear contador_tracos.json:', e.message);
-  }
-}
-
-module.exports.migrarContadorTracosSeNecessario = migrarContadorTracosSeNecessario;
+// Extraída para lib/db/sobra-contador-tracos.js (Fase 6 do fatiamento de
+// db.js — ver README, "Fatiamento de db.js (plano)"). Mesma lógica de
+// sempre, só mudou onde o código mora.
+const criarSobraContadorTracos = require('./lib/db/sobra-contador-tracos');
+Object.assign(module.exports, criarSobraContadorTracos(db));
 
 // ============================================================
 //  FASE 5 — relatorio_injecao.json + ajustes_tracos.json ->
 //  tracos + traco_usos + ajustes + leituras_resultado
 //
-//  A mais complexa: ver "Banco de Dados (SQLite)" no README pra entender
-//  a decisão de normalizar os ajustes (Opção B) e o que acontece com
-//  dados legados sem uma entrada correspondente em ajustes_tracos.json
-//  (collapse no original — ver colapsarOriginalEAjustes/decidirOriginal).
+//  Extraída para lib/db/tracos.js (Fase 8 do fatiamento de db.js — ver
+//  README, "Fatiamento de db.js (plano)"). Era a maior fatia isolada que
+//  restava, deixada por último de propósito por afetar valor exibido pro
+//  usuário. Mesma lógica de sempre, só mudou onde o código mora — quem
+//  chamava db.todosOsTracos(), db.substituirTracosEAjustes(),
+//  db.migrarRelatorioInjecaoSeNecessario(dbDir), etc. continua chamando
+//  exatamente igual.
 // ============================================================
-
-/** Extrai o valor "original" de um campo que pode ser número simples OU {original, ajustes}. */
-function extrairOriginal(v) {
-  if (v && typeof v === 'object' && 'original' in v) {
-    const o = v.original;
-    return (o === '' || o === null || o === undefined) ? null : Number(o);
-  }
-  return (v === undefined || v === null || v === '') ? null : Number(v);
-}
-
-/** Extrai a lista de ajustes (deltas/leituras) de um campo, ou [] se for número simples. */
-function extrairAjustesNumericos(v) {
-  return (v && typeof v === 'object' && Array.isArray(v.ajustes)) ? v.ajustes.map(Number) : [];
-}
-
-/**
- * Caminho inverso de extrairOriginal/extrairAjustesNumericos — junta de
- * volta num número simples (sem ajustes) ou em {original, ajustes}. Mesma
- * lógica usada pela rota /editar-traco-relatorio (ver server.js).
- */
-function colapsarOriginalEAjustes(original, listaAjustes) {
-  const temOriginal = original !== '' && original !== null && original !== undefined;
-  if (!listaAjustes || !listaAjustes.length) return temOriginal ? Number(original) : '';
-  return { original: temOriginal ? Number(original) : '', ajustes: listaAjustes };
-}
-
-// Campos "soma" (insumo) — cada um tem uma coluna *_original em "tracos" e
-// um nome de coluna correspondente em "ajustes". tempo_batida é tratado
-// separado (unidade diferente: minutos em ajustes, segundos em tracos).
-const CAMPOS_SOMA = [
-  { campoJson: 'cimento_real', colunaOriginal: 'cimento_original', nomeAjuste: 'cimento' },
-  { campoJson: 'agua_real', colunaOriginal: 'agua_original', nomeAjuste: 'agua' },
-  { campoJson: 'eps_real', colunaOriginal: 'eps_original', nomeAjuste: 'eps' },
-  { campoJson: 'superplast_real', colunaOriginal: 'superplast_original', nomeAjuste: 'superplast' },
-  { campoJson: 'incorporador_real', colunaOriginal: 'incorporador_original', nomeAjuste: 'incorporador' },
-];
-
-function agruparPor(linhas, campo) {
-  const mapa = new Map();
-  linhas.forEach(l => {
-    if (!mapa.has(l[campo])) mapa.set(l[campo], []);
-    mapa.get(l[campo]).push(l);
-  });
-  return mapa;
-}
-
-/**
- * Reconstrói 1 traço no formato relatorio_injecao.json a partir da linha
- * de "tracos" + suas linhas relacionadas (ajustes, leituras, usos) — usado
- * tanto pela leitura única (GET /db/relatorio_injecao.json) quanto pela
- * edição (/editar-traco-relatorio).
- */
-function rowParaTraco(row, ajustesRows = [], leiturasRows = [], usosRows = []) {
-  const resultado = {
-    id_traco: row.id_traco,
-    ultilizado: {
-      operacao: usosRows.map(u => ({
-        id_operacao: u.id_operacao,
-        id_bateria: u.id_bateria,
-        berco_inicio: u.berco_inicio,
-        berco_finalizacao: u.berco_finalizacao,
-        obs: u.obs,
-      })),
-    },
-    data: row.data,
-    turno: row.turno,
-    num_traco: row.num_traco,
-  };
-
-  CAMPOS_SOMA.forEach(({ campoJson, colunaOriginal, nomeAjuste }) => {
-    const lista = ajustesRows
-      .filter(a => a[nomeAjuste] !== null && a[nomeAjuste] !== undefined)
-      .map(a => a[nomeAjuste]);
-    resultado[campoJson] = colapsarOriginalEAjustes(row[colunaOriginal], lista);
-  });
-
-  // tempo_batida: minutos (tabela ajustes) -> segundos (formato de sempre)
-  const listaTempoSegundos = ajustesRows.map(a => a.tempo_batida * 60);
-  resultado.tempo_batida = colapsarOriginalEAjustes(row.tempo_batida_original, listaTempoSegundos);
-
-  // densidade/flow: leituras (remedições), não ajustes de receita
-  const leiturasDensidade = leiturasRows.filter(l => l.campo === 'densidade').sort((a, b) => a.ordem - b.ordem).map(l => l.valor);
-  const leiturasFlow = leiturasRows.filter(l => l.campo === 'flow').sort((a, b) => a.ordem - b.ordem).map(l => l.valor);
-  resultado.densidade = colapsarOriginalEAjustes(row.densidade_original, leiturasDensidade);
-  resultado.flow = colapsarOriginalEAjustes(row.flow_original, leiturasFlow);
-
-  resultado.obs = row.obs;
-  resultado.silo = row.silo;
-  resultado.expansao = row.expansao;
-  resultado.densidade_eps = row.densidade_eps;
-
-  return resultado;
-}
-
-/** Todos os traços, no formato relatorio_injecao.json — usado pela leitura (GET) e pelos backups. */
-function todosOsTracos() {
-  const tracoRows = db.prepare('SELECT * FROM tracos').all();
-  const ajustesRows = db.prepare('SELECT * FROM ajustes ORDER BY id_traco, ordem').all();
-  const leiturasRows = db.prepare('SELECT * FROM leituras_resultado ORDER BY id_traco, campo, ordem').all();
-  const usosRows = db.prepare('SELECT * FROM traco_usos ORDER BY id').all();
-
-  const ajustesPorTraco = agruparPor(ajustesRows, 'id_traco');
-  const leiturasPorTraco = agruparPor(leiturasRows, 'id_traco');
-  const usosPorTraco = agruparPor(usosRows, 'id_traco');
-
-  return tracoRows.map(row => rowParaTraco(
-    row,
-    ajustesPorTraco.get(row.id_traco) || [],
-    leiturasPorTraco.get(row.id_traco) || [],
-    usosPorTraco.get(row.id_traco) || [],
-  ));
-}
-
-/** Todos os ajustes, no formato ajustes_tracos.json ({id_traco, ajuste_1, ajuste_2, ...}) — usado pela leitura (GET) e pelos backups. */
-function todosOsAjustesTracosJSON() {
-  const ajustesRows = db.prepare('SELECT * FROM ajustes ORDER BY id_traco, ordem').all();
-  const porTraco = agruparPor(ajustesRows, 'id_traco');
-  const resultado = [];
-  for (const [idTraco, lista] of porTraco) {
-    const entrada = { id_traco: idTraco };
-    lista.forEach(a => {
-      const item = { tempo_batida: a.tempo_batida };
-      ['cimento', 'agua', 'eps', 'superplast', 'incorporador'].forEach(campo => {
-        if (a[campo] !== null && a[campo] !== undefined) item[campo] = a[campo];
-      });
-      item.registrado_em = a.registrado_em;
-      entrada['ajuste_' + a.ordem] = item;
-    });
-    resultado.push(entrada);
-  }
-  return resultado;
-}
-
-const SQL_INSERIR_TRACO = `
-  INSERT INTO tracos (
-    id_traco, data, turno, num_traco,
-    cimento_original, agua_original, eps_original, superplast_original, incorporador_original,
-    tempo_batida_original, densidade_original, flow_original,
-    obs, silo, expansao, densidade_eps
-  ) VALUES (
-    @id_traco, @data, @turno, @num_traco,
-    @cimento_original, @agua_original, @eps_original, @superplast_original, @incorporador_original,
-    @tempo_batida_original, @densidade_original, @flow_original,
-    @obs, @silo, @expansao, @densidade_eps
-  )
-`;
-const SQL_INSERIR_USO = `
-  INSERT INTO traco_usos (id_traco, id_operacao, id_bateria, berco_inicio, berco_finalizacao, obs)
-  VALUES (@id_traco, @id_operacao, @id_bateria, @berco_inicio, @berco_finalizacao, @obs)
-`;
-const SQL_INSERIR_AJUSTE = `
-  INSERT INTO ajustes (id_traco, ordem, tempo_batida, cimento, agua, eps, superplast, incorporador, registrado_em)
-  VALUES (@id_traco, @ordem, @tempo_batida, @cimento, @agua, @eps, @superplast, @incorporador, @registrado_em)
-`;
-const SQL_INSERIR_LEITURA = `
-  INSERT INTO leituras_resultado (id_traco, campo, valor, ordem)
-  VALUES (@id_traco, @campo, @valor, @ordem)
-`;
-
-module.exports.extrairOriginal = extrairOriginal;
-module.exports.extrairAjustesNumericos = extrairAjustesNumericos;
-module.exports.colapsarOriginalEAjustes = colapsarOriginalEAjustes;
-module.exports.rowParaTraco = rowParaTraco;
-module.exports.todosOsTracos = todosOsTracos;
-module.exports.todosOsAjustesTracosJSON = todosOsAjustesTracosJSON;
-module.exports.SQL_INSERIR_TRACO = SQL_INSERIR_TRACO;
-module.exports.SQL_INSERIR_USO = SQL_INSERIR_USO;
-module.exports.SQL_INSERIR_AJUSTE = SQL_INSERIR_AJUSTE;
-module.exports.SQL_INSERIR_LEITURA = SQL_INSERIR_LEITURA;
-
-function migrarRelatorioInjecaoSeNecessario(dbDir) {
-  const path = require('path');
-  const fs = require('fs');
-
-  const jaTemDados = db.prepare('SELECT COUNT(*) AS n FROM tracos').get().n > 0;
-  if (jaTemDados) return;
-
-  const relatorioPath = path.join(dbDir, 'relatorio_injecao.json');
-  if (!fs.existsSync(relatorioPath)) return;
-
-  let relatorio = [];
-  try {
-    const texto = fs.readFileSync(relatorioPath, 'utf8').trim();
-    relatorio = texto ? JSON.parse(texto) : [];
-  } catch (e) {
-    console.error('[migração] Não consegui ler relatorio_injecao.json — abortando migração:', e.message);
-    return;
-  }
-  if (!Array.isArray(relatorio) || !relatorio.length) {
-    try { fs.renameSync(relatorioPath, relatorioPath + '.migrado-' + Date.now()); } catch (_) {}
-    return;
-  }
-
-  // ajustes_tracos.json — fonte confiável de ajustes pra quem já tem
-  // entrada; quem não tem, colapsa (ver CAMPOS_SOMA acima e a nota no README).
-  const ajustesPath = path.join(dbDir, 'ajustes_tracos.json');
-  let ajustesTracos = [];
-  try {
-    const texto = fs.readFileSync(ajustesPath, 'utf8').trim();
-    ajustesTracos = texto ? JSON.parse(texto) : [];
-  } catch (_) { /* arquivo pode não existir ainda — ok, trata como vazio */ }
-  const ajustesPorTracoOrigem = new Map((ajustesTracos || []).map(a => [a.id_traco, a]));
-
-  const idsOperacaoValidos = new Set(db.prepare('SELECT id FROM operacoes').all().map(r => r.id));
-
-  const inserirTraco = db.prepare(SQL_INSERIR_TRACO);
-  const inserirUso = db.prepare(SQL_INSERIR_USO);
-  const inserirAjuste = db.prepare(SQL_INSERIR_AJUSTE);
-  const inserirLeitura = db.prepare(SQL_INSERIR_LEITURA);
-
-  let tracosColapsados = 0;
-  let usosComOperacaoDesconhecida = 0;
-
-  const migrarTudo = db.transaction((registros) => {
-    for (const r of registros) {
-      const entradaAjustes = ajustesPorTracoOrigem.get(r.id_traco);
-      let precisouColapsar = false;
-
-      const paramsTraco = { id_traco: r.id_traco, data: r.data, turno: r.turno ?? null, num_traco: r.num_traco ?? null };
-
-      CAMPOS_SOMA.forEach(({ campoJson, colunaOriginal, nomeAjuste }) => {
-        const original = extrairOriginal(r[campoJson]);
-        const ajustesDoCampo = extrairAjustesNumericos(r[campoJson]);
-        if (entradaAjustes || !ajustesDoCampo.length) {
-          paramsTraco[colunaOriginal] = original;
-        } else {
-          paramsTraco[colunaOriginal] = (original || 0) + ajustesDoCampo.reduce((s, v) => s + v, 0);
-          precisouColapsar = true;
-        }
-      });
-      // tempo_batida: mesma regra, mas em segundos (ajustes do relatório já vêm em segundos)
-      {
-        const original = extrairOriginal(r.tempo_batida);
-        const ajustesDoCampo = extrairAjustesNumericos(r.tempo_batida);
-        if (entradaAjustes || !ajustesDoCampo.length) {
-          paramsTraco.tempo_batida_original = original;
-        } else {
-          paramsTraco.tempo_batida_original = (original || 0) + ajustesDoCampo.reduce((s, v) => s + v, 0);
-          precisouColapsar = true;
-        }
-      }
-      paramsTraco.densidade_original = extrairOriginal(r.densidade);
-      paramsTraco.flow_original = extrairOriginal(r.flow);
-      paramsTraco.obs = r.obs ?? null;
-      paramsTraco.silo = r.silo ?? null;
-      paramsTraco.expansao = r.expansao ?? null;
-      paramsTraco.densidade_eps = r.densidade_eps ?? null;
-
-      if (precisouColapsar) tracosColapsados++;
-      inserirTraco.run(paramsTraco);
-
-      // Usos
-      (r.ultilizado?.operacao || []).forEach(uso => {
-        if (uso.id_operacao && !idsOperacaoValidos.has(uso.id_operacao)) {
-          usosComOperacaoDesconhecida++;
-        }
-        inserirUso.run({
-          id_traco: r.id_traco,
-          id_operacao: uso.id_operacao ?? '',
-          id_bateria: uso.id_bateria ?? null,
-          berco_inicio: uso.berco_inicio ?? null,
-          berco_finalizacao: uso.berco_finalizacao ?? null,
-          obs: uso.obs ?? null,
-        });
-      });
-
-      // Ajustes — só migra como linhas próprias quando há entrada confiável
-      // em ajustes_tracos.json (ver decisão de colapso acima).
-      if (entradaAjustes) {
-        Object.keys(entradaAjustes)
-          .filter(k => /^ajuste_\d+$/.test(k))
-          .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10))
-          .forEach((k, i) => {
-            const a = entradaAjustes[k];
-            inserirAjuste.run({
-              id_traco: r.id_traco,
-              ordem: i + 1,
-              tempo_batida: a.tempo_batida,
-              cimento: a.cimento ?? null,
-              agua: a.agua ?? null,
-              eps: a.eps ?? null,
-              superplast: a.superplast ?? null,
-              incorporador: a.incorporador ?? null,
-              registrado_em: a.registrado_em || new Date().toISOString(),
-            });
-          });
-      }
-
-      // Leituras de densidade/flow — sempre migradas (nunca dependem de ajustes_tracos.json)
-      ['densidade', 'flow'].forEach(campo => {
-        extrairAjustesNumericos(r[campo]).forEach((valor, i) => {
-          inserirLeitura.run({ id_traco: r.id_traco, campo, valor, ordem: i + 1 });
-        });
-      });
-    }
-  });
-
-  migrarTudo(relatorio);
-
-  let msg = `[migração] ${relatorio.length} traço(s) migrado(s) de relatorio_injecao.json pra SQLite.`;
-  if (tracosColapsados) msg += ` ${tracosColapsados} tinha(m) ajuste(s) sem entrada correspondente em ajustes_tracos.json — total preservado, histórico do ajuste colapsado no valor original (ver README).`;
-  if (usosComOperacaoDesconhecida) msg += ` ATENÇÃO: ${usosComOperacaoDesconhecida} uso(s) referenciam id_operacao que não existe em "operacoes" (provavelmente registros antigos ou importados) — migrados mesmo assim.`;
-  console.log(msg);
-
-  try {
-    fs.renameSync(relatorioPath, relatorioPath + '.migrado-' + Date.now());
-  } catch (e) {
-    console.error('[migração] Migrei os traços, mas não consegui renomear relatorio_injecao.json:', e.message);
-  }
-  if (ajustesTracos.length) {
-    try {
-      fs.renameSync(ajustesPath, ajustesPath + '.migrado-' + Date.now());
-    } catch (e) {
-      console.error('[migração] Migrei os ajustes, mas não consegui renomear ajustes_tracos.json:', e.message);
-    }
-  }
-
-  // relatorio_edicoes.json (auditoria) — migra junto, mesmo critério de sempre.
-  const edicoesPath = path.join(dbDir, 'relatorio_edicoes.json');
-  if (fs.existsSync(edicoesPath)) {
-    try {
-      const texto = fs.readFileSync(edicoesPath, 'utf8').trim();
-      const edicoes = texto ? JSON.parse(texto) : [];
-      if (Array.isArray(edicoes) && edicoes.length) {
-        const inserirEdicao = db.prepare(`
-          INSERT INTO edicoes_traco (id_traco, id_operacao, data_edicao, campos_alterados)
-          VALUES (@id_traco, @id_operacao, @data_edicao, @campos_alterados)
-        `);
-        const migrarEdicoes = db.transaction((lista) => {
-          for (const e of lista) {
-            inserirEdicao.run({
-              id_traco: e.id_traco,
-              id_operacao: e.id_operacao ?? null,
-              data_edicao: e.data_edicao,
-              campos_alterados: JSON.stringify(e.campos_alterados || []),
-            });
-          }
-        });
-        migrarEdicoes(edicoes);
-        console.log(`[migração] ${edicoes.length} edição(ões) de traço migrada(s) de relatorio_edicoes.json pra SQLite.`);
-      }
-      fs.renameSync(edicoesPath, edicoesPath + '.migrado-' + Date.now());
-    } catch (e) {
-      console.error('[migração] Falha ao migrar relatorio_edicoes.json:', e.message);
-    }
-  }
-}
-
-module.exports.migrarRelatorioInjecaoSeNecessario = migrarRelatorioInjecaoSeNecessario;
-
-/**
- * Substitui TODO o conteúdo de tracos/traco_usos/ajustes/leituras_resultado
- * a partir de um relatorio_injecao.json + ajustes_tracos.json completos —
- * usado por "Restaurar Backup de Dados" (não pela migração automática, que
- * tem sua própria versão dessa mesma lógica, já que parte de tabelas
- * vazias e cuida também de renomear os arquivos de origem). Mesma decisão
- * de colapso de sempre: confia no .original quando já existe ajuste
- * confiável pra aquele traço; senão, soma tudo no original (ver "Banco de
- * Dados (SQLite)" no README).
- * @param {Array} relatorioArray - conteúdo de relatorio_injecao.json
- * @param {Array} ajustesArray - conteúdo de ajustes_tracos.json
- */
-function substituirTracosEAjustes(relatorioArray, ajustesArray) {
-  db.prepare('DELETE FROM leituras_resultado').run();
-  db.prepare('DELETE FROM ajustes').run();
-  db.prepare('DELETE FROM traco_usos').run();
-  db.prepare('DELETE FROM tracos').run();
-
-  const ajustesPorTracoOrigem = new Map((ajustesArray || []).map(a => [a.id_traco, a]));
-
-  const inserirTraco = db.prepare(SQL_INSERIR_TRACO);
-  const inserirUso = db.prepare(SQL_INSERIR_USO);
-  const inserirAjuste = db.prepare(SQL_INSERIR_AJUSTE);
-  const inserirLeitura = db.prepare(SQL_INSERIR_LEITURA);
-
-  for (const r of (relatorioArray || [])) {
-    const entradaAjustes = ajustesPorTracoOrigem.get(r.id_traco);
-    const paramsTraco = { id_traco: r.id_traco, data: r.data, turno: r.turno ?? null, num_traco: r.num_traco ?? null };
-
-    CAMPOS_SOMA.forEach(({ campoJson, colunaOriginal }) => {
-      const original = extrairOriginal(r[campoJson]);
-      const ajustesDoCampo = extrairAjustesNumericos(r[campoJson]);
-      paramsTraco[colunaOriginal] = (entradaAjustes || !ajustesDoCampo.length)
-        ? original
-        : (original || 0) + ajustesDoCampo.reduce((s, v) => s + v, 0);
-    });
-    {
-      const original = extrairOriginal(r.tempo_batida);
-      const ajustesDoCampo = extrairAjustesNumericos(r.tempo_batida);
-      paramsTraco.tempo_batida_original = (entradaAjustes || !ajustesDoCampo.length)
-        ? original
-        : (original || 0) + ajustesDoCampo.reduce((s, v) => s + v, 0);
-    }
-    paramsTraco.densidade_original = extrairOriginal(r.densidade);
-    paramsTraco.flow_original = extrairOriginal(r.flow);
-    paramsTraco.obs = r.obs ?? null;
-    paramsTraco.silo = r.silo ?? null;
-    paramsTraco.expansao = r.expansao ?? null;
-    paramsTraco.densidade_eps = r.densidade_eps ?? null;
-    inserirTraco.run(paramsTraco);
-
-    (r.ultilizado?.operacao || []).forEach(uso => {
-      inserirUso.run({
-        id_traco: r.id_traco, id_operacao: uso.id_operacao ?? '', id_bateria: uso.id_bateria ?? null,
-        berco_inicio: uso.berco_inicio ?? null, berco_finalizacao: uso.berco_finalizacao ?? null, obs: uso.obs ?? null,
-      });
-    });
-
-    if (entradaAjustes) {
-      Object.keys(entradaAjustes)
-        .filter(k => /^ajuste_\d+$/.test(k))
-        .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10))
-        .forEach((k, i) => {
-          const a = entradaAjustes[k];
-          inserirAjuste.run({
-            id_traco: r.id_traco, ordem: i + 1, tempo_batida: a.tempo_batida,
-            cimento: a.cimento ?? null, agua: a.agua ?? null, eps: a.eps ?? null,
-            superplast: a.superplast ?? null, incorporador: a.incorporador ?? null,
-            registrado_em: a.registrado_em || new Date().toISOString(),
-          });
-        });
-    }
-
-    ['densidade', 'flow'].forEach(campo => {
-      extrairAjustesNumericos(r[campo]).forEach((valor, i) => {
-        inserirLeitura.run({ id_traco: r.id_traco, campo, valor, ordem: i + 1 });
-      });
-    });
-  }
-}
-
-module.exports.substituirTracosEAjustes = substituirTracosEAjustes;
-
-/**
- * Mescla um relatorio_injecao.json + ajustes_tracos.json de OUTRA
- * instalação do sistema pro banco ATUAL, sem apagar nada — usado por
- * "Mesclar Backup de Dados" (ver server.js POST /mesclar-backup-dados).
- * Diferente de substituirTracosEAjustes (que sobrescreve tudo):
- *   - nenhum DELETE — só INSERT;
- *   - cada id_traco é gerado de novo (o da origem pode colidir com o
- *     daqui — duas instalações nunca combinaram esse id entre si);
- *   - deduplica um traço pela MESMA chave (id_operacao + num_traco) já
- *     usada por /importar-relatorio-injecao — um traço só é pulado se
- *     algum dos seus usos já existir aqui com esse mesmo par. Traço sem
- *     nenhum uso (sobra nunca usada) cai num fallback por (data+num_traco).
- * @returns {{tracosInseridos:number, tracosDuplicados:number}}
- */
-function mesclarTracosEAjustes(relatorioArray, ajustesArray) {
-  const ajustesPorTracoOrigem = new Map((ajustesArray || []).map(a => [a.id_traco, a]));
-
-  const existentesPorUso = new Set(
-    db.prepare(`
-      SELECT tu.id_operacao || '|' || t.num_traco AS chave
-      FROM traco_usos tu JOIN tracos t ON t.id_traco = tu.id_traco
-    `).all().map(r => r.chave)
-  );
-  const existentesPorDataNum = new Set(
-    db.prepare(`SELECT data || '|' || num_traco AS chave FROM tracos`).all().map(r => r.chave)
-  );
-
-  const inserirTraco = db.prepare(SQL_INSERIR_TRACO);
-  const inserirUso = db.prepare(SQL_INSERIR_USO);
-  const inserirAjuste = db.prepare(SQL_INSERIR_AJUSTE);
-  const inserirLeitura = db.prepare(SQL_INSERIR_LEITURA);
-
-  let tracosInseridos = 0, tracosDuplicados = 0;
-
-  (relatorioArray || []).forEach((r, i) => {
-    const usos = r.ultilizado?.operacao || [];
-    const chaveDataNum = (r.data ?? '') + '|' + (r.num_traco ?? '');
-
-    const jaExiste = usos.length
-      ? usos.some(u => existentesPorUso.has((u.id_operacao ?? '') + '|' + (r.num_traco ?? '')))
-      : existentesPorDataNum.has(chaveDataNum); // traço sem uso (sobra nunca usada)
-
-    if (jaExiste) { tracosDuplicados++; return; }
-
-    const idTracoNovo = 'merge_traco_' + Date.now() + '_' + i;
-    const entradaAjustes = ajustesPorTracoOrigem.get(r.id_traco);
-    const paramsTraco = { id_traco: idTracoNovo, data: r.data, turno: r.turno ?? null, num_traco: r.num_traco ?? null };
-
-    CAMPOS_SOMA.forEach(({ campoJson, colunaOriginal }) => {
-      const original = extrairOriginal(r[campoJson]);
-      const ajustesDoCampo = extrairAjustesNumericos(r[campoJson]);
-      paramsTraco[colunaOriginal] = (entradaAjustes || !ajustesDoCampo.length)
-        ? original
-        : (original || 0) + ajustesDoCampo.reduce((s, v) => s + v, 0);
-    });
-    {
-      const original = extrairOriginal(r.tempo_batida);
-      const ajustesDoCampo = extrairAjustesNumericos(r.tempo_batida);
-      paramsTraco.tempo_batida_original = (entradaAjustes || !ajustesDoCampo.length)
-        ? original
-        : (original || 0) + ajustesDoCampo.reduce((s, v) => s + v, 0);
-    }
-    paramsTraco.densidade_original = extrairOriginal(r.densidade);
-    paramsTraco.flow_original = extrairOriginal(r.flow);
-    paramsTraco.obs = r.obs ?? null;
-    paramsTraco.silo = r.silo ?? null;
-    paramsTraco.expansao = r.expansao ?? null;
-    paramsTraco.densidade_eps = r.densidade_eps ?? null;
-    inserirTraco.run(paramsTraco);
-
-    usos.forEach(uso => {
-      inserirUso.run({
-        id_traco: idTracoNovo, id_operacao: uso.id_operacao ?? '', id_bateria: uso.id_bateria ?? null,
-        berco_inicio: uso.berco_inicio ?? null, berco_finalizacao: uso.berco_finalizacao ?? null, obs: uso.obs ?? null,
-      });
-      existentesPorUso.add((uso.id_operacao ?? '') + '|' + (r.num_traco ?? ''));
-    });
-    if (!usos.length) existentesPorDataNum.add(chaveDataNum);
-
-    if (entradaAjustes) {
-      Object.keys(entradaAjustes)
-        .filter(k => /^ajuste_\d+$/.test(k))
-        .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10))
-        .forEach((k, idx) => {
-          const a = entradaAjustes[k];
-          inserirAjuste.run({
-            id_traco: idTracoNovo, ordem: idx + 1, tempo_batida: a.tempo_batida,
-            cimento: a.cimento ?? null, agua: a.agua ?? null, eps: a.eps ?? null,
-            superplast: a.superplast ?? null, incorporador: a.incorporador ?? null,
-            registrado_em: a.registrado_em || new Date().toISOString(),
-          });
-        });
-    }
-
-    ['densidade', 'flow'].forEach(campo => {
-      extrairAjustesNumericos(r[campo]).forEach((valor, idx) => {
-        inserirLeitura.run({ id_traco: idTracoNovo, campo, valor, ordem: idx + 1 });
-      });
-    });
-
-    tracosInseridos++;
-  });
-
-  return { tracosInseridos, tracosDuplicados };
-}
-
-module.exports.mesclarTracosEAjustes = mesclarTracosEAjustes;
+const criarDbTracos = require('./lib/db/tracos.js');
+Object.assign(module.exports, criarDbTracos(db));
 
 // ════════════════════════════════════════════════════════════════════════
 //  SETOR DE MANUTENÇÃO — Fase 2 (backend real)
 // ════════════════════════════════════════════════════════════════════════
 
 // ─── Manutenção Corretiva ──────────────────────────────────────────────
-
-function _rowParaManutencaoCorretiva(row) {
-  return {
-    id: row.id,
-    data: row.data,
-    setor: row.setor,
-    maquina: row.maquina,
-    turno: row.turno,
-    observador: row.observador,
-    prioridade: row.prioridade,
-    anomalia: row.anomalia,
-    local: row.local,
-    tipos: row.tipos ? JSON.parse(row.tipos) : [],
-    tipoManutencao: row.tipo_manutencao,
-    tipoEtiqueta: row.tipo_etiqueta,
-    tipoExecucao: row.tipo_execucao,
-    empresaExterna: row.empresa_externa,
-    responsavel: row.responsavel,
-    fotoOperador: row.foto_operador,
-    fotoTecnico: row.foto_tecnico,
-    dataInicio: row.data_inicio,
-    horaInicio: row.hora_inicio,
-    dataFim: row.data_fim,
-    horaFim: row.hora_fim,
-    tempoGasto: row.tempo_gasto,
-    situacao: row.situacao,
-    emManutencao: row.em_manutencao,
-    aguardandoPecas: row.aguardando_pecas,
-    pecasAvariadas: row.pecas_avariadas,
-    pecasComprar: row.pecas_comprar,
-    rotina: row.rotina,
-    supDataInicio: row.sup_data_inicio,
-    supHoraInicio: row.sup_hora_inicio,
-    supDataFim: row.sup_data_fim,
-    supHoraFim: row.sup_hora_fim,
-    supTempoGasto: row.sup_tempo_gasto,
-    statusCompra: row.status_compra,
-    previsaoChegada: row.previsao_chegada,
-    fornecedor: row.fornecedor,
-    respSupervisor: row.resp_supervisor,
-    obsSupervisor: row.obs_supervisor,
-    custoPecas: row.custo_pecas,
-    custoMaoObra: row.custo_mao_obra,
-    etiquetaFechada: !!row.etiqueta_fechada,
-    aceito: row.aceito || 'Nao',
-    aceitoPor: row.aceito_por,
-    aceitoEm: row.aceito_em,
-    pedidoPecaAceito: row.pedido_peca_aceito || 'Nao',
-    pedidoPecaAceitoPor: row.pedido_peca_aceito_por,
-    pedidoPecaAceitoEm: row.pedido_peca_aceito_em,
-    recebimentoPecaConfirmado: row.recebimento_peca_confirmado || 'Nao',
-    recebimentoPecaConfirmadoPor: row.recebimento_peca_confirmado_por,
-    recebimentoPecaConfirmadoEm: row.recebimento_peca_confirmado_em,
-    recusaPendente: row.recusa_pendente || 'Nao',
-    recusaMotivo: row.recusa_motivo,
-    recusaSolicitadoPor: row.recusa_solicitado_por,
-    recusaSolicitadoEm: row.recusa_solicitado_em,
-    recusaResultado: row.recusa_resultado,
-    recusaRevisadoPor: row.recusa_revisado_por,
-    recusaRevisadoEm: row.recusa_revisado_em,
-    visualizadoPor: row.visualizado_por,
-    visualizadoEm: row.visualizado_em,
-    autorNome: row.autor_nome,
-    dataCriacao: row.data_criacao,
-    dataModificacao: row.data_modificacao,
-  };
-}
-
-const SQL_UPSERT_MANUTENCAO_CORRETIVA = `
-  INSERT INTO manutencao_corretiva (
-    id, data, setor, maquina, turno, observador, prioridade, anomalia, local,
-    tipos, tipo_manutencao, tipo_etiqueta, tipo_execucao, empresa_externa,
-    responsavel, foto_operador, foto_tecnico, data_inicio, hora_inicio,
-    data_fim, hora_fim, tempo_gasto, situacao, em_manutencao,
-    aguardando_pecas, pecas_avariadas, pecas_comprar, rotina,
-    sup_data_inicio, sup_hora_inicio, sup_data_fim, sup_hora_fim,
-    sup_tempo_gasto, status_compra, previsao_chegada, fornecedor,
-    resp_supervisor, obs_supervisor, custo_pecas, custo_mao_obra,
-    etiqueta_fechada, aceito, aceito_por, aceito_em,
-    pedido_peca_aceito, pedido_peca_aceito_por, pedido_peca_aceito_em,
-    recebimento_peca_confirmado, recebimento_peca_confirmado_por, recebimento_peca_confirmado_em,
-    recusa_pendente, recusa_motivo, recusa_solicitado_por, recusa_solicitado_em,
-    recusa_resultado, recusa_revisado_por, recusa_revisado_em,
-    visualizado_por, visualizado_em,
-    autor_nome, data_criacao, data_modificacao
-  ) VALUES (
-    @id, @data, @setor, @maquina, @turno, @observador, @prioridade, @anomalia, @local,
-    @tipos, @tipo_manutencao, @tipo_etiqueta, @tipo_execucao, @empresa_externa,
-    @responsavel, @foto_operador, @foto_tecnico, @data_inicio, @hora_inicio,
-    @data_fim, @hora_fim, @tempo_gasto, @situacao, @em_manutencao,
-    @aguardando_pecas, @pecas_avariadas, @pecas_comprar, @rotina,
-    @sup_data_inicio, @sup_hora_inicio, @sup_data_fim, @sup_hora_fim,
-    @sup_tempo_gasto, @status_compra, @previsao_chegada, @fornecedor,
-    @resp_supervisor, @obs_supervisor, @custo_pecas, @custo_mao_obra,
-    @etiqueta_fechada, @aceito, @aceito_por, @aceito_em,
-    @pedido_peca_aceito, @pedido_peca_aceito_por, @pedido_peca_aceito_em,
-    @recebimento_peca_confirmado, @recebimento_peca_confirmado_por, @recebimento_peca_confirmado_em,
-    @recusa_pendente, @recusa_motivo, @recusa_solicitado_por, @recusa_solicitado_em,
-    @recusa_resultado, @recusa_revisado_por, @recusa_revisado_em,
-    @visualizado_por, @visualizado_em,
-    @autor_nome, @data_criacao, @data_modificacao
-  )
-  ON CONFLICT(id) DO UPDATE SET
-    data=@data, setor=@setor, maquina=@maquina, turno=@turno, observador=@observador,
-    prioridade=@prioridade, anomalia=@anomalia, local=@local, tipos=@tipos,
-    tipo_manutencao=@tipo_manutencao, tipo_etiqueta=@tipo_etiqueta, tipo_execucao=@tipo_execucao,
-    empresa_externa=@empresa_externa, responsavel=@responsavel, foto_operador=@foto_operador,
-    foto_tecnico=@foto_tecnico, data_inicio=@data_inicio, hora_inicio=@hora_inicio,
-    data_fim=@data_fim, hora_fim=@hora_fim, tempo_gasto=@tempo_gasto, situacao=@situacao,
-    em_manutencao=@em_manutencao, aguardando_pecas=@aguardando_pecas,
-    pecas_avariadas=@pecas_avariadas, pecas_comprar=@pecas_comprar, rotina=@rotina,
-    sup_data_inicio=@sup_data_inicio, sup_hora_inicio=@sup_hora_inicio,
-    sup_data_fim=@sup_data_fim, sup_hora_fim=@sup_hora_fim, sup_tempo_gasto=@sup_tempo_gasto,
-    status_compra=@status_compra, previsao_chegada=@previsao_chegada, fornecedor=@fornecedor,
-    resp_supervisor=@resp_supervisor, obs_supervisor=@obs_supervisor, custo_pecas=@custo_pecas,
-    custo_mao_obra=@custo_mao_obra, etiqueta_fechada=@etiqueta_fechada,
-    aceito=@aceito, aceito_por=@aceito_por, aceito_em=@aceito_em,
-    pedido_peca_aceito=@pedido_peca_aceito, pedido_peca_aceito_por=@pedido_peca_aceito_por,
-    pedido_peca_aceito_em=@pedido_peca_aceito_em,
-    recebimento_peca_confirmado=@recebimento_peca_confirmado,
-    recebimento_peca_confirmado_por=@recebimento_peca_confirmado_por,
-    recebimento_peca_confirmado_em=@recebimento_peca_confirmado_em,
-    recusa_pendente=@recusa_pendente, recusa_motivo=@recusa_motivo,
-    recusa_solicitado_por=@recusa_solicitado_por, recusa_solicitado_em=@recusa_solicitado_em,
-    recusa_resultado=@recusa_resultado, recusa_revisado_por=@recusa_revisado_por,
-    recusa_revisado_em=@recusa_revisado_em,
-    visualizado_por=@visualizado_por, visualizado_em=@visualizado_em,
-    autor_nome=@autor_nome, data_modificacao=@data_modificacao
-`;
-
-function listarManutencaoCorretiva() {
-  const rows = db.prepare('SELECT * FROM manutencao_corretiva ORDER BY data_criacao DESC').all();
-  return rows.map(_rowParaManutencaoCorretiva);
-}
-
-/** Busca 1 chamado por id — usado pelas rotas de aceite (ver
- * lib/rotas/manutencao.js), que precisam checar o estado atual (aceito,
- * aguardandoPecas etc.) antes de decidir se a ação é válida. */
-function obterManutencaoCorretiva(id) {
-  const row = db.prepare('SELECT * FROM manutencao_corretiva WHERE id = ?').get(id);
-  return row ? _rowParaManutencaoCorretiva(row) : null;
-}
-
-/**
- * Marca um chamado como aceito — libera os campos de Execução (Seção 3)
- * no front (ver aceitarChamado(), manutencao.js). Só mexe nas 3 colunas
- * de aceite; nunca chamada a partir do upsert geral (ver comentário na
- * CREATE TABLE, acima, e em salvarManutencaoCorretiva, abaixo).
- * Idempotente: chamar de novo depois de já aceito só atualiza
- * data_modificacao, não troca quem/quando aceitou primeiro.
- */
-function aceitarManutencaoCorretiva(id, nomeQuemAceitou) {
-  const agora = new Date().toISOString();
-  db.prepare(`
-    UPDATE manutencao_corretiva
-    SET aceito = 'Sim', aceito_por = @nome, aceito_em = @agora, data_modificacao = @agora
-    WHERE id = @id AND aceito != 'Sim'
-  `).run({ id, nome: nomeQuemAceitou, agora });
-}
-
-/**
- * Marca o PEDIDO DE PEÇA de um chamado como aceito — libera os campos de
- * Acompanhamento da Supervisão (Seção 4). Mesmo raciocínio de
- * aceitarManutencaoCorretiva(), acima, só que pra esse 2º portão.
- */
-function aceitarPedidoPecaManutencaoCorretiva(id, nomeQuemAceitou) {
-  const agora = new Date().toISOString();
-  db.prepare(`
-    UPDATE manutencao_corretiva
-    SET pedido_peca_aceito = 'Sim', pedido_peca_aceito_por = @nome, pedido_peca_aceito_em = @agora, data_modificacao = @agora
-    WHERE id = @id AND pedido_peca_aceito != 'Sim'
-  `).run({ id, nome: nomeQuemAceitou, agora });
-}
-
-/**
- * Marca a PEÇA como CONFIRMADA (recebida de verdade nas mãos da
- * Manutenção) — libera de novo os campos de Execução (Seção 3), que
- * ficam bloqueados desde que "Status da Compra" virou 'Peça recebida'
- * até essa confirmação (ver conversa que motivou isso). Mesmo raciocínio
- * de aceitarManutencaoCorretiva()/aceitarPedidoPecaManutencaoCorretiva(),
- * acima, só que pra esse 3º portão do fluxo de peça.
- */
-function confirmarRecebimentoPecaManutencaoCorretiva(id, nomeQuemConfirmou) {
-  const agora = new Date().toISOString();
-  db.prepare(`
-    UPDATE manutencao_corretiva
-    SET recebimento_peca_confirmado = 'Sim', recebimento_peca_confirmado_por = @nome,
-        recebimento_peca_confirmado_em = @agora, data_modificacao = @agora
-    WHERE id = @id AND recebimento_peca_confirmado != 'Sim'
-  `).run({ id, nome: nomeQuemConfirmou, agora });
-}
-
-/**
- * Registra um PEDIDO DE RECUSA do chamado — em vez de aceitar, a
- * Manutenção (ou Admin/Supervisão/Encarregado) explica por que o chamado
- * deveria ser recusado. Fica pendente de revisão por Admin/Supervisão/
- * Encarregado (ver responderRecusaManutencaoCorretiva, abaixo). Só mexe
- * nas colunas de recusa; nunca chamada a partir do upsert geral.
- */
-function solicitarRecusaManutencaoCorretiva(id, motivo, nomeSolicitante) {
-  const agora = new Date().toISOString();
-  db.prepare(`
-    UPDATE manutencao_corretiva
-    SET recusa_pendente = 'Sim', recusa_motivo = @motivo,
-        recusa_solicitado_por = @nome, recusa_solicitado_em = @agora,
-        recusa_resultado = NULL, recusa_revisado_por = NULL, recusa_revisado_em = NULL,
-        data_modificacao = @agora
-    WHERE id = @id
-  `).run({ id, motivo, nome: nomeSolicitante, agora });
-}
-
-/**
- * Revisa um pedido de recusa pendente — só Admin/Supervisão/Encarregado
- * (ver podeAceitarPedidoPeca, server.js, reaproveitada pra esse portão
- * também: mesmo grupo de 3). Dois caminhos:
- *  - aceitaRecusa=true: a recusa É ACEITA, o chamado é ENCERRADO
- *    (etiqueta_fechada=1, situacao='Recusado') — mesmo "fica trancado"
- *    de sempre pra chamado fechado (ver aoMudarSituacao()/editarManutencao,
- *    manutencao.js).
- *  - aceitaRecusa=false: a recusa é NEGADA — descartada
- *    (recusa_pendente volta pra 'Nao'), chamado continua aberto e ainda
- *    não aceito, esperando a Manutenção aceitar e dar prosseguimento de
- *    verdade (pedido do usuário).
- */
-function responderRecusaManutencaoCorretiva(id, aceitaRecusa, nomeRevisor) {
-  const agora = new Date().toISOString();
-  if (aceitaRecusa) {
-    db.prepare(`
-      UPDATE manutencao_corretiva
-      SET recusa_pendente = 'Nao', recusa_resultado = 'Aceita',
-          recusa_revisado_por = @nome, recusa_revisado_em = @agora,
-          etiqueta_fechada = 1, situacao = 'Recusado', data_modificacao = @agora
-      WHERE id = @id
-    `).run({ id, nome: nomeRevisor, agora });
-  } else {
-    db.prepare(`
-      UPDATE manutencao_corretiva
-      SET recusa_pendente = 'Nao', recusa_resultado = 'Negada',
-          recusa_revisado_por = @nome, recusa_revisado_em = @agora,
-          data_modificacao = @agora
-      WHERE id = @id
-    `).run({ id, nome: nomeRevisor, agora });
-  }
-}
-
-/**
- * Marca a 1ª visualização do chamado (ver abrirHistorico(),
- * manutencao.js) — vira um ponto na trajetória visual. Idempotente: só
- * grava na 1ª vez (WHERE visualizado_por IS NULL); visualizações
- * seguintes, de qualquer pessoa, não sobrescrevem quem viu primeiro.
- */
-function marcarVisualizadoManutencaoCorretiva(id, nomeOuAdmin) {
-  const agora = new Date().toISOString();
-  db.prepare(`
-    UPDATE manutencao_corretiva
-    SET visualizado_por = @nome, visualizado_em = @agora, data_modificacao = @agora
-    WHERE id = @id AND visualizado_por IS NULL
-  `).run({ id, nome: nomeOuAdmin, agora });
-}
-
-/**
- * Salva (cria ou atualiza) um chamado corretivo. IMPORTANTE: os campos de
- * aceite (aceito e pedido_peca_aceito, com seus "_por" e "_em"), o de
- * confirmação de recebimento de peça (recebimento_peca_confirmado, com
- * seus "_por" e "_em") e os de recusa (recusa_pendente, recusa_motivo, os
- * campos "recusa_solicitado_" e "recusa_revisado_", e recusa_resultado),
- * além de "visualizado_por"/"visualizado_em", NUNCA são lidos do
- * parâmetro `m` — ver comentário na CREATE TABLE, acima. Essa função
- * sempre preserva o que já estava salvo no banco (busca o registro atual
- * antes de gravar); só as rotas dedicadas (aceitarManutencaoCorretiva(),
- * aceitarPedidoPecaManutencaoCorretiva(),
- * confirmarRecebimentoPecaManutencaoCorretiva(),
- * solicitarRecusaManutencaoCorretiva(),
- * responderRecusaManutencaoCorretiva() — todas acima) podem mudar esses
- * valores. Isso impede que qualquer perfil "aceite"/"recuse"/"confirme"
- * um chamado só por mandar esses campos no payload do upsert geral — tem
- * que passar pela rota de verdade, que confere a permissão e grava
- * quem/quando agiu.
- *
- * Exceção: se "aguardandoPecas" deixar de ser 'Sim' nesta gravação, o
- * aceite do pedido de peça E a confirmação de recebimento são resetados
- * pra 'Nao' — não faz sentido ficar "aceito"/"confirmado" um pedido que
- * não existe mais (ex: técnico desmarcou por engano, ou resolveu sem
- * precisar de peça); um pedido futuro começa limpo, exigindo os 2
- * portões de novo.
- */
-function salvarManutencaoCorretiva(m) {
-  const agora = new Date().toISOString();
-  const existente = db.prepare(`
-    SELECT aceito, aceito_por, aceito_em, pedido_peca_aceito, pedido_peca_aceito_por, pedido_peca_aceito_em,
-           recebimento_peca_confirmado, recebimento_peca_confirmado_por, recebimento_peca_confirmado_em,
-           recusa_pendente, recusa_motivo, recusa_solicitado_por, recusa_solicitado_em,
-           recusa_resultado, recusa_revisado_por, recusa_revisado_em,
-           visualizado_por, visualizado_em
-    FROM manutencao_corretiva WHERE id = ?
-  `).get(m.id);
-  const aguardandoPecas = m.aguardandoPecas || 'Nao';
-  const aceito = existente ? existente.aceito : 'Nao';
-  const aceitoPor = existente ? existente.aceito_por : null;
-  const aceitoEm = existente ? existente.aceito_em : null;
-  const mantemPedidoPeca = existente && aguardandoPecas === 'Sim';
-  const pedidoPecaAceito = mantemPedidoPeca ? existente.pedido_peca_aceito : 'Nao';
-  const pedidoPecaAceitoPor = mantemPedidoPeca ? existente.pedido_peca_aceito_por : null;
-  const pedidoPecaAceitoEm = mantemPedidoPeca ? existente.pedido_peca_aceito_em : null;
-  const recebimentoPecaConfirmado = mantemPedidoPeca ? existente.recebimento_peca_confirmado : 'Nao';
-  const recebimentoPecaConfirmadoPor = mantemPedidoPeca ? existente.recebimento_peca_confirmado_por : null;
-  const recebimentoPecaConfirmadoEm = mantemPedidoPeca ? existente.recebimento_peca_confirmado_em : null;
-  const recusaPendente = existente ? existente.recusa_pendente : 'Nao';
-  const recusaMotivo = existente ? existente.recusa_motivo : null;
-  const recusaSolicitadoPor = existente ? existente.recusa_solicitado_por : null;
-  const recusaSolicitadoEm = existente ? existente.recusa_solicitado_em : null;
-  const recusaResultado = existente ? existente.recusa_resultado : null;
-  const recusaRevisadoPor = existente ? existente.recusa_revisado_por : null;
-  const recusaRevisadoEm = existente ? existente.recusa_revisado_em : null;
-  const visualizadoPor = existente ? existente.visualizado_por : null;
-  const visualizadoEm = existente ? existente.visualizado_em : null;
-  db.prepare(SQL_UPSERT_MANUTENCAO_CORRETIVA).run({
-    id: m.id,
-    data: m.data ?? null,
-    setor: m.setor,
-    maquina: m.maquina,
-    turno: m.turno ?? null,
-    observador: m.observador,
-    prioridade: m.prioridade,
-    anomalia: m.anomalia,
-    local: m.local ?? null,
-    tipos: m.tipos ? JSON.stringify(m.tipos) : '[]',
-    tipo_manutencao: m.tipoManutencao,
-    tipo_etiqueta: m.tipoEtiqueta || 'Azul',
-    tipo_execucao: m.tipoExecucao || 'Interno',
-    empresa_externa: m.empresaExterna ?? null,
-    responsavel: m.responsavel ?? null,
-    foto_operador: m.fotoOperador ?? null,
-    foto_tecnico: m.fotoTecnico ?? null,
-    data_inicio: m.dataInicio ?? null,
-    hora_inicio: m.horaInicio ?? null,
-    data_fim: m.dataFim ?? null,
-    hora_fim: m.horaFim ?? null,
-    tempo_gasto: m.tempoGasto ?? 0,
-    situacao: m.situacao || 'Aguardando',
-    em_manutencao: m.emManutencao || 'Nao',
-    aguardando_pecas: aguardandoPecas,
-    pecas_avariadas: m.pecasAvariadas ?? null,
-    pecas_comprar: m.pecasComprar ?? null,
-    rotina: m.rotina ?? null,
-    sup_data_inicio: m.supDataInicio ?? null,
-    sup_hora_inicio: m.supHoraInicio ?? null,
-    sup_data_fim: m.supDataFim ?? null,
-    sup_hora_fim: m.supHoraFim ?? null,
-    sup_tempo_gasto: m.supTempoGasto ?? 0,
-    status_compra: m.statusCompra ?? null,
-    previsao_chegada: m.previsaoChegada ?? null,
-    fornecedor: m.fornecedor ?? null,
-    resp_supervisor: m.respSupervisor ?? null,
-    obs_supervisor: m.obsSupervisor ?? null,
-    custo_pecas: m.custoPecas ?? 0,
-    custo_mao_obra: m.custoMaoObra ?? 0,
-    etiqueta_fechada: m.etiquetaFechada ? 1 : 0,
-    aceito, aceito_por: aceitoPor, aceito_em: aceitoEm,
-    pedido_peca_aceito: pedidoPecaAceito, pedido_peca_aceito_por: pedidoPecaAceitoPor, pedido_peca_aceito_em: pedidoPecaAceitoEm,
-    recebimento_peca_confirmado: recebimentoPecaConfirmado,
-    recebimento_peca_confirmado_por: recebimentoPecaConfirmadoPor,
-    recebimento_peca_confirmado_em: recebimentoPecaConfirmadoEm,
-    recusa_pendente: recusaPendente, recusa_motivo: recusaMotivo,
-    recusa_solicitado_por: recusaSolicitadoPor, recusa_solicitado_em: recusaSolicitadoEm,
-    recusa_resultado: recusaResultado, recusa_revisado_por: recusaRevisadoPor, recusa_revisado_em: recusaRevisadoEm,
-    visualizado_por: visualizadoPor, visualizado_em: visualizadoEm,
-    autor_nome: m.autorNome ?? null,
-    data_criacao: m.dataCriacao || agora,
-    data_modificacao: agora,
-  });
-}
-
-function excluirManutencaoCorretiva(id) {
-  db.prepare('DELETE FROM manutencao_corretiva WHERE id = ?').run(id);
-}
+// Extraída para lib/db/manutencao-corretiva.js (Fase 3 do fatiamento de
+// db.js — ver README, "Fatiamento de db.js (plano)"). Mesma lógica de
+// sempre, só mudou onde o código mora: uma factory que recebe a conexão
+// já aberta (mesmo padrão de lib/rotas/) e devolve as funções do domínio,
+// penduradas aqui em module.exports (= db) pra ninguém mais precisar mudar.
+const criarManutencaoCorretiva = require('./lib/db/manutencao-corretiva');
+Object.assign(module.exports, criarManutencaoCorretiva(db));
 
 // ─── Manutenção Programada (agendamentos) ──────────────────────────────
+// Fase 2 do fatiamento de db.js (ver README) — extraído pra
+// lib/db/manutencao-programada.js, sem mudar lógica nenhuma, só onde o
+// código mora. O módulo recebe a conexão `db` já aberta (mesmo padrão de
+// factory de lib/rotas/) e devolve as funções do domínio, que penduramos
+// de volta aqui no objeto `db` (module.exports = db, acima) — todo
+// consumidor existente (lib/rotas/manutencao.js, lib/rotas/backup.js,
+// lib/notificacoes-push.js) continua chamando db.listarManutencaoProgramada()
+// etc. sem precisar mudar nada.
+Object.assign(module.exports, require('./lib/db/manutencao-programada.js')(db));
 
-function _rowParaManutencaoProgramada(row) {
-  return {
-    id: row.id,
-    data: row.data,
-    hora: row.hora,
-    turno: row.turno,
-    setor: row.setor,
-    maquina: row.maquina,
-    tipo: row.tipo,
-    solicitante: row.solicitante,
-    observacoes: row.observacoes,
-    status: row.status,
-    justificativa: row.justificativa,
-    dataInicioEstimado: row.data_inicio_estimado,
-    horaInicioEstimado: row.hora_inicio_estimado,
-    dataFimEstimado: row.data_fim_estimado,
-    horaFimEstimado: row.hora_fim_estimado,
-    execucaoDataInicio: row.execucao_data_inicio,
-    execucaoHoraInicio: row.execucao_hora_inicio,
-    ...(row.execucao ? { execucao: JSON.parse(row.execucao) } : {}),
-    autorNome: row.autor_nome,
-    dataCriacao: row.data_criacao,
-  };
-}
-
-const SQL_UPSERT_MANUTENCAO_PROGRAMADA = `
-  INSERT INTO manutencao_programada (
-    id, data, hora, turno, setor, maquina, tipo, solicitante, observacoes,
-    status, justificativa, data_inicio_estimado, hora_inicio_estimado,
-    data_fim_estimado, hora_fim_estimado, execucao_data_inicio, execucao_hora_inicio,
-    execucao, autor_nome, data_criacao
-  ) VALUES (
-    @id, @data, @hora, @turno, @setor, @maquina, @tipo, @solicitante, @observacoes,
-    @status, @justificativa, @data_inicio_estimado, @hora_inicio_estimado,
-    @data_fim_estimado, @hora_fim_estimado, @execucao_data_inicio, @execucao_hora_inicio,
-    @execucao, @autor_nome, @data_criacao
-  )
-  ON CONFLICT(id) DO UPDATE SET
-    data=@data, hora=@hora, turno=@turno, setor=@setor, maquina=@maquina, tipo=@tipo,
-    solicitante=@solicitante, observacoes=@observacoes, status=@status,
-    justificativa=@justificativa, data_inicio_estimado=@data_inicio_estimado,
-    hora_inicio_estimado=@hora_inicio_estimado, data_fim_estimado=@data_fim_estimado,
-    hora_fim_estimado=@hora_fim_estimado, execucao_data_inicio=@execucao_data_inicio,
-    execucao_hora_inicio=@execucao_hora_inicio, execucao=@execucao, autor_nome=@autor_nome
-`;
-
-function listarManutencaoProgramada() {
-  const rows = db.prepare('SELECT * FROM manutencao_programada ORDER BY data_criacao DESC').all();
-  return rows.map(_rowParaManutencaoProgramada);
-}
-
-function salvarManutencaoProgramada(a) {
-  db.prepare(SQL_UPSERT_MANUTENCAO_PROGRAMADA).run({
-    id: a.id,
-    data: a.data,
-    hora: a.hora ?? null,
-    turno: a.turno ?? null,
-    setor: a.setor,
-    maquina: a.maquina,
-    tipo: a.tipo ?? null,
-    solicitante: a.solicitante,
-    observacoes: a.observacoes ?? null,
-    status: a.status || 'Pendente',
-    justificativa: a.justificativa ?? null,
-    data_inicio_estimado: a.dataInicioEstimado ?? null,
-    hora_inicio_estimado: a.horaInicioEstimado ?? null,
-    data_fim_estimado: a.dataFimEstimado ?? null,
-    hora_fim_estimado: a.horaFimEstimado ?? null,
-    execucao_data_inicio: a.execucaoDataInicio ?? null,
-    execucao_hora_inicio: a.execucaoHoraInicio ?? null,
-    execucao: a.execucao ? JSON.stringify(a.execucao) : null,
-    autor_nome: a.autorNome ?? null,
-    data_criacao: a.dataCriacao || new Date().toISOString().split('T')[0],
-  });
-}
-
-function excluirManutencaoProgramada(id) {
-  db.prepare('DELETE FROM manutencao_programada WHERE id = ?').run(id);
-}
-
-module.exports.listarManutencaoCorretiva = listarManutencaoCorretiva;
-module.exports.obterManutencaoCorretiva = obterManutencaoCorretiva;
-module.exports.salvarManutencaoCorretiva = salvarManutencaoCorretiva;
-module.exports.aceitarManutencaoCorretiva = aceitarManutencaoCorretiva;
-module.exports.aceitarPedidoPecaManutencaoCorretiva = aceitarPedidoPecaManutencaoCorretiva;
-module.exports.confirmarRecebimentoPecaManutencaoCorretiva = confirmarRecebimentoPecaManutencaoCorretiva;
-module.exports.solicitarRecusaManutencaoCorretiva = solicitarRecusaManutencaoCorretiva;
-module.exports.responderRecusaManutencaoCorretiva = responderRecusaManutencaoCorretiva;
-module.exports.marcarVisualizadoManutencaoCorretiva = marcarVisualizadoManutencaoCorretiva;
-module.exports.excluirManutencaoCorretiva = excluirManutencaoCorretiva;
-module.exports.listarManutencaoProgramada = listarManutencaoProgramada;
-module.exports.salvarManutencaoProgramada = salvarManutencaoProgramada;
-module.exports.excluirManutencaoProgramada = excluirManutencaoProgramada;
-/**
- * Substitui TODOS os chamados de manutenção corretiva pelos da lista —
- * usada só por POST /restaurar-backup-dados e /restaurar-backup-geral
- * (ver lib/rotas/backup.js). Mesmo padrão de substituirAvaliacoesQualidade
- * (acima): apaga tudo, reinsere.
- */
-function substituirManutencaoCorretiva(lista) {
-  db.prepare('DELETE FROM manutencao_corretiva').run();
-  for (const m of (lista || [])) salvarManutencaoCorretiva(m);
-}
-
-/** Substitui TODOS os agendamentos de manutenção programada pelos da lista. */
-function substituirManutencaoProgramada(lista) {
-  db.prepare('DELETE FROM manutencao_programada').run();
-  for (const a of (lista || [])) salvarManutencaoProgramada(a);
-}
-
-module.exports.substituirManutencaoCorretiva = substituirManutencaoCorretiva;
-module.exports.substituirManutencaoProgramada = substituirManutencaoProgramada;
+// module.exports.*Corretiva e module.exports.*Programada (listar/obter/
+// salvar/aceitar/.../substituir de cada domínio): já vêm penduradas via
+// Object.assign(module.exports, criarManutencaoCorretiva(db)) e
+// Object.assign(module.exports, require('./lib/db/manutencao-programada.js')(db)),
+// ambos acima (Fases 3 e 2 do fatiamento de db.js, ver README).
 
 // ============================================================
 //  NOTIFICAÇÕES PUSH — ver CREATE TABLE push_subscriptions, acima.
+//  Extraído pra lib/db/notificacoes-push.js (Fase 4 do fatiamento de
+//  db.js — ver README.md). O schema (CREATE TABLE) continua aqui.
 // ============================================================
 
-const SQL_UPSERT_PUSH_SUBSCRIPTION = `
-  INSERT INTO push_subscriptions (endpoint, usuario_nome, p256dh, auth, user_agent, criado_em)
-  VALUES (@endpoint, @usuario_nome, @p256dh, @auth, @user_agent, datetime('now'))
-  ON CONFLICT(endpoint) DO UPDATE SET
-    usuario_nome = @usuario_nome, p256dh = @p256dh, auth = @auth, user_agent = @user_agent
-`;
-
-/**
- * Salva (ou atualiza, se o endpoint já existir — ex: o navegador renovou
- * a inscrição) uma inscrição de notificação push pra um usuário
- * cadastrado. `subscription` é o objeto devolvido por
- * PushManager.subscribe() no navegador: { endpoint, keys: { p256dh, auth } }.
- */
-function salvarPushSubscription(usuarioNome, subscription, userAgent) {
-  if (!usuarioNome) throw new Error('usuarioNome é obrigatório.');
-  if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
-    throw new Error('Inscrição de notificação inválida — faltam endpoint/keys.');
-  }
-  db.prepare(SQL_UPSERT_PUSH_SUBSCRIPTION).run({
-    endpoint: subscription.endpoint,
-    usuario_nome: usuarioNome,
-    p256dh: subscription.keys.p256dh,
-    auth: subscription.keys.auth,
-    user_agent: userAgent || null,
-  });
-}
-
-/** Remove 1 inscrição específica (usuário desativou pelo próprio dispositivo). */
-function removerPushSubscription(endpoint) {
-  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
-}
-
-/**
- * Remove uma inscrição que o próprio serviço de push informou como morta
- * (HTTP 404/410 — navegador desinstalado, permissão revogada no SO,
- * etc.) — ver lib/notificacoes-push.js, enviarParaTodos(). Mesmo efeito
- * de removerPushSubscription, nome separado só pra deixar claro QUEM
- * chama (o sistema, não o próprio usuário) nos logs/leitura do código.
- */
-function removerPushSubscriptionMorta(endpoint) {
-  removerPushSubscription(endpoint);
-}
-
-/** 1 inscrição específica, ou undefined — usado só pra checar posse antes de remover (ver POST /push/desinscrever, lib/rotas/notificacoes.js). */
-function obterPushSubscriptionPorEndpoint(endpoint) {
-  return db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint);
-}
-
-/** Todas as inscrições de 1 usuário (nome de cadastro, mesmo valor de nomeUsuario). */
-function listarPushSubscriptionsDoUsuario(usuarioNome) {
-  return db.prepare('SELECT * FROM push_subscriptions WHERE usuario_nome = ?').all(usuarioNome);
-}
-
-/**
- * Todas as inscrições de uma LISTA de usuários — usada na hora de notificar
- * (ver lib/notificacoes-push.js): já resolvida a lista de quem deve
- * receber (perfil com a permissão marcada), busca de uma vez só as
- * inscrições de todos eles.
- */
-function listarPushSubscriptionsDosUsuarios(usuarioNomes) {
-  if (!Array.isArray(usuarioNomes) || usuarioNomes.length === 0) return [];
-  const placeholders = usuarioNomes.map(() => '?').join(',');
-  return db.prepare(`SELECT * FROM push_subscriptions WHERE usuario_nome IN (${placeholders})`).all(...usuarioNomes);
-}
+const {
+  salvarPushSubscription,
+  removerPushSubscription,
+  removerPushSubscriptionMorta,
+  obterPushSubscriptionPorEndpoint,
+  listarPushSubscriptionsDoUsuario,
+  listarPushSubscriptionsDosUsuarios,
+} = require('./lib/db/notificacoes-push.js')(db);
 
 module.exports.salvarPushSubscription = salvarPushSubscription;
 module.exports.removerPushSubscription = removerPushSubscription;
@@ -3162,3 +1130,29 @@ module.exports.removerPushSubscriptionMorta = removerPushSubscriptionMorta;
 module.exports.obterPushSubscriptionPorEndpoint = obterPushSubscriptionPorEndpoint;
 module.exports.listarPushSubscriptionsDoUsuario = listarPushSubscriptionsDoUsuario;
 module.exports.listarPushSubscriptionsDosUsuarios = listarPushSubscriptionsDosUsuarios;
+
+// ============================================================
+//  SESSÕES — ver CREATE TABLE sessoes_admin/sessoes_usuario, acima.
+//  Extraído pra lib/db/sessoes.js (Fase 5 do fatiamento de db.js — ver
+//  README.md). O schema (CREATE TABLE) continua aqui.
+// ============================================================
+
+const {
+  criarSessaoAdmin,
+  sessaoAdminValida,
+  destruirSessaoAdmin,
+  limparSessoesAdminExpiradas,
+  criarSessaoUsuario,
+  dadosSessaoUsuario,
+  destruirSessaoUsuario,
+  limparSessoesUsuarioExpiradas,
+} = require('./lib/db/sessoes.js')(db);
+
+module.exports.criarSessaoAdmin = criarSessaoAdmin;
+module.exports.sessaoAdminValida = sessaoAdminValida;
+module.exports.destruirSessaoAdmin = destruirSessaoAdmin;
+module.exports.limparSessoesAdminExpiradas = limparSessoesAdminExpiradas;
+module.exports.criarSessaoUsuario = criarSessaoUsuario;
+module.exports.dadosSessaoUsuario = dadosSessaoUsuario;
+module.exports.destruirSessaoUsuario = destruirSessaoUsuario;
+module.exports.limparSessoesUsuarioExpiradas = limparSessoesUsuarioExpiradas;

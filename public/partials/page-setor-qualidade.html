@@ -219,11 +219,7 @@
               </div>
               <div class="form-group">
                 <label class="form-label">Sequência do Dia</label>
-                <select class="form-input form-select" id="sq-dailySeq">
-                  <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
-                  <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
-                  <option>11</option><option>12</option><option>13</option>
-                </select>
+                <input class="form-input" type="text" id="sq-dailySeq" readonly placeholder="—" title="Calculada automaticamente — conta as avaliações já registradas hoje e recomeça a cada dia. Não é mais preenchida manualmente.">
               </div>
               <div class="form-group">
                 <label class="form-label">Turno</label>
@@ -356,7 +352,6 @@
               <div class="sq-pallet-col" data-pallet-id="stack1">
                 <div class="sq-pallet-header">
                   <span class="sq-pallet-label">PALLET 1</span>
-                  <span class="sq-pallet-sub" id="sq-pallet-sub-1"></span>
                   <div class="sq-pallet-actions">
                     <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack1')">⚡ Todas</button>
                     <button class="sq-btn-clear-pallet" onclick="SQ.clearPallet('stack1')" title="Limpar marcações deste pallet"><i class="fas fa-trash-alt"></i></button>
@@ -368,7 +363,6 @@
               <div class="sq-pallet-col" data-pallet-id="stack2">
                 <div class="sq-pallet-header">
                   <span class="sq-pallet-label">PALLET 2</span>
-                  <span class="sq-pallet-sub" id="sq-pallet-sub-2"></span>
                   <div class="sq-pallet-actions">
                     <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack2')">⚡ Todas</button>
                     <button class="sq-btn-clear-pallet" onclick="SQ.clearPallet('stack2')" title="Limpar marcações deste pallet"><i class="fas fa-trash-alt"></i></button>
@@ -380,7 +374,6 @@
               <div class="sq-pallet-col" data-pallet-id="stack3">
                 <div class="sq-pallet-header">
                   <span class="sq-pallet-label">PALLET 3</span>
-                  <span class="sq-pallet-sub" id="sq-pallet-sub-3"></span>
                   <div class="sq-pallet-actions">
                     <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack3')">⚡ Todas</button>
                     <button class="sq-btn-clear-pallet" onclick="SQ.clearPallet('stack3')" title="Limpar marcações deste pallet"><i class="fas fa-trash-alt"></i></button>
@@ -392,7 +385,6 @@
               <div class="sq-pallet-col" data-pallet-id="stack4">
                 <div class="sq-pallet-header">
                   <span class="sq-pallet-label">PALLET 4</span>
-                  <span class="sq-pallet-sub" id="sq-pallet-sub-4"></span>
                   <div class="sq-pallet-actions">
                     <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('stack4')">⚡ Todas</button>
                     <button class="sq-btn-clear-pallet" onclick="SQ.clearPallet('stack4')" title="Limpar marcações deste pallet"><i class="fas fa-trash-alt"></i></button>

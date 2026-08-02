@@ -219,7 +219,13 @@
 
     html += `<div class="dbf-baterias">`;
     estrutura.forEach(({ bateria, tracos }) => {
-      html += `<div class="dbf-bateria-card">`;
+      // Clicável → Análise Focada da operação (LWFocada.abrir usa
+      // bateria.id = id_operacao, não id_bateria — mesmo dado usado logo
+      // acima pra casar traço×bateria, ver montarEstrutura). Só clicável
+      // quando bateria.id existe (sempre deveria, mas por segurança —
+      // registros muito antigos/corrompidos sem id não abririam nada).
+      const clicavel = !!bateria.id;
+      html += `<div class="dbf-bateria-card${clicavel ? ' dbf-bateria-card-clicavel' : ''}"${clicavel ? ` onclick="LWDebriefing.abrirAnaliseFocada('${escapeHtml(String(bateria.id))}')" title="Ver Análise Focada desta operação"` : ''}>`;
       const corMont = LW.corMontagemPorLabel(bateria.tipo_montagem);
       const corTextoMont = corMont.hibrida ? 'var(--text)' : corMont.cor;
       html += `<div class="dbf-bateria-head">
@@ -326,7 +332,125 @@
     };
   }
 
-  function renderAvaliacao(stats, data) {
+  // Nome dos códigos de motivo de reprovação (ver MOTIVOS_DEFEITO,
+  // setor-qualidade.js — fonte da verdade dos códigos; copiado aqui
+  // porque setor-qualidade.js não expõe essa lista em window.SQ, e o
+  // debriefing só precisa do nome pra exibir, não da UI de seleção).
+  const _MOTIVO_NOME = {
+    BC: 'Borra de Cimento',
+    CD: 'Cimentícia Descamando',
+    CC: 'Cimentícia Não Colada',
+    CF: 'Cimentícia Fora de Posição',
+    EM: 'Espessura Maior',
+    EP: 'Engoliu Placa',
+    FD: 'Falha Desmoldante',
+    FE: 'Falha Enchimento',
+    FT: 'Falha Traço',
+    PA: 'Painel Amassado',
+    QE: 'Quebra por Empilhadeira',
+    PQ: 'Painel Quebrado',
+    PT: 'Perfil Torto',
+    TR: 'Trincada',
+    OT: 'Outros'
+  };
+
+  /**
+   * Insight 1 — motivo de reprovação mais frequente do dia, entre os
+   * painéis reprovados (mesmo filtro de calcularEstatisticasAvaliacao:
+   * ignora excluidaDaFila). Painéis reprovados sem código de motivo
+   * gravado (registros antigos, ou "múltiplas"/"outros" sem seleção)
+   * não entram na contagem — não dá pra apontar "motivo principal" pra
+   * quem não tem motivo.
+   */
+  function calcularMotivoTopDoDia(avaliacoes, data) {
+    const doDia = avaliacoes.filter(a =>
+      !a.excluidaDaFila && dataDoISO(a.dtDesmoldagem || a.registeredAt) === data
+    );
+    const reprovados = doDia
+      .flatMap(a => Array.isArray(a.paineis) ? a.paineis : [])
+      .filter(p => p.resultado === 'reprovado' && p.motivo);
+
+    if (!reprovados.length) return null;
+
+    const contagem = {};
+    reprovados.forEach(p => { contagem[p.motivo] = (contagem[p.motivo] || 0) + 1; });
+
+    let codigoTop = null, qtdTop = 0;
+    Object.keys(contagem).forEach(cod => {
+      if (contagem[cod] > qtdTop) { codigoTop = cod; qtdTop = contagem[cod]; }
+    });
+
+    return {
+      codigo: codigoTop,
+      nome: _MOTIVO_NOME[codigoTop] || codigoTop,
+      qtd: qtdTop,
+      totalReprovados: reprovados.length
+    };
+  }
+
+  /**
+   * Insight 2 — compara a taxa de aprovação do dia selecionado com a
+   * média histórica (todos os OUTROS dias que têm avaliação registrada
+   * — não só os últimos N, já que o histórico completo já está
+   * carregado em memória mesmo; ver carregarDados()). Mesma definição
+   * de taxa de aprovação de calcularEstatisticasAvaliacao (aprovados /
+   * (aprovados + reprovados), ignorando excluidaDaFila).
+   */
+  function calcularMediaHistoricaAprovacao(avaliacoes, data) {
+    const porDia = {};
+    avaliacoes.forEach(a => {
+      if (a.excluidaDaFila) return;
+      const dia = dataDoISO(a.dtDesmoldagem || a.registeredAt);
+      if (!dia || dia === data) return; // só histórico, exclui o dia selecionado
+      if (!porDia[dia]) porDia[dia] = { aprovados: 0, reprovados: 0 };
+      (Array.isArray(a.paineis) ? a.paineis : []).forEach(p => {
+        if (p.resultado === 'aprovado') porDia[dia].aprovados++;
+        else if (p.resultado === 'reprovado') porDia[dia].reprovados++;
+      });
+    });
+
+    const taxasPorDia = Object.values(porDia)
+      .map(d => (d.aprovados + d.reprovados) ? (d.aprovados / (d.aprovados + d.reprovados)) * 100 : null)
+      .filter(t => t !== null);
+
+    if (!taxasPorDia.length) return null;
+
+    const media = taxasPorDia.reduce((s, t) => s + t, 0) / taxasPorDia.length;
+    return { media, diasConsiderados: taxasPorDia.length };
+  }
+
+  function renderInsights(avaliacoes, data, stats) {
+    if (!stats.totalRegistros) return '';
+
+    const motivoTop = calcularMotivoTopDoDia(avaliacoes, data);
+    const mediaHist = calcularMediaHistoricaAprovacao(avaliacoes, data);
+
+    const linhas = [];
+
+    if (motivoTop) {
+      linhas.push(`<div class="dbf-insight">
+        📌 Principal motivo de reprovação hoje: <strong>${escapeHtml(motivoTop.nome)}</strong>
+        (${motivoTop.codigo}) — ${motivoTop.qtd} de ${motivoTop.totalReprovados} painel(éis) reprovado(s).
+      </div>`);
+    }
+
+    if (mediaHist && stats.taxaAprovacao !== null) {
+      const diff = stats.taxaAprovacao - mediaHist.media;
+      const sinal = diff >= 0 ? '+' : '';
+      const classe = diff >= 0 ? 'is-green' : 'is-red';
+      const seta = diff >= 0 ? '▲' : '▼';
+      linhas.push(`<div class="dbf-insight">
+        📊 Taxa de aprovação de hoje (${fmtNum(stats.taxaAprovacao, 1)}%) está
+        <span class="${classe}">${seta} ${sinal}${fmtNum(diff, 1)}pp</span>
+        em relação à média histórica (${fmtNum(mediaHist.media, 1)}%, ${mediaHist.diasConsiderados} dia(s)).
+      </div>`);
+    }
+
+    if (!linhas.length) return '';
+    return `<div class="dbf-insights">${linhas.join('')}</div>`;
+  }
+
+  function renderAvaliacao(stats, data, insightsHtml) {
     const [y, m, d] = data.split('-');
     const dataFmt = `${d}/${m}/${y}`;
 
@@ -369,6 +493,7 @@
           <span class="dbf-stat-label">Aprovação %</span>
         </div>
       </div>
+      ${insightsHtml}
     </div>`;
   }
 
@@ -380,7 +505,8 @@
       const { historico, relatorio, avaliacoes } = await carregarDados();
       if (_abaAtiva === 'avaliacao') {
         const stats = calcularEstatisticasAvaliacao(avaliacoes, data);
-        el.innerHTML = renderAvaliacao(stats, data);
+        const insightsHtml = renderInsights(avaliacoes, data, stats);
+        el.innerHTML = renderAvaliacao(stats, data, insightsHtml);
       } else {
         const estrutura = montarEstrutura(historico, relatorio, data);
         el.innerHTML = renderRelatorio(estrutura, data);
@@ -424,6 +550,17 @@
       if (btnAv) btnAv.classList.toggle('active', aba === 'avaliacao');
       if (!_dataSelecionada) _dataSelecionada = todayBrasiliaLocal();
       atualizarConteudo(_dataSelecionada);
+    },
+    // Clique num card de operação (aba "Operação" do Debriefing) → Análise
+    // Focada daquela operação (mesmo destino de LWDash.onClickLinhaRegistro
+    // no modo de foco, dashboard.js — LWFocada.abrir troca de página
+    // sozinho, ver showPage lá dentro). Fecha o popover primeiro (mesma
+    // varredura de .ao-popover usada em toggle(), acima) — sem isso, ele
+    // ficaria aberto por cima da tela de Análise Focada.
+    abrirAnaliseFocada(idOperacao) {
+      if (!idOperacao) return;
+      document.querySelectorAll('.ao-popover').forEach(p => p.classList.remove('active'));
+      if (window.LWFocada) LWFocada.abrir(idOperacao);
     }
   };
 

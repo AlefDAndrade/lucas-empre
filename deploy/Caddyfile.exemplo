@@ -8,11 +8,11 @@
 # Compute Engine → VM instances → coluna "External IP"), com PONTOS
 # trocados por HÍFENS. Ex: IP 34.123.45.67 -> 34-123-45-67.nip.io
 #
-# Troque "3000" pela porta que o Node está escutando, se for diferente
-# (ver PORT em server.js — padrão 3000).
+# Troque "5000" pela porta que o Node está escutando, se for diferente
+# (ver PORT em server.js — padrão 5000).
 
 34-123-45-67.nip.io {
-    reverse_proxy localhost:3000
+    reverse_proxy localhost:5000
 }
 
 # Depois de editar, aplique com: sudo systemctl reload caddy

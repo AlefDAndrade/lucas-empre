@@ -144,6 +144,19 @@
       }
     }
 
+    // Mesma ideia de _extrairChamadoIdDaUrl, acima, só que pro deep-link
+    // de notificação de MANUTENÇÃO PROGRAMADA (ver
+    // notificarManutencaoProgramada, lib/notificacoes-push.js, que manda
+    // a URL como "/index.html?programada=ID" — parâmetro diferente de
+    // "chamado" de propósito, pra não confundir com um chamado corretivo).
+    function _extrairProgramadaIdDaUrl(urlStr) {
+      try {
+        return new URL(urlStr, window.location.origin).searchParams.get('programada');
+      } catch (e) {
+        return null;
+      }
+    }
+
     // Leva a pessoa direto pra tela de Manutenção, já com o chamado
     // específico aberto (a mesma caixa "Aceitar/Recusar" que aparece
     // hoje ao abrir manualmente — ver MAN.abrirChamado, manutencao.js).
@@ -161,6 +174,19 @@
       return true;
     }
 
+    // Mesma ideia de _abrirChamadoDeNotificacao, acima, só que leva a
+    // pessoa direto pra aba "Programada" com o AGENDAMENTO específico
+    // aberto (ver MAN.abrirAgendamentoProgramada, manutencao.js) — usada
+    // pelo deep-link da notificação de "Manutenção programada agendada".
+    async function _abrirProgramadaDeNotificacao(id) {
+      if (!id) return false;
+      if (!_paginaPermitida('manutencao')) return false; // perfil sem acesso à página — ignora silenciosamente, cai no boot normal
+      if (typeof MAN === 'undefined' || typeof MAN.abrirAgendamentoProgramada !== 'function') return false;
+      await MAN.abrirAgendamentoProgramada(id);
+      showPage('manutencao');
+      return true;
+    }
+
     // Recebido do service worker quando a notificação é clicada com uma
     // aba do app JÁ aberta (ver 'notificationclick', service-worker.js —
     // nesse caso ele só FOCA a aba existente, sem recarregar a página, e
@@ -170,7 +196,9 @@
         const dados = event.data || {};
         if (dados.tipo !== 'lw-notificacao-clique') return;
         const id = _extrairChamadoIdDaUrl(dados.url);
-        if (id) _abrirChamadoDeNotificacao(id);
+        if (id) { _abrirChamadoDeNotificacao(id); return; }
+        const idProgramada = _extrairProgramadaIdDaUrl(dados.url);
+        if (idProgramada) _abrirProgramadaDeNotificacao(idProgramada);
       });
     }
 
@@ -540,15 +568,51 @@
       }, 3000);
     }
 
+    // ---- Tela de carregamento pós-login (boot) ────────────────────────
+    // Ver div#boot-loading-overlay (index.template.html) e o comentário
+    // lá — esconde a tela só quando navegação + topbar estão prontas de
+    // verdade (chamada no fim do boot, abaixo), não num tempo fixo.
+    let _relogioSegurancaBoot = null;
+    function _finalizarBootUI() {
+      if (_relogioSegurancaBoot) { clearTimeout(_relogioSegurancaBoot); _relogioSegurancaBoot = null; }
+      const overlay = document.getElementById('boot-loading-overlay');
+      if (!overlay) return; // já foi removida (ex: chamada 2x — idempotente)
+      const fill = document.getElementById('boot-loading-fill');
+      const lbl = document.getElementById('boot-loading-label');
+      if (fill) fill.style.width = '100%';
+      if (lbl) lbl.textContent = 'Pronto!';
+      overlay.classList.remove('active');
+      // Só tira do DOM depois da transição de opacidade (.3s, ver CSS) —
+      // limpa o `pointer-events:all` mais cedo (classe removida já faz
+      // isso) e evita um elemento fixed sobrando, cobrindo cliques por
+      // engano se algo mexer no z-index dele depois.
+      setTimeout(() => overlay.remove(), 400);
+    }
+
     // ---- Boot ----
     document.addEventListener('DOMContentLoaded', async () => {
+      // Rede de segurança: se o boot (fetches de sessão/permissões, mais
+      // abaixo) travar por qualquer motivo — rede instável, servidor
+      // lento — a tela de carregamento não pode prender a pessoa aqui
+      // pra sempre. Cancelada por _finalizarBootUI() assim que o boot
+      // termina normalmente; só dispara se isso NÃO acontecer dentro do
+      // tempo abaixo.
+      _relogioSegurancaBoot = setTimeout(_finalizarBootUI, 8000);
+
       // Veio de um clique em notificação de chamado de manutenção? (ver
       // _extrairChamadoIdDaUrl, acima, e lib/notificacoes-push.js) —
       // capturado JÁ AQUI, antes de qualquer outra coisa, porque limpamos
       // o parâmetro da URL logo abaixo (senão um F5 nesta aba reabriria o
       // mesmo chamado de novo pra sempre).
       const _chamadoIdDaNotificacao = _extrairChamadoIdDaUrl(window.location.href);
-      if (_chamadoIdDaNotificacao) {
+      // Mesma ideia, pro deep-link de "Manutenção programada agendada"
+      // (ver _extrairProgramadaIdDaUrl, acima) — os dois parâmetros nunca
+      // vêm juntos na mesma URL (cada notificação manda só um), mas
+      // capturamos os dois aqui, antes de limpar a URL, pelo mesmo
+      // motivo: um F5 nesta aba não pode reabrir o mesmo registro de
+      // novo pra sempre.
+      const _programadaIdDaNotificacao = _extrairProgramadaIdDaUrl(window.location.href);
+      if (_chamadoIdDaNotificacao || _programadaIdDaNotificacao) {
         window.history.replaceState(null, '', window.location.pathname);
       }
 
@@ -656,7 +720,8 @@
         document.getElementById('btn-config').style.display = 'inline-flex';
         document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = '');
         document.querySelectorAll('[data-hide-analista]').forEach(el => el.style.display = '');
-        if (!(_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao))) {
+        if (!(_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao))
+            && !(_programadaIdDaNotificacao && await _abrirProgramadaDeNotificacao(_programadaIdDaNotificacao))) {
           _restaurarUltimaPagina();
         }
 
@@ -720,6 +785,8 @@
           if (_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao)) {
             // já navegou pro chamado — nem Operação (Operador de Injetora)
             // nem "última página" entram em jogo neste boot específico.
+          } else if (_programadaIdDaNotificacao && await _abrirProgramadaDeNotificacao(_programadaIdDaNotificacao)) {
+            // idem, só que pro agendamento de manutenção programada.
           } else if (role === 'OperadorInjetora') {
             // Operador de Injetora sempre entra direto na tela de trabalho
             // (Registrar Operação), mesmo comportamento de sempre — os
@@ -768,6 +835,13 @@
       const toggleSidebar = () => {
         const isExpanded = sidebar.classList.toggle('expanded');
         backdrop.classList.toggle('active', isExpanded);
+        // Sidebar fica fora da tela via transform (translateX), não via
+        // display/visibility — sem "inert" ela continua alcançável pelo
+        // Tab (e pelo leitor de tela) mesmo escondida visualmente. Por
+        // isso sincroniza o inert com o estado de expansão sempre que ele
+        // muda, em vez de só no carregamento inicial.
+        sidebar.inert = !isExpanded;
+        if (isExpanded) sidebar.querySelector('.nav-item')?.focus();
       };
 
       toggleBtn.addEventListener('click', (e) => {
@@ -778,6 +852,7 @@
       backdrop.addEventListener('click', () => {
         sidebar.classList.remove('expanded');
         backdrop.classList.remove('active');
+        sidebar.inert = true;
       });
 
       // Fechar sidebar ao clicar em um item de navegação (melhor UX em mobile/overlay)
@@ -785,8 +860,18 @@
         item.addEventListener('click', () => {
           sidebar.classList.remove('expanded');
           backdrop.classList.remove('active');
+          sidebar.inert = true;
         });
       });
+
+      // Navegação (menu, com permissões já aplicadas e página restaurada
+      // acima) e informações da topbar (nome, perfil, logo acima) estão
+      // prontas — esconde a tela de carregamento (ver
+      // div#boot-loading-overlay, index.template.html). O resto do
+      // sistema (dados de cada página, notificações push, etc.) continua
+      // carregando em segundo plano, cada um do seu jeito, como sempre —
+      // não faz sentido esperar a página INTEIRA aqui.
+      _finalizarBootUI();
     });
 
 
@@ -3350,14 +3435,63 @@
         ? `<span class="badge badge-green">✓ ${_usuariosCache.length} usuário(s) cadastrado(s)</span>`
         : `<span class="badge badge-gray">⬤ Nenhum usuário cadastrado ainda — ninguém consegue logar com usuário+senha (só o botão "Entrar como Administrador" continua funcionando).</span>`;
 
+      // "Pode iniciar/encerrar operações" só faz sentido pra perfis com
+      // controle de operação de verdade (mesma lista usada em
+      // cfgAtualizarCampoPodeIniciarOperacao, acima) — pros outros nem
+      // mostra o toggle, pra não sugerir uma opção que não teria efeito.
+      const perfisComControle = _perfisInfoCache.perfisComControleDeOperacao || [];
+
       elLista.innerHTML = _usuariosCache.map(u => `
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;flex-wrap:wrap">
       <span style="font-size:.85rem;font-weight:700;color:var(--text);min-width:120px">${_escaparHtmlLocal(u.nomeUsuario)}</span>
       <span class="badge badge-blue">${_escaparHtmlLocal(_rotuloPerfil(u.perfil))}</span>
-      ${u.podeIniciarOperacao ? '<span class="badge badge-green" title="Pode iniciar/encerrar operações">▶ Inicia Operação</span>' : ''}
       <button onclick="cfgRemoverUsuario('${_escaparHtmlLocal(u.id)}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
+      ${perfisComControle.includes(u.perfil) ? `
+      <div style="flex-basis:100%;display:flex;align-items:center;gap:10px;padding-top:8px;margin-top:2px;border-top:1px solid var(--border)">
+        <label style="display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text-2);cursor:pointer" title="Pode iniciar/encerrar operações em Registrar Operação">
+          <span class="switch">
+            <input type="checkbox" ${u.podeIniciarOperacao ? 'checked' : ''} onchange="cfgToggleIniciarOperacao('${_escaparHtmlLocal(u.id)}', this)">
+            <span class="switch-slider"></span>
+          </span>
+          Pode iniciar/encerrar operações em Registrar Operação
+        </label>
+      </div>` : ''}
     </div>
   `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum usuário cadastrado ainda.</span>';
+    }
+
+    // Alterna "Pode iniciar/encerrar operações em Registrar Operação" pra
+    // um usuário JÁ CADASTRADO, direto na lista — sem precisar remover e
+    // recriar. Reenvia a lista inteira pro mesmo POST /salvar-usuarios de
+    // sempre (só o campo deste usuário muda), o que também significa que
+    // pede a senha de Administrador Master de novo (AdminAuth, dentro de
+    // _cfgSalvarUsuarios) — mesma trava de segurança usada em
+    // Adicionar/Remover usuário. Se cancelar ou der erro, o switch volta
+    // pro estado anterior (o onchange já tinha marcado o novo antes de
+    // chegar aqui).
+    async function cfgToggleIniciarOperacao(id, inputEl) {
+      const usuario = _usuariosCache.find(u => u.id === id);
+      if (!usuario) return;
+
+      const valorAnterior = !!usuario.podeIniciarOperacao;
+      const novoValor = inputEl.checked;
+
+      const listaParaEnviar = _usuariosCache.map(u => ({
+        id: u.id,
+        nomeUsuario: u.nomeUsuario,
+        perfil: u.perfil,
+        podeIniciarOperacao: u.id === id ? novoValor : u.podeIniciarOperacao,
+      }));
+
+      try {
+        await _cfgSalvarUsuarios(listaParaEnviar);
+      } catch (e) {
+        inputEl.checked = valorAnterior;
+        if (!e.silencioso) LW.mostrarAlerta('Erro ao atualizar: ' + e.message, { tipo: 'erro' });
+        return;
+      }
+
+      cfgRenderUsuarios();
     }
 
     // POST /salvar-usuarios exige sessão de Administrador Master (ver

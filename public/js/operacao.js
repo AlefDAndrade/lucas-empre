@@ -33,6 +33,13 @@
     tracos: [],
     modo_teste: false,
     bercos_personalizados: null, // [tipo|null, ...] — só usado quando tipo_montagem === 'PERSONALIZADA'
+    // Override de Dimensão por berço específico — [dimensao|null, ...],
+    // 1 posição por berço (índice 0 = berço 1). null = usa state.dimensao
+    // (a dimensão geral da operação) pra aquele berço. Só recebe valor
+    // via o modal "📋 Detalhes do Berço" (ver aplicarDetalhesBerco,
+    // abaixo) — editar por lá NUNCA mais mexe em state.dimensao, só
+    // nesta posição específica.
+    bercos_dimensoes: null,
   };
 
   let timerInterval = null;
@@ -223,6 +230,15 @@
         state.bercos_personalizados = Array.from({ length: novaCapacidade }, (_, i) => atual[i] || null);
       } else if (state.bercos_personalizados) {
         state.bercos_personalizados = null;
+      }
+      // Mesmo redimensionamento acima, mas pro override de Dimensão por
+      // berço (ver aplicarDetalhesBerco, abaixo) — independe do tipo de
+      // montagem (Simples/Híbrida/Personalizada todas podem ter berços
+      // com override de dimensão).
+      if (Array.isArray(state.bercos_dimensoes)) {
+        const atualDim = state.bercos_dimensoes;
+        const redimensionado = Array.from({ length: novaCapacidade }, (_, i) => atualDim[i] || null);
+        state.bercos_dimensoes = redimensionado.some(Boolean) ? redimensionado : null;
       }
       updateCapacidade();
       recalcPaineis();
@@ -2321,6 +2337,10 @@
       // m2_por_tipo, vindos de ...calc acima), é só pra exibir/auditar a
       // composição exata desta bateria depois.
       ...(state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA ? { bercos_personalizados: state.bercos_personalizados } : {}),
+      // Override de Dimensão por berço — independe do tipo de montagem;
+      // só vai no registro se pelo menos 1 berço teve a dimensão editada
+      // individualmente (ver aplicarDetalhesBerco, abaixo).
+      ...(Array.isArray(state.bercos_dimensoes) && state.bercos_dimensoes.some(Boolean) ? { bercos_dimensoes: state.bercos_dimensoes } : {}),
       ...calc,
       tracos: state.tracos.map(t => {
         // Se o traço foi reaproveitado, completa a entrada de reaproveitamento com o ID real
@@ -2606,6 +2626,7 @@
       // operação REAL acabar indo pros arquivos de teste sem querer.
       modo_teste: false,
       bercos_personalizados: null,
+      bercos_dimensoes: null,
     };
   }
 
@@ -2724,9 +2745,103 @@
     updatePendencias();
   }
 
+  /**
+   * Aplica as edições feitas no modal "📋 Detalhes do Berço" (ver
+   * bateria-atual.js, _abrirDetalhesBerco) — Tipo de Montagem e/ou
+   * Dimensão de UM berço específico da operação atual. `novoTipo` é o
+   * CÓDIGO de um tipo simples (ex: 'sp','2p') ou null/'' (não mexer);
+   * `novaDimensao` é o texto digitado no campo (ou '' pra não mexer).
+   *
+   * Dimensão: editar por aqui grava um OVERRIDE só do berço clicado
+   * (state.bercos_dimensoes[numeroBerco-1]) — NUNCA mais mexe em
+   * state.dimensao (a dimensão geral da operação, campo "Dimensão" lá
+   * em cima), que continua valendo normalmente pra todos os outros
+   * berços que não tiverem override próprio (ver dimensaoBercoAtual,
+   * bateria-atual.js). Cada bateria pode ter, na prática, algum berço
+   * fora do padrão (molde avariado, ajuste pontual etc.) — daí a
+   * dimensão poder variar berço a berço, diferente do Tipo de Montagem
+   * de uma bateria uniforme.
+   *
+   * Tipo de Montagem SÓ existe por berço numa bateria Personalizada
+   * (cada berço guarda seu próprio código, ver bercos_personalizados).
+   * Se a bateria ainda for uniforme (Simples ou Híbrida) e a pessoa
+   * pedir pra mudar o tipo de 1 berço só, convertemos pra Personalizada
+   * na hora — MAS só quando o tipo uniforme atual for, ele mesmo, um
+   * tipo simples reconhecido (tem código equivalente em
+   * LW.MONTAGEM_OPCOES): todos os outros berços herdam esse mesmo
+   * código (preservando o que a bateria já era) e só o berço editado
+   * recebe o novo. Uma bateria Híbrida não converte automaticamente
+   * (não existe 1 código simples que represente os 2 tipos misturados)
+   * — nesse caso, orienta a usar "🔧 Configurar Berços" em vez de tentar
+   * adivinhar uma divisão que a pessoa não pediu.
+   */
+  function aplicarDetalhesBerco(numeroBerco, novoTipo, novaDimensao) {
+    let mudouAlgo = false;
+    const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
+    const capacidade = parseInt(state.bercos_reais) || (bateria?.bercos || 0);
+
+    if (typeof novaDimensao === 'string' && novaDimensao.trim() !== '') {
+      const valorFormatado = _formatarDimensaoLive(novaDimensao.trim(), true);
+      if (!capacidade || numeroBerco < 1 || numeroBerco > capacidade) {
+        LW.mostrarAlerta('Berço fora da capacidade atual da bateria.', { tipo: 'erro' });
+      } else {
+        // Valor "efetivo" atual deste berço — o override dele, se já
+        // tiver um, senão a dimensão geral da operação (é o que a pessoa
+        // via no campo ao abrir o modal, ver dimensaoBercoAtual em
+        // bateria-atual.js) — só marca como mudança se realmente mudou.
+        const atualDoBerco = (Array.isArray(state.bercos_dimensoes) && state.bercos_dimensoes[numeroBerco - 1])
+          || state.dimensao || '';
+        if (valorFormatado !== atualDoBerco) {
+          if (!Array.isArray(state.bercos_dimensoes) || state.bercos_dimensoes.length !== capacidade) {
+            const atual = Array.isArray(state.bercos_dimensoes) ? state.bercos_dimensoes : [];
+            state.bercos_dimensoes = Array.from({ length: capacidade }, (_, i) => atual[i] || null);
+          }
+          state.bercos_dimensoes[numeroBerco - 1] = valorFormatado;
+          mudouAlgo = true;
+        }
+      }
+    }
+
+    if (novoTipo) {
+      if (!capacidade || numeroBerco < 1 || numeroBerco > capacidade) {
+        LW.mostrarAlerta('Berço fora da capacidade atual da bateria.', { tipo: 'erro' });
+      } else if (state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA) {
+        if (!Array.isArray(state.bercos_personalizados) || state.bercos_personalizados.length !== capacidade) {
+          const atual = Array.isArray(state.bercos_personalizados) ? state.bercos_personalizados : [];
+          state.bercos_personalizados = Array.from({ length: capacidade }, (_, i) => atual[i] || null);
+        }
+        state.bercos_personalizados[numeroBerco - 1] = novoTipo;
+        mudouAlgo = true;
+      } else {
+        const codigoUniforme = (LW.MONTAGEM_OPCOES || [])
+          .find(o => o.modo === 'simples' && o.label === state.tipo_montagem)?.tipo || null;
+        if (!codigoUniforme) {
+          LW.mostrarAlerta(
+            'Não é possível alterar o tipo de montagem de um berço individual nesta bateria (Híbrida, ou tipo não reconhecido) — use "🔧 Configurar Berços" para Montagem Personalizada.',
+            { tipo: 'aviso' }
+          );
+        } else {
+          state.tipo_montagem = LW.TIPO_MONTAGEM_PERSONALIZADA;
+          state.bercos_personalizados = Array.from({ length: capacidade }, () => codigoUniforme);
+          state.bercos_personalizados[numeroBerco - 1] = novoTipo;
+          mudouAlgo = true;
+        }
+      }
+    }
+
+    if (mudouAlgo) {
+      if (!state.dimensaoManual) updateCapacidade(); // reaplica o automático se a dimensão foi limpa
+      recalcPaineis();
+      persist();
+      renderAll(); // reflete tipo_montagem/dimensao/bercos_personalizados nos campos do formulário (select, input, botão "Configurar Berços"...)
+      LW.mostrarAlerta('Detalhes do berço atualizados.', { tipo: 'sucesso' });
+    }
+  }
+
   // ---- Public API ----
   window.LWOp = {
     init,
+    aplicarDetalhesBerco,
     // Usado por app-core.js (ver _aoReceberDadosSqlExcluidosDeOutroDispositivo)
     // pra saber se é seguro recarregar a página agora ou se precisa
     // esperar — true só quando o cronômetro está de fato rodando (uma

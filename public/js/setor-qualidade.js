@@ -131,6 +131,12 @@
   let _editandoRegistradoEm     = null;
   let _editandoLinkedOperacaoId = null;
   let _editandoAvaliadorNome    = null;
+  // Mesmo raciocínio das 3 acima, mas pra Sequência do Dia (ver comentário
+  // em _calcularProximaSequenciaHoje/_atualizarSequenciaDoDiaPrevia, mais
+  // abaixo): corrigir uma avaliação antiga preserva o número ORIGINAL dela
+  // (não recalcula pro "próximo de hoje" — a avaliação corrigida nem
+  // sempre foi registrada hoje).
+  let _editandoDailySeq         = null;
 
   // ── Tipos de montagem — vem de config.json (tipos_montagem.opcoes),
   // NUNCA mais fixo/hardcoded aqui (ver _carregarOpcoesMontagem). Cache
@@ -1234,14 +1240,12 @@
   /* ── Render das pilhas de placas ──────────────────────── */
   function renderStacks() {
     _sincronizarColunasExtras(); // garante que as colunas dos pallets extras existem no DOM antes de preenchê-las
-    _atualizarSubtitulosPallets(); // faixa de berços de cada palete-base (ver função) — nunca muda a marcação em si, só o rótulo
     _stackIds().forEach((sid) => {
       const stack = document.getElementById(sid);
       if (!stack) return;
       _ativarDropZone(stack, sid); // liga o "soltar" — idempotente, ver função
       stack.innerHTML = '';
       const total = stackCounts[sid] || 0;
-      const palleteBase = parseInt(sid.replace('stack', '')); // 1-4 nos originais; extras (5+) nunca têm berço de origem
       for (let i = 1; i <= total; i++) {
         const slab = document.createElement('div');
         slab.className = 'sq-slab';
@@ -1250,13 +1254,14 @@
 
         const num = document.createElement('span');
         num.className = 'sq-slab-number';
-        // Mostra o berço de ORIGEM (ver _bercoDoSlot) em vez de um índice
-        // solto 1..N, sempre que a capacidade da operação for conhecida
-        // — cai de volta pro índice simples de sempre quando não for
-        // (avaliação avulsa legada, palete extra, ou rascunho reaberto
-        // sem a operação recarregada — ver capacidadeOperacaoAtual).
-        const berco = palleteBase <= 4 ? _bercoDoSlot(palleteBase, i, capacidadeOperacaoAtual, paineisNaoEnchidosAtual) : null;
-        num.textContent = berco ? ('B' + berco) : i;
+        // Índice simples, sempre 1..N dentro do próprio palete — cada
+        // palete recomeça do 1 (antes mostrava o berço de ORIGEM, que
+        // no palete da 2ª metade ia de metade+1 até a capacidade, ex.
+        // B11..B22; ver histórico de _bercoDoSlot). Um painel removido
+        // (🚫 Não Enchido, ver paineisNaoEnchidosAtual) já reduz "total"
+        // antes deste loop — não deixa buraco na numeração, o resto
+        // simplesmente ocupa as posições seguintes.
+        num.textContent = i;
         slab.appendChild(num);
 
         const tp = document.createElement('span');
@@ -1974,6 +1979,7 @@
       _editandoRegistradoEm = null;
       _editandoLinkedOperacaoId = null;
       _editandoAvaliadorNome = null;
+      _editandoDailySeq = null;
     }
     document.querySelectorAll('.sq-section').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.sq-nav-btn').forEach(el => el.classList.remove('active'));
@@ -2055,6 +2061,12 @@
     setEditable(true);
     _bloquearCamposAutoPreenchidos(true); // sempre travado — ver comentário na função, acima
     _aplicarModoBotoesForm(); // reflete no botão "Registrar" se ficou sem operação vinculada (ver comentário lá)
+    // Sequência do Dia — clearForm() (chamado acima) já mostrou uma prévia
+    // com o cache que já estava em memória; isto busca o cache mais
+    // recente do servidor bem na hora de abrir a avaliação, pra prévia
+    // não ficar desatualizada se outro operador tiver registrado algo há
+    // pouco (ver _calcularProximaSequenciaHoje).
+    carregarAvaliacoesQualidade().then(_atualizarSequenciaDoDiaPrevia);
   }
 
   // Seleciona no <select> de ID da Bateria (sq-batteryId) um valor que pode
@@ -2238,35 +2250,6 @@
     return { pallet, posicao };
   }
 
-  // Dado um dos 4 paletes BASE, devolve de qual LADO ele é (esquerdo ou
-  // direito) — usado por _bercoDoSlot pra saber quais berços "não
-  // enchido" (que são marcados por lado, não pelo palete em si) valem
-  // pra ele.
-  function _ladoDoPallet(pallet) {
-    const mapa = _paletePorMetadeELado();
-    if (pallet === mapa.esquerdo.primeira || pallet === mapa.esquerdo.segunda) return 'esquerdo';
-    if (pallet === mapa.direito.primeira || pallet === mapa.direito.segunda) return 'direito';
-    return null;
-  }
-
-  // Conjunto (Set) dos números de berço marcados como "não enchido" NO
-  // LADO indicado, a partir de uma lista bruta no formato de
-  // paineisNaoEnchidosAtual (ver _definirPaineisNaoEnchidos). Recebe a
-  // lista como parâmetro em vez de ler paineisNaoEnchidosAtual direto —
-  // assim _bercoDoSlot também funciona pro espelho de uma avaliação já
-  // salva (item.capacidadeOperacao), sem misturar com o estado da
-  // avaliação que está sendo editada agora.
-  function _bercosNaoEnchidosPorLado(lado, listaBruta) {
-    const campo = lado === 'esquerdo' ? 'esquerda' : 'direita';
-    const set = new Set();
-    (Array.isArray(listaBruta) ? listaBruta : []).forEach(b => {
-      if (b[`estado_${campo}`] !== 'nao_enchido') return;
-      const bercoNum = parseInt(b.ordem) || parseInt(String(b.berco || '').replace(/^B/i, ''));
-      if (bercoNum) set.add(bercoNum);
-    });
-    return set;
-  }
-
   // "🚫 Marcar Não Enchido" (Bateria Atual, ver bateria-atual.js) — grava
   // o snapshot cru de op.bercos_visuais (ver bercosVisuaisPorOperacoes,
   // db.js, e GET /operacoes-nao-avaliadas) em paineisNaoEnchidosAtual, pra
@@ -2338,71 +2321,6 @@
     });
     remocoes.sort((a, b) => b.bercoNum - a.bercoNum);
     remocoes.forEach(r => _removerPosicaoDoPallet(`stack${r.pallet}`, r.posicao));
-  }
-
-  // Caminho inverso: dado um dos 4 paletes BASE (1-4) e uma posição
-  // dentro dele, devolve o nº do berço de origem — usado por
-  // renderStacks() pra rotular cada painel da grade com o berço real,
-  // em vez de um índice solto 1..N sem relação com o berço físico.
-  // Paletes extras (5+, ver adicionarPalletExtra) não têm berço de
-  // origem definido — devolve null, a chamada volta a numerar 1..N.
-  // Generalizado pra qualquer permutação configurada em "Definir
-  // Paletes" (ver _paletePorMetadeELado, acima) — não assume mais que
-  // paletes 3/4 são sempre a 1ª metade.
-  //
-  // bercosNaoEnchidos (opcional, mesmo formato de paineisNaoEnchidosAtual)
-  // — ver conversa que motivou isso: encher só um lado do berço (ou
-  // marcar "🚫 Não Enchido" em Bateria Atual) tira 1 painel da grade
-  // (ver _removerPaineisNaoEnchidosDaGrade), mas o berço que falta
-  // precisa DESAPARECER da numeração, não só empurrar todo mundo pra
-  // trás uma casa — B6 continua sendo B6 mesmo se B5 não existir aqui,
-  // nunca vira "B5" por engano. Por isso este cálculo agora PULA os
-  // berços não enchidos ao contar posições, em vez de somar direto
-  // (posição + deslocamento fixo).
-  function _bercoDoSlot(pallet, posicao, capacidade, bercosNaoEnchidos) {
-    if (!capacidade || capacidade <= 0) return null;
-    const metade = Math.ceil(capacidade / 2);
-    const mapa = _paletePorMetadeELado();
-    let inicio, fim;
-    if (pallet === mapa.esquerdo.primeira || pallet === mapa.direito.primeira) { inicio = 1; fim = metade; }
-    else if (pallet === mapa.esquerdo.segunda || pallet === mapa.direito.segunda) { inicio = metade + 1; fim = capacidade; }
-    else return null;
-
-    if (!bercosNaoEnchidos || !bercosNaoEnchidos.length) return inicio + posicao - 1; // atalho de sempre, sem remoções
-
-    const removidos = _bercosNaoEnchidosPorLado(_ladoDoPallet(pallet), bercosNaoEnchidos);
-    if (!removidos.size) return inicio + posicao - 1;
-
-    let contagem = 0;
-    for (let b = inicio; b <= fim; b++) {
-      if (removidos.has(b)) continue;
-      contagem++;
-      if (contagem === posicao) return b;
-    }
-    return null; // não deveria acontecer se posicao <= stackCounts[sid]
-  }
-
-  // Atualiza o subtítulo de cada palete-base (ex.: "Berços 1–10 · Esq.")
-  // com a faixa de berços que ele recebe — só aparece quando a
-  // capacidade da operação já é conhecida (ver capacidadeOperacaoAtual);
-  // fica em branco (mesmo texto de sempre, sem subtítulo) enquanto não
-  // for, pra não mostrar uma faixa errada antes da operação carregar.
-  // Generalizado pra qualquer permutação configurada em "Definir
-  // Paletes" (ver _paletePorMetadeELado, acima).
-  function _atualizarSubtitulosPallets() {
-    const cap = capacidadeOperacaoAtual;
-    const metade = cap ? Math.ceil(cap / 2) : null;
-    const mapa = _paletePorMetadeELado();
-    const faixas = cap ? {
-      [mapa.esquerdo.primeira]: `Berços 1–${metade} · Esq.`,
-      [mapa.direito.primeira]:  `Berços 1–${metade} · Dir.`,
-      [mapa.esquerdo.segunda]:  `Berços ${metade + 1}–${cap} · Esq.`,
-      [mapa.direito.segunda]:   `Berços ${metade + 1}–${cap} · Dir.`,
-    } : { 1: '', 2: '', 3: '', 4: '' };
-    Object.entries(faixas).forEach(([n, texto]) => {
-      const el = document.getElementById('sq-pallet-sub-' + n);
-      if (el) el.textContent = texto;
-    });
   }
 
   // Monta o slabConfig (mesmo formato usado pelo modal de Configuração
@@ -2753,6 +2671,47 @@
       });
   }
 
+  // ── Sequência do Dia (automática) ───────────────────────────────────
+  // Antes era um <select> manual (1 a 13) que o avaliador escolhia à mão
+  // — gerava erros reais (número repetido, fora de ordem, esquecido).
+  // Agora é calculada: conta quantas avaliações já foram registradas HOJE
+  // (Brasília) e soma 1. A contagem é só do dia — recomeça em 1 a cada
+  // dia novo, sozinha, sem ninguém precisar zerar nada.
+  //
+  // _dataBrasiliaDeISO/_hojeBrasilia são cópias locais de
+  // dataBrasiliaDeISO()/todayBrasilia() (data.js) — duplicadas de
+  // propósito, não importadas: setor-qualidade.js já evita depender de
+  // globais de data.js fora do stub mínimo de LW (ver
+  // test/helpers/setor-qualidade-dom.js, que carrega este arquivo
+  // isolado, sem data.js, pra testar "de fora" como um navegador faria).
+  function _dataBrasiliaDeISO(iso) {
+    if (!iso) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(iso));
+  }
+  function _hojeBrasilia() {
+    return _dataBrasiliaDeISO(new Date().toISOString());
+  }
+
+  // O valor mostrado aqui é uma PRÉVIA, a partir do avaliacoesCache já
+  // carregado (pode ficar um passo atrás se outro operador registrar uma
+  // avaliação bem no meio-tempo) — o número que realmente vale é
+  // recalculado no SERVIDOR, na hora de registrar (ver
+  // db.salvarAvaliacaoQualidade, lib/db/operacoes-qualidade.js), pra não
+  // sair número repetido em duas avaliações registradas quase juntas.
+  function _calcularProximaSequenciaHoje() {
+    const hoje = _hojeBrasilia();
+    const totalHoje = (avaliacoesCache.avaliacoes || [])
+      .filter(a => _dataBrasiliaDeISO(a.registeredAt) === hoje).length;
+    return totalHoje + 1;
+  }
+  function _atualizarSequenciaDoDiaPrevia() {
+    const el = document.getElementById('sq-dailySeq');
+    if (el) el.value = _calcularProximaSequenciaHoje();
+  }
+
   function getData() {
     return avaliacoesCache;
   }
@@ -2808,7 +2767,11 @@
       linkedOperacaoId,
       palletTypes, slabConfig,
       extraStacks: [...extraStacks], stackCounts: { ...stackCounts },
-      dailySeq:     document.getElementById('sq-dailySeq').value,
+      // Sequência do Dia NÃO é mais salva no rascunho — é sempre
+      // recalculada na hora de reabrir (ver applyFormData), porque o
+      // "próximo número de hoje" muda com o tempo (outras avaliações
+      // registradas nesse meio-tempo, ou o rascunho atravessando a
+      // virada do dia).
       turno:        document.getElementById('sq-turno').value,
       tempInput:    document.getElementById('sq-temp').value,
       dtMontagem:   document.getElementById('sq-dtMontagem').value,
@@ -2914,6 +2877,15 @@
     // quem conscientemente não deu pra avaliar). Destaca as que faltam
     // (mesmo visual de placa com tipo incompatível, ver validateAllSlabs)
     // e recusa registrar enquanto sobrar alguma.
+    // Tempo de Pega inválido (Desmoldagem <= Enchimento) — ver
+    // _tempoPegaInvalido, acima. Checado ANTES dos painéis não marcados
+    // (mesma ordem em que os campos aparecem no formulário: datas primeiro,
+    // grade de painéis depois), pra guiar o avaliador na correção de cima
+    // pra baixo.
+    if (_tempoPegaInvalido()) {
+      showAlert('Tempo de Pega inválido', 'A Data/Hora de Desmoldagem precisa ser posterior à Data/Hora de Enchimento — corrija antes de registrar.');
+      return;
+    }
     document.querySelectorAll('.sq-slab.invalid').forEach(el => el.classList.remove('invalid'));
     const faltando = _paineisNaoMarcados();
     if (faltando.length) {
@@ -2968,6 +2940,15 @@
         // corrigiu um detalhe depois (mesmo raciocínio de Paradas,
         // paradas.js).
         avaliadorNome: editando ? (_editandoAvaliadorNome || null) : LW.nomeDeQuemEstaLogado(),
+        // Sequência do Dia — numa CORREÇÃO, manda de volta o número
+        // ORIGINAL (_editandoDailySeq, carregado junto com o resto da
+        // avaliação em edição — ver editarAvaliacaoDoEspelho), pra
+        // preservá-lo. Numa avaliação NOVA, não manda nada — quem calcula
+        // e atribui o número definitivo é o servidor, na hora de salvar
+        // (ver db.salvarAvaliacaoQualidade), pra não sair repetido se duas
+        // avaliações forem registradas quase ao mesmo tempo; o valor
+        // mostrado até aqui na tela era só uma prévia.
+        ...(editando ? { dailySeq: _editandoDailySeq || null } : {}),
         ...(editando ? { editadoEm: new Date().toISOString() } : {}),
       };
       // Painéis embutidos na própria avaliação — 1 linha no banco pra
@@ -3086,6 +3067,12 @@
     // que falta antes de selecionar (mesma correção já usada em
     // _prefillFromOperacao, acima).
     _selecionarBateriaNoForm(item.batteryId || 'B1');
+    // Mostra a Sequência do Dia REAL desta avaliação (a que foi calculada
+    // no servidor quando ela foi registrada) — não recalcula pra "próximo
+    // de hoje" aqui, porque a avaliação sendo reaberta pode ser de
+    // qualquer dia, não necessariamente hoje. Avaliação legada (anterior
+    // a esta mudança) não tem esse campo — mostra "—".
+    document.getElementById('sq-dailySeq').value     = item.dailySeq || '—';
     document.getElementById('sq-turno').value        = item.turno    || '';
     document.getElementById('sq-temp').value         = item.tempInput || '';
     document.getElementById('sq-dtMontagem').value   = fmtDTL(item.dtMontagem);
@@ -3167,6 +3154,7 @@
         _editandoRegistradoEm     = item.registeredAt || null;
         _editandoLinkedOperacaoId = item.linkedOperacaoId || null;
         _editandoAvaliadorNome    = item.avaliadorNome || null;
+        _editandoDailySeq         = item.dailySeq || null;
         setEditable(true);
         // Mesma trava do lançamento novo: os dados vieram da operação
         // real na hora do registro original, corrigir aqui não deveria
@@ -3367,13 +3355,9 @@
         const motivoHtml = panel?.motivo
           ? `<span class="sq-mini-slab-motivo${_linhaDoPainel(panel) === '2ª' ? ' sq-mini-slab-motivo-2linha' : ''}" title="${_escaparHtml(tituloMotivo)}">${_escaparHtml(panel.motivo)}</span>`
           : '';
-        // Mesmo raciocínio de renderStacks (grade principal) — mostra o
-        // berço de origem quando a avaliação salva tem
-        // capacidadeOperacao gravado (ver registerEvaluation);
-        // avaliação legada, sem esse campo, cai de volta no índice
-        // simples de sempre.
-        const berco = _bercoDoSlot(p, i, item.capacidadeOperacao);
-        const rotulo = berco ? ('B' + berco) : i;
+        // Mesmo raciocínio de renderStacks (grade principal) — índice
+        // simples 1..N, cada palete recomeçando do 1.
+        const rotulo = i;
         // Motivo + tipo agrupados num wrapper só (.sq-mini-slab-canto-info,
         // mesma ideia da grade principal — ver .sq-slab-canto-info,
         // renderStacks) — sem isso, o motivo entrava como mais um item
@@ -4188,7 +4172,11 @@
     paineisNaoEnchidosAtual = [];
     palletTypes = d.palletTypes  || ['','','',''];
     updateMountTypeDropdown();
-    document.getElementById('sq-dailySeq').value     = d.dailySeq  || '1';
+    // Sequência do Dia — recalcula do zero em vez de restaurar o valor
+    // salvo no rascunho: um rascunho pode ter ficado "Em Andamento" de um
+    // dia pra outro, e o número de ontem não vale mais hoje (ver
+    // _calcularProximaSequenciaHoje — a contagem é sempre do dia atual).
+    _atualizarSequenciaDoDiaPrevia();
     document.getElementById('sq-turno').value        = d.turno     || '1° TURNO';
     document.getElementById('sq-temp').value         = d.tempInput || '';
     document.getElementById('sq-dtMontagem').value   = fmtDTL(d.dtMontagem);
@@ -4304,10 +4292,18 @@
     _editandoRegistradoEm = null;
     _editandoLinkedOperacaoId = null;
     _editandoAvaliadorNome = null;
+    _editandoDailySeq = null;
     _aplicarModoBotoesForm();
     document.querySelectorAll('.sq-slab-marks').forEach(c => { c.innerHTML = ''; });
     document.getElementById('sq-batteryId').value    = 'B1';
-    document.getElementById('sq-dailySeq').value     = '1';
+    // Sequência do Dia — não é mais escolhida à mão (era um <select> 1-13
+    // que o avaliador preenchia manualmente e errava — número repetido,
+    // fora de ordem, esquecido). Agora é só uma PRÉVIA calculada a partir
+    // do que já está no cache local (ver _atualizarSequenciaDoDiaPrevia) —
+    // o número final e definitivo é recalculado no servidor na hora de
+    // registrar (ver db.salvarAvaliacaoQualidade), pra não dar número
+    // repetido se duas avaliações forem registradas quase ao mesmo tempo.
+    _atualizarSequenciaDoDiaPrevia();
     document.getElementById('sq-turno').value        = '1° TURNO';
     document.getElementById('sq-temp').value         = '';
     document.getElementById('sq-dtMontagem').value   = '';
@@ -4338,6 +4334,24 @@
     const diff = new Date(e) - new Date(s);
     if (diff > 0) { const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000); out.value = `${h}h ${m}min`; }
     else out.value = diff === 0 ? '0h 0min' : 'Data inválida';
+  }
+
+  // Tempo de Pega inválido: Desmoldagem <= Enchimento (diff zero também
+  // conta como inválido — desmoldar no mesmo instante do enchimento não é
+  // fisicamente possível, então não faz sentido aceitar). Só considera
+  // inválido quando as DUAS datas estão preenchidas; se alguma estiver
+  // vazia, não bloqueia (nem toda avaliação necessariamente tem as duas
+  // datas preenchidas). Usada por registerEvaluation logo abaixo, como 1ª
+  // camada de prevenção — a rota POST /registrar-avaliacao-qualidade
+  // (server.js) repete a mesma checagem como 2ª camada, pra quem manda
+  // direto pra rota sem passar pela tela não conseguir burlar (mesmo
+  // padrão do bloqueio de avaliação avulsa, ver comentário em
+  // registerEvaluation).
+  function _tempoPegaInvalido() {
+    const s = document.getElementById('sq-dtEnchimento').value;
+    const e = document.getElementById('sq-dtDesmoldagem').value;
+    if (!s || !e) return false;
+    return (new Date(e) - new Date(s)) <= 0;
   }
 
   // Espessura real da operação sendo avaliada — vem de op.dimensao (a

@@ -276,15 +276,15 @@ h4 {
   letter-spacing: .1em;
   text-transform: uppercase;
   color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.topbar-sub {
-  font-size: .72rem;
-  color: var(--text-3);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  border-left: 1px solid var(--border);
-  padding-left: 16px;
+.topbar-logo-mark {
+  height: 22px;
+  width: auto;
+  display: block;
 }
 
 .topbar-right {
@@ -1893,21 +1893,6 @@ td.mono {
   padding: 40px 32px;
 }
 
-.menu-page-header {
-  margin-bottom: 40px;
-}
-
-.menu-page-title {
-  font-size: 2.6rem;
-  margin-bottom: 6px;
-}
-
-.menu-page-subtitle {
-  color: var(--text-3);
-  font-size: .9rem;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-}
 
 .menu-grid {
   display: grid;
@@ -1930,10 +1915,16 @@ td.mono {
   text-decoration: none;
 }
 
-.menu-card:hover {
+.menu-card:hover,
+.menu-card:focus-visible {
   border-color: var(--accent);
   transform: translateY(-3px);
   box-shadow: 0 8px 30px rgba(245, 158, 11, .1);
+}
+
+.menu-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .menu-card-icon {
@@ -1997,10 +1988,6 @@ td.mono {
     flex-wrap: wrap;
     padding: 8px 12px;
     row-gap: 6px;
-  }
-
-  .topbar-sub {
-    display: none;
   }
 
   .topbar-right {
@@ -2072,14 +2059,6 @@ td.mono {
 
   .menu-page-wrap {
     padding: 24px 16px;
-  }
-
-  .menu-page-header {
-    margin-bottom: 24px;
-  }
-
-  .menu-page-title {
-    font-size: 1.9rem;
   }
 }
 
@@ -2851,6 +2830,32 @@ td.mono {
   letter-spacing: .05em;
 }
 
+/* ---- Insights da aba Avaliação — linhas de texto abaixo dos KPIs
+   (ex: principal motivo de reprovação, comparação com a média
+   histórica). Cada insight ocupa 1 linha própria, empilhados. ---- */
+.dbf-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dbf-insight {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px 10px;
+  font-size: .78rem;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.dbf-insight strong {
+  color: var(--text-1);
+}
+
+.dbf-insight .is-green { color: var(--green); font-weight: 700; }
+.dbf-insight .is-red   { color: var(--red); font-weight: 700; }
+
 /* ---- Estados vazios / erro ---- */
 .dbf-empty-state {
   text-align: center;
@@ -2880,6 +2885,16 @@ td.mono {
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-lg);
   padding: 10px 12px;
+}
+
+.dbf-bateria-card-clicavel {
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+
+.dbf-bateria-card-clicavel:hover {
+  background: var(--bg-hover, var(--bg-3));
+  border-color: var(--accent);
 }
 
 .dbf-bateria-head {
@@ -3210,6 +3225,227 @@ td.mono {
   transform: none;
 }
 
+/* Fileira dos botões de modo (🚫 Marcar Não Enchido / 📋 Detalhes do
+   Berço) lado a lado, com quebra de linha num celular estreito. */
+.ba-botoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.ba-dica-detalhes {
+  color: var(--accent);
+}
+
+/* Modo "📋 Detalhes do Berço" ativo (ver _modoDetalhesBerco,
+   bateria-atual.js) — a célula INTEIRA vira clicável (diferente do modo
+   normal, onde só os 2 indicadores reagem), então o cursor/hover mudam
+   pra deixar isso óbvio. */
+.ba-grid-detalhes .ba-celula {
+  cursor: pointer;
+  transition: filter .12s, outline-color .12s;
+}
+
+.ba-grid-detalhes .ba-celula:hover {
+  filter: brightness(1.12);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ============================================================
+   Modal "Detalhes do Berço" — desenho + dados de UM berço específico
+   (ver _abrirDetalhesBerco, bateria-atual.js). Criado dinamicamente
+   (append direto no <body>, removido ao fechar) — mesmo padrão do
+   seletor de motivo do Setor de Qualidade (.sq-motivo-modal-overlay).
+   ============================================================ */
+.ba-detalhes-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .75);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ba-detalhes-box {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .6);
+  padding: 28px;
+  width: 420px;
+  max-width: 94vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.ba-detalhes-fechar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+}
+
+.ba-detalhes-fechar:hover {
+  color: var(--text);
+}
+
+.ba-detalhes-titulo {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--accent);
+  text-align: center;
+  margin: 0 0 18px;
+}
+
+.ba-detalhes-desenho {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 22px;
+}
+
+/* O "desenho" do berço — mesmo espírito visual de .ba-celula (indicador
+   em cima, número no meio, indicador embaixo), só que bem maior, já que
+   aqui é a única célula na tela (não precisa dividir espaço com as
+   outras, ver .ba-grid). */
+.ba-detalhes-celula {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  width: 110px;
+  height: 150px;
+  border-radius: var(--radius-lg);
+  padding: 14px 0;
+  font-weight: 700;
+}
+
+.ba-detalhes-dot {
+  font-size: 1.3rem;
+  opacity: .45;
+}
+
+.ba-detalhes-dot-x {
+  opacity: 1;
+  color: var(--sq-cor-azul, var(--blue));
+  text-shadow: 0 0 6px var(--sq-cor-azul, var(--blue));
+}
+
+/* Indicador marcado como "baixou/vazou" dentro do modal de Detalhes do
+   Berço — mesma cor vermelha usada em .ba-dot-marcado (grade principal
+   de bateria-atual.js) e em relatorio-bercos.js/analise-focada.js, pra
+   manter o mesmo código de cores em toda a aplicação (vermelho =
+   vazamento observado, azul = painel nunca existiu pra avaliar). Antes
+   deste modal só marcava visualmente o "não enchido" (✕), deixando
+   berços com vazamento aparentando estar tudo normal. */
+.ba-detalhes-dot-vazou {
+  opacity: 1;
+  color: var(--red);
+  text-shadow: 0 0 6px var(--red);
+}
+
+.ba-detalhes-label {
+  font-size: 1.05rem;
+}
+
+.ba-detalhes-campos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.ba-det-valor {
+  color: var(--text-2);
+  font-size: .92rem;
+  padding: 8px 0;
+}
+
+.ba-detalhes-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Posição no Palete (dentro de .ba-detalhes-campos, acima) — Direito e
+   Esquerdo lado a lado, cada um com o desenho em miniatura de .ba-palete-mini
+   (ver _baDesenhoPaleteMini, bateria-atual.js). */
+.ba-detalhes-paletes {
+  display: flex;
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.ba-detalhes-palete-lado {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ba-detalhes-palete-lado-label {
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-3);
+}
+
+.ba-palete-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.ba-palete-mini-titulo {
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+/* Pilha do palete inteiro — cada posição é um retângulo empilhado
+   (mesmo espírito visual de .sq-slab-stack/.sq-slab, ver
+   setor-qualidade.css); só a posição que este berço ocupa fica acesa
+   (background/borda na cor do palete, ver BA_CORES_PALETE), as demais
+   ficam acinzentadas. column-reverse pra posição 1 ficar na BASE da
+   pilha (embaixo), empilhando pra cima — igual ao palete físico. */
+.ba-palete-mini-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: 70px;
+}
+
+.ba-palete-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-size: .68rem;
+  font-weight: 600;
+}
+
+.ba-palete-slot-ativo {
+  color: #fff;
+  box-shadow: 0 0 6px rgba(0, 0, 0, .35);
+}
+
 /* ============================================================
    MÓDULO DE PARADAS
    ============================================================ */
@@ -3382,4 +3618,65 @@ td.mono {
   background: rgba(245, 158, 11, .12);
   border-color: var(--accent-dim);
   color: var(--accent);
+}
+
+/* ── Tela de carregamento pós-login (boot) ──────────────────────────────
+   Mesmas classes de login.css (.loading-overlay/.loading-role/etc), de
+   propósito — visual idêntico ao da transição de login, só que aqui ela
+   COBRE de verdade a página até a navegação (menu) e as informações da
+   topbar estarem prontas (ver _finalizarBootUI, app-core.js), em vez de
+   sumir sozinha depois de um tempo fixo, sem relação com o que já
+   carregou de fato. z-index bem alto de propósito: precisa cobrir
+   QUALQUER coisa que já exista no DOM nesse instante do boot (ex: os
+   modais do Setor de Qualidade chegam a z-index:99998). */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s;
+}
+
+.loading-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.loading-role {
+  font-family: 'Barlow Condensed', 'Oswald', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.loading-bar {
+  width: 180px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.loading-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  width: 0%;
+  transition: width .6s ease;
+}
+
+.loading-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .7rem;
+  color: var(--text-2);
+  letter-spacing: .1em;
 }
