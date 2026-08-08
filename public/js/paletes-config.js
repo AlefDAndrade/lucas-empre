@@ -116,7 +116,7 @@ function _pcRenderPreviewAtual() {
   if (!el) return;
   const cap = _pcAbaDimensaoAtiva;
   if (!cap || !_pcRascunho) {
-    el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Cadastre ao menos uma bateria (com nº de berços) pra ver a prévia.</span>';
+    el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Cadastre ao menos uma bateria (com nº de berços) para ver a prévia.</span>';
     return;
   }
 
@@ -152,7 +152,7 @@ function pcAoMudarSelect() {
   });
 
   if (!LW.paletesConfigValida(novo)) {
-    erroEl.textContent = 'Cada palete (01 a 04) precisa ser usado em exatamente 1 quadrante — dois quadrantes não podem apontar pro mesmo palete.';
+    erroEl.textContent = 'Cada palete (01 a 04) precisa ser usado em exatamente 1 quadrante — dois quadrantes não podem apontar para o mesmo palete.';
     erroEl.style.display = 'block';
     return;
   }

@@ -241,6 +241,18 @@
       }, 8000);
     }
 
+    // Garante que a aba clicada/ativada fique visível dentro da faixa de
+    // navegação horizontal (.tabbar-scroll) — necessário porque a barra
+    // rola lateralmente em telas estreitas ou quando há mais abas do que
+    // cabem (ver .tabbar-scroll, styles.css). scrollIntoView com
+    // block:'nearest' evita rolar a página inteira (só desloca o próprio
+    // contêiner com overflow-x), e inline:'nearest' só move o necessário
+    // pra aba aparecer, sem sempre centralizar/colar na borda.
+    function _rolarAbaAtivaParaVisivel(navEl) {
+      if (!navEl || typeof navEl.scrollIntoView !== 'function') return;
+      navEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
     function showPage(pageId, navEl) {
       if (!_paginaPermitida(pageId)) return;
 
@@ -268,9 +280,13 @@
 
       if (navEl) {
         navEl.classList.add('active');
+        _rolarAbaAtivaParaVisivel(navEl);
       } else {
         const btn = document.querySelector(`[data-page="${pageId}"]`);
-        if (btn) btn.classList.add('active');
+        if (btn) {
+          btn.classList.add('active');
+          _rolarAbaAtivaParaVisivel(btn);
+        }
       }
 
       // Init page if needed
@@ -668,8 +684,8 @@
       // reaberto direto no index.html, sem passar pelo auto-login do
       // login.html) — antes de desistir e mandar pro login, tenta
       // restaurar a partir da sessão de USUÁRIO CADASTRADO que ainda
-      // pode estar válida no servidor (cookie lw_usuario_sessao, 12h —
-      // ver lib/sessao-usuario.js e GET /minha-sessao, logo abaixo).
+      // pode estar válida no servidor (cookie lw_usuario_sessao, dura ~10
+      // anos na prática — ver lib/sessao-usuario.js e GET /minha-sessao, logo abaixo).
       // Propositalmente não cobre o Administrador Master aqui: aquela
       // sessão é outro cookie (lib/sessao.js) e continua sempre pedindo
       // a senha de novo (ver AdminAuth/login.html) — nada muda pra ele.
@@ -755,7 +771,7 @@
         // lib/perfis.js) e esconde do menu tudo que não está nela.
         // "data-admin-only" continua exclusivo do Administrador Master de
         // verdade (ações sensíveis dentro de uma página, ex: editar um
-        // registro — ver comentário em nav-sidebar.html/page-menu.html),
+        // registro — ver comentário em nav-tabbar.html/page-menu.html),
         // mesmo perfis com bastante acesso como Administrativo não
         // ganham esses botões.
         document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = 'none');
@@ -827,42 +843,15 @@
       // acontece no clique explícito do usuário no botão).
       if (window.LWPush) LWPush.iniciar();
 
-      // Lógica do botão Sidebar
-      const sidebar = document.querySelector('.sidebar');
-      const backdrop = document.getElementById('sidebar-backdrop');
-      const toggleBtn = document.getElementById('sidebar-toggle');
-
-      const toggleSidebar = () => {
-        const isExpanded = sidebar.classList.toggle('expanded');
-        backdrop.classList.toggle('active', isExpanded);
-        // Sidebar fica fora da tela via transform (translateX), não via
-        // display/visibility — sem "inert" ela continua alcançável pelo
-        // Tab (e pelo leitor de tela) mesmo escondida visualmente. Por
-        // isso sincroniza o inert com o estado de expansão sempre que ele
-        // muda, em vez de só no carregamento inicial.
-        sidebar.inert = !isExpanded;
-        if (isExpanded) sidebar.querySelector('.nav-item')?.focus();
-      };
-
-      toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleSidebar();
-      });
-
-      backdrop.addEventListener('click', () => {
-        sidebar.classList.remove('expanded');
-        backdrop.classList.remove('active');
-        sidebar.inert = true;
-      });
-
-      // Fechar sidebar ao clicar em um item de navegação (melhor UX em mobile/overlay)
-      document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', () => {
-          sidebar.classList.remove('expanded');
-          backdrop.classList.remove('active');
-          sidebar.inert = true;
-        });
-      });
+      // A navegação agora é uma tabbar horizontal sempre visível (ver
+      // nav-tabbar.html) — não é mais um painel off-canvas que precisa
+      // ser aberto/fechado, então não existe mais toggle/backdrop aqui.
+      // O único cuidado que sobra é garantir que a aba ativa esteja
+      // sempre visível dentro da faixa: em telas estreitas (ou com muitas
+      // abas) a barra rola na horizontal (.tabbar-scroll), e trocar de
+      // página com o teclado (atalhos Alt+1..0, ver keyboard-shortcuts.js)
+      // ou por um deep-link não dá nenhum feedback de scroll sozinho —
+      // ver showPage(), que chama _rolarAbaAtivaParaVisivel() no final.
 
       // Navegação (menu, com permissões já aplicadas e página restaurada
       // acima) e informações da topbar (nome, perfil, logo acima) estão
@@ -895,7 +884,6 @@
       { key: 'm2_total', label: 'm² Total', required: false },
       { key: 'm2_2p', label: 'm² 2/P', required: false },
       { key: 'm2_sp', label: 'm² S/P', required: false },
-      { key: 'bercos_reais', label: 'Berços Reais', required: false },
       { key: 'tempo_min', label: 'Tempo (min)', required: false },
       { key: 'placas_cimenticia', label: 'Placas Cimentícia', required: false },
     ];
@@ -942,7 +930,8 @@
     // GET /backups-automaticos exige sessão de Administrador (ver
     // lib/sessao.js), mas essa sessão já foi criada no login como
     // Administrador (mesma senha, ver login.html) — não pedimos de novo
-    // aqui. Se a sessão tiver expirado (30 min, ver lib/sessao.js), o
+    // aqui. Se a sessão tiver expirado (dura ~10 anos na prática, mas o
+    // próprio navegador limita cookies a ~400 dias — ver lib/sessao.js), o
     // servidor responde 403 e mostramos um aviso pedindo pra relogar, em
     // vez de reabrir o modal de senha (ficava redundante com o login).
     function _carregarBackupsAutomaticos() {
@@ -1986,7 +1975,6 @@
             paineis_sp: paineis_por_tipo['sp'] || 0,
             m2_2p: m2_por_tipo['2p'] || 0,
             m2_sp: m2_por_tipo['sp'] || 0,
-            bercos_reais: mapa['bercos_reais'] ? parseInt(row[mapa['bercos_reais']]) || capacidade : capacidade,
             tempo_min: tempoMin,
             // Cimentícia: usa a coluna explícita se mapeada; senão, deriva
             // pela MESMA regra configurável usada em calcPaineis() (data.js) —
@@ -2547,7 +2535,7 @@
           if (!res.ok || !json?.ok) throw new Error(json?.erro || 'Não foi possível excluir. Tente novamente.');
 
           const mensagemSucesso = (ehDesfazerAvaliacao && json.cascata)
-            ? `Avaliação desfeita: ${json.cascata.avaliacoes_qualidade} avaliação(ões), ${json.cascata.avaliacao_paineis} registro(s) de painéis e ${json.cascata.operacoes_avaliadas} marcação(ões) removidos. A operação volta pra fila de avaliação pendente. A página será recarregada.`
+            ? `Avaliação desfeita: ${json.cascata.avaliacoes_qualidade} avaliação(ões), ${json.cascata.avaliacao_paineis} registro(s) de painéis e ${json.cascata.operacoes_avaliadas} marcação(ões) removidos. A operação volta para fila de avaliação pendente. A página será recarregada.`
             : 'Linha excluída com sucesso. A página será recarregada para atualizar todas as telas.';
 
           // Recarrega a página inteira depois de excluir — mesmo motivo de
@@ -2609,7 +2597,7 @@
           // json.cascata com o total de cada tabela afetada, e todas essas
           // operações voltam pra fila de avaliação pendente.
           const mensagemSucesso = json.cascata
-            ? `Limpeza desfez ${json.cascata.avaliacoes_qualidade} avaliação(ões): ${json.cascata.avaliacao_paineis} registro(s) de painéis e ${json.cascata.operacoes_avaliadas} marcação(ões) removidos. Todas essas operações voltam pra fila de avaliação pendente. A página será recarregada.`
+            ? `Limpeza desfez ${json.cascata.avaliacoes_qualidade} avaliação(ões): ${json.cascata.avaliacao_paineis} registro(s) de painéis e ${json.cascata.operacoes_avaliadas} marcação(ões) removidos. Todas essas operações voltam para fila de avaliação pendente. A página será recarregada.`
             : `${json.excluidas} linha(s) excluída(s) de "${labelTabela}". A página será recarregada para atualizar todas as telas.`;
 
           await LW.mostrarAlerta(mensagemSucesso, { tipo: 'sucesso' });
@@ -3592,17 +3580,16 @@
 
     // ---- Editar Operação (admin) — Registro de Baterias ----
     // Só os campos preenchidos manualmente podem ser corrigidos aqui (ID
-    // Bateria, Berços Reais, Tipo de Montagem, Turno, Motivo do Atraso).
-    // Data, início, fim, duração, houve_atraso (calculado a partir do tempo)
-    // e tudo que é calculado (painéis, m², cimentícia) NUNCA são editados
-    // diretamente — recalculados automaticamente quando bateria/berços/tipo
-    // de montagem mudam (ver _eoAtualizarPreview).
+    // Bateria, Tipo de Montagem, Turno, Motivo do Atraso). Data, início,
+    // fim, duração, houve_atraso (calculado a partir do tempo) e tudo que é
+    // calculado (painéis, m², cimentícia) NUNCA são editados diretamente —
+    // recalculados automaticamente quando bateria/tipo de montagem mudam
+    // (ver _eoAtualizarPreview). "Berços Reais" existiu aqui (e em
+    // Registrar Operação) pra declarar uma capacidade reduzida numa
+    // injeção parcial — removido: isso agora se resolve marcando os
+    // berços específicos como "🚫 Não Enchido" em Bateria Atual, DEPOIS do
+    // registro (ver bateria-atual.js), sem precisar reduzir um total aqui.
     let _eoRegistroOriginal = null;
-    // true assim que o admin digitar manualmente em Berços Reais — a partir
-    // daí, trocar de bateria não sobrescreve mais o valor (ver
-    // _eoAoMudarBateria). Evita o bug de "troquei a bateria, voltei pra
-    // original, mas o berço ficou com o valor da bateria errada".
-    let _eoBercosTocadoManualmente = false;
     // Cópia de trabalho da grade berço-a-berço (Montagem Personalizada) —
     // igual à _gradeTrabalho de operacao.js, mas separada dela de
     // propósito: aqui é a edição de uma operação JÁ SALVA, não o rascunho
@@ -3614,7 +3601,6 @@
     function abrirEdicaoOperacao(bateria) {
       if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
       _eoRegistroOriginal = JSON.parse(JSON.stringify(bateria));
-      _eoBercosTocadoManualmente = false;
       _eoBercosPersonalizados = Array.isArray(bateria.bercos_personalizados)
         ? [...bateria.bercos_personalizados]
         : [];
@@ -3648,7 +3634,6 @@
         `<option value="${LW.TIPO_MONTAGEM_PERSONALIZADA}">Personalizada</option>`;
       selTipo.value = bateria.tipo_montagem;
 
-      document.getElementById('eo-bercos-reais').value = bateria.bercos_reais || bateria.capacidade || '';
       document.getElementById('eo-turno').value = bateria.turno || '1º TURNO';
       document.getElementById('eo-motivo-atraso').value = bateria.motivo_atraso || '';
       // Motivo do atraso só faz sentido editar se ESTA operação teve atraso
@@ -3664,25 +3649,10 @@
       _eoRegistroOriginal = null;
     }
 
-    // Disparado ao DIGITAR manualmente em Berços Reais — marca que o admin
-    // assumiu o controle desse campo, então trocar de bateria depois não
-    // deve mais sobrescrever o que ele digitou.
-    function _eoAoEditarBercosManualmente() {
-      _eoBercosTocadoManualmente = true;
-      _eoAtualizarPreview();
-    }
-
-    // Ao trocar a bateria, sugere os berços da bateria nova selecionada —
-    // cobre o caso "registrei B1 mas era B6": berços e dimensão seguem a
-    // bateria certa automaticamente. Sempre que a bateria muda (inclusive
-    // voltando pra original), os berços acompanham — a não ser que o admin
-    // já tenha digitado um valor manual nessa mesma edição.
+    // Ao trocar a bateria, o preview (painéis/m²/cimentícia) recalcula com
+    // a capacidade da bateria nova selecionada — cobre o caso "registrei B1
+    // mas era B6".
     function _eoAoMudarBateria() {
-      const idBateria = document.getElementById('eo-id-bateria').value;
-      const bateriaObj = LW.BATERIA_IDS.find(b => b.id === idBateria);
-      if (bateriaObj && !_eoBercosTocadoManualmente) {
-        document.getElementById('eo-bercos-reais').value = bateriaObj.bercos;
-      }
       _eoAtualizarPreview();
     }
 
@@ -3744,8 +3714,8 @@
     function _eoAtualizarPreview() {
       const idBateria = document.getElementById('eo-id-bateria').value;
       const tipoMontagem = document.getElementById('eo-tipo-montagem').value;
-      const bercos = parseInt(document.getElementById('eo-bercos-reais').value) || 0;
       const bateriaObj = LW.BATERIA_IDS.find(b => b.id === idBateria);
+      const bercos = bateriaObj?.bercos || 0;
 
       _eoAtualizarBotaoBercos();
 
@@ -3764,7 +3734,6 @@
 
       const idBateria = document.getElementById('eo-id-bateria').value;
       const tipoMontagem = document.getElementById('eo-tipo-montagem').value;
-      const bercos = parseInt(document.getElementById('eo-bercos-reais').value) || 0;
       const turno = document.getElementById('eo-turno').value;
       // houve_atraso NÃO é editável (calculado a partir do tempo da
       // operação) — o motivo só é salvo se a operação JÁ tinha atraso.
@@ -3774,20 +3743,19 @@
 
       if (!idBateria) { LW.mostrarAlerta('Selecione a bateria.', { tipo: 'aviso' }); return; }
       if (!tipoMontagem) { LW.mostrarAlerta('Selecione o tipo de montagem.', { tipo: 'aviso' }); return; }
-      if (!bercos || bercos < 1) { LW.mostrarAlerta('Informe a quantidade de berços reais.', { tipo: 'aviso' }); return; }
       if (tipoMontagem === LW.TIPO_MONTAGEM_PERSONALIZADA && (!_eoBercosPersonalizados.length || _eoBercosPersonalizados.every(t => !t))) {
         LW.mostrarAlerta('Configure os berços da Montagem Personalizada antes de salvar (botão 🔧 Configurar Berços).', { tipo: 'aviso' });
         return;
       }
 
       const bateriaObj = LW.BATERIA_IDS.find(b => b.id === idBateria);
+      const bercos = bateriaObj?.bercos || 0;
       const calc = _eoCalcularPaineis(tipoMontagem, bercos);
 
       const novosValores = {
         id_bateria: idBateria,
         dimensao: bateriaObj?.label || _eoRegistroOriginal.dimensao,
         capacidade: bateriaObj?.bercos || _eoRegistroOriginal.capacidade,
-        bercos_reais: bercos,
         tipo_montagem: tipoMontagem,
         turno,
         motivo_atraso: motivoAtraso,
@@ -3992,7 +3960,7 @@
     function _etRenderAjustes() {
       const cont = document.getElementById('et-lista-ajustes');
       if (!_etAjustesAtuais.length) {
-        cont.innerHTML = '<div style="color:var(--text-3);font-size:.82rem;padding:8px 0">Nenhum ajuste registrado pra este traço.</div>';
+        cont.innerHTML = '<div style="color:var(--text-3);font-size:.82rem;padding:8px 0">Nenhum ajuste registrado para este traço.</div>';
         return;
       }
       const CAMPOS = [

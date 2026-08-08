@@ -135,7 +135,7 @@
     }
     if (!candidatos.length) {
       if (resultadosEl) {
-        resultadosEl.innerHTML = `<div style="color:var(--text-3);font-size:.85rem">Nenhuma operação encontrada pra "${LW.escaparHtml(q)}".</div>`;
+        resultadosEl.innerHTML = `<div style="color:var(--text-3);font-size:.85rem">Nenhuma operação encontrada para "${LW.escaparHtml(q)}".</div>`;
       }
       return;
     }
@@ -211,7 +211,6 @@
       <div class="af-campo"><div class="af-label">Início — Fim</div><div class="af-valor mono">${_fmtHora(op.inicio)} — ${_fmtHora(op.fim)}</div></div>
       <div class="af-campo"><div class="af-label">Turno</div><div class="af-valor">${LW.escaparHtml(op.turno || '—')}</div></div>
       <div class="af-campo"><div class="af-label">Dimensão</div><div class="af-valor">${LW.escaparHtml(op.dimensao || '—')}</div></div>
-      <div class="af-campo"><div class="af-label">Berços Reais</div><div class="af-valor">${op.bercos_reais ?? '—'}</div></div>
       <div class="af-campo"><div class="af-label">Atraso</div><div class="af-valor">${atrasoHtml}</div></div>
     `;
   }
@@ -235,20 +234,17 @@
   //  (.ba-detalhes-*, styles.css), mas SEM o campo de Dimensão editável
   //  nem o botão Salvar: esta é uma operação já REGISTRADA, não faz
   //  sentido editar berço a berço por aqui (quem precisa corrigir usa
-  //  "Editar Operação"). Os helpers abaixo (_afCapacidade.../
-  //  _afPaleteDoBerco/_afDesenhoPaleteMini/AF_CORES_PALETE) são cópias
-  //  das equivalentes em bateria-atual.js — duplicadas de propósito,
+  //  "Editar Operação"). O helper abaixo (_afCapacidadeConfigurada/
+  //  _afPaleteDoBerco/_afDesenhoPaleteMini/AF_CORES_PALETE) é cópia
+  //  das equivalentes em bateria-atual.js — duplicada de propósito,
   //  mesmo padrão já usado no resto deste arquivo (_corPorTipoBerco,
   //  acima), pra não acoplar esta tela à de Registro.
   // ============================================================
 
-  function _afCapacidade(op) {
-    const bateria = (LW.BATERIA_IDS || []).find(b => b.id === op.id_bateria);
-    return parseInt(op.bercos_reais) || (bateria?.bercos || 0);
-  }
-
-  // SEMPRE o nº de berços CADASTRADO pra bateria (nunca bercos_reais) —
-  // mesma distinção de _baCapacidadeConfigurada (bateria-atual.js).
+  // SEMPRE o nº de berços CADASTRADO pra bateria — não existe mais uma
+  // capacidade "declarada" separada (bercos_reais foi removido; um berço
+  // que não vai ser usado agora se marca individualmente como 🚫 Não
+  // Enchido, não muda o total da bateria).
   function _afCapacidadeConfigurada(op) {
     const bateria = (LW.BATERIA_IDS || []).find(b => b.id === op.id_bateria);
     return bateria?.bercos || 0;
@@ -342,7 +338,7 @@
         : op.bercos_dimensoes;
     }
 
-    const capacidade = _afCapacidade(op);
+    const capacidade = _afCapacidadeConfigurada(op);
     const tipos = _afTiposPorBerco(op, capacidade, gradePersonalizada, ehPersonalizada);
     const tipoAtualCodigo = tipos[numeroBerco - 1] || null;
     const cor = _corPorTipoBerco(ehPersonalizada, tipoAtualCodigo);
@@ -364,7 +360,7 @@
     const traco = _afTracoDoBerco(tracos, numeroBerco);
     const labelTraco = traco ? `Traço Nº ${LW.escaparHtml(String(traco.num_traco ?? traco.id_traco))}` : 'Não identificado';
 
-    const capacidadePalete = _afCapacidadeConfigurada(op);
+    const capacidadePalete = capacidade;
     const posicaoDireito = _afPaleteDoBerco(numeroBerco, 'direito', capacidadePalete);
     const posicaoEsquerdo = _afPaleteDoBerco(numeroBerco, 'esquerdo', capacidadePalete);
 
@@ -607,6 +603,13 @@
       </div>`;
   }
 
+  // Formata um valor de leitura de Densidade/Flow pro texto exibido dentro
+  // da linha de ajuste — sem casas decimais inúteis (densidade é sempre
+  // inteiro na prática, flow tem 1 casa).
+  function _fmtLeitura(v, casas) {
+    return (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '—' : Number(v).toFixed(casas);
+  }
+
   // ── Receita utilizada (traços + ajustes) ─────────────────────
   function _renderReceita(tracos, bercosVisuais) {
     const el = document.getElementById('af-receita');
@@ -617,11 +620,24 @@
     }
     const resumoHtml = _renderResumoTracos(tracos, bercosVisuais);
     el.innerHTML = resumoHtml + tracos.map(t => {
-      const semAjuste = !t.ajustes.length;
+      const densidadeLeituras = t.densidade_leituras || [];
+      const flowLeituras = t.flow_leituras || [];
+      // Nº de linhas da seção de ajustes = o maior entre ajustes de insumo
+      // (ajustes_tracos.json, com evento/timestamp) e leituras de
+      // densidade/flow (leituras_resultado, soltas — SEM evento/timestamp
+      // associado). O alinhamento entre a linha N e a N-ésima leitura de
+      // densidade/flow é posicional (por ordem), não uma correlação real
+      // de "isso aconteceu junto com aquilo" — mesma ressalva de
+      // _construirTabelaAjustesPorEvento, dashboard.js.
+      const numLinhas = Math.max(t.ajustes.length, densidadeLeituras.length, flowLeituras.length);
+      const semAjuste = numLinhas === 0;
       const camposReceita = [
         ['Cimento', _fmtKg(t.original.cimento), 'kg'],
         ['Água', _fmtKg(t.original.agua), 'kg'],
         ['EPS', _fmtKg(t.original.eps), 'kg'],
+        ['Densidade EPS', t.densidade_eps || null, 'kg/m³'],
+        ['Silo EPS', t.silo || null, ''],
+        ['Expansão', t.expansao || null, ''],
         ['Superplast.', _fmtKg(t.original.superplast), 'kg'],
         ['Incorp. de Ar', _fmtKg(t.original.incorporador), 'kg'],
         ['Tempo de Batida', _fmtTempoBatidaOriginal(t.original.tempo_batida), ''],
@@ -637,17 +653,24 @@
       const ajustesHtml = semAjuste
         ? `<div class="af-sem-ajuste">Receita sem ajuste.</div>`
         : `<div class="af-ajustes-wrap">
-             <div class="af-ajustes-titulo">${t.ajustes.length} ajuste${t.ajustes.length > 1 ? 's' : ''} de receita</div>
-             ${t.ajustes.map(a => `
-               <div class="af-ajuste-linha">
-                 <strong>Ajuste ${a.ordem}</strong>
-                 <span>⏱ +${a.tempo_batida}min</span>
-                 ${a.cimento ? `<span>Cimento +${_fmtKg(a.cimento)}kg</span>` : ''}
-                 ${a.agua ? `<span>Água +${_fmtKg(a.agua)}kg</span>` : ''}
-                 ${a.eps ? `<span>EPS +${_fmtKg(a.eps)}kg</span>` : ''}
-                 ${a.superplast ? `<span>Superplast. +${_fmtKg(a.superplast)}kg</span>` : ''}
-                 ${a.incorporador ? `<span>Incorp. +${_fmtKg(a.incorporador)}kg</span>` : ''}
-               </div>`).join('')}
+             <div class="af-ajustes-titulo">${numLinhas} ajuste${numLinhas > 1 ? 's' : ''} de receita</div>
+             ${Array.from({ length: numLinhas }, (_, i) => {
+               const a = t.ajustes[i];
+               const dens = densidadeLeituras[i];
+               const flow = flowLeituras[i];
+               return `
+                 <div class="af-ajuste-linha">
+                   <strong>Ajuste ${a ? a.ordem : i + 1}</strong>
+                   ${a ? `<span>⏱ +${a.tempo_batida}min</span>` : ''}
+                   ${a?.cimento ? `<span>Cimento +${_fmtKg(a.cimento)}kg</span>` : ''}
+                   ${a?.agua ? `<span>Água +${_fmtKg(a.agua)}kg</span>` : ''}
+                   ${a?.eps ? `<span>EPS +${_fmtKg(a.eps)}kg</span>` : ''}
+                   ${a?.superplast ? `<span>Superplast. +${_fmtKg(a.superplast)}kg</span>` : ''}
+                   ${a?.incorporador ? `<span>Incorp. +${_fmtKg(a.incorporador)}kg</span>` : ''}
+                   ${dens !== undefined ? `<span>Densidade ${_fmtLeitura(dens, 0)} kg/m³</span>` : ''}
+                   ${flow !== undefined ? `<span>Flow ${_fmtLeitura(flow, 1)}</span>` : ''}
+                 </div>`;
+             }).join('')}
            </div>`;
 
       const origemHtml = t._origem
@@ -696,6 +719,10 @@
   function _renderParadas(paradas) {
     const el = document.getElementById('af-paradas');
     if (!el) return;
+    // Contador ao lado do título — visível mesmo com o <details> fechado,
+    // pra dar uma pista do que tem lá dentro sem precisar expandir.
+    const contagem = document.getElementById('af-paradas-contagem');
+    if (contagem) contagem.textContent = paradas.length ? `(${paradas.length})` : '(nenhuma)';
     if (!paradas.length) {
       el.innerHTML = `<div class="sq-empty-af"><i class="fas fa-inbox"></i> Nenhuma parada registrada durante esta operação.</div>`;
       return;
@@ -830,13 +857,56 @@
 
   // ── Exportar Dashboard Interativo (HTML standalone) ───────────────────────
   // Diferente dos outros dashboards (sem período/filtro aqui — é sobre UMA
-  // operação só): embute o detalhe já carregado (LW.getDetalheOperacao) e
-  // as mesmas funções de render via toString(), virando um retrato
-  // autossuficiente dessa operação específica — sem filtro pra aplicar,
-  // "interativo" aqui significa só "abre em qualquer navegador, offline,
+  // ou VÁRIAS operações específicas, nunca um período arbitrário): embute
+  // o(s) detalhe(s) já carregado(s) (LW.getDetalheOperacao) e as mesmas
+  // funções de render via toString(), virando um retrato autossuficiente
+  // — "interativo" aqui significa só "abre em qualquer navegador, offline,
   // com a mesma formatação".
+  //
+  // Ponto de entrada público (botão "🌐 Exportar Interativo" e atalho de
+  // teclado, ver keyboard-shortcuts.js) — pergunta ao usuário qual das 2
+  // exportações ele quer e delega pra _exportarSimples/_exportarDoDia,
+  // abaixo. Mantido com este mesmo nome pra não quebrar quem já chama
+  // LWFocada.exportarInterativo() de fora.
   async function exportarInterativo() {
-    if (!_idAtual) return;
+    // Antes saía de cara se não houvesse operação carregada (_idAtual),
+    // deixando o botão parecendo morto mesmo pra quem só queria "Do Dia"
+    // (que nem depende de operação selecionada — roda em cima de uma data
+    // escolhida no calendário). Agora o botão sempre abre o menu de
+    // escolha; só a opção "Simples" (que exporta A operação atual) exige
+    // _idAtual, e avisa em vez de falhar em silêncio.
+    const escolha = await LW.mostrarEscolha(
+      'Como você quer exportar esta Análise Focada?',
+      {
+        titulo: '🌐 Exportar Interativo',
+        icon: '🌐',
+        itens: [
+          { valor: 'simples', texto: '📄 Exportação Simples', desc: 'Só esta operação, do jeito que já era.' },
+          { valor: 'dia', texto: '📅 Do Dia', desc: 'Escolha uma data — todas as operações feitas nela.' },
+        ],
+        textoCancelar: 'Cancelar',
+      }
+    );
+    if (!escolha) return;
+    if (escolha === 'simples') {
+      if (!_idAtual) {
+        if (LW.mostrarAlerta) LW.mostrarAlerta('Selecione uma operação primeiro para usar a Exportação Simples.', { tipo: 'erro' });
+        return;
+      }
+      await _exportarSimples();
+      return;
+    }
+    // "Do Dia" pede a data ANTES de exportar — sugere a data da operação
+    // atualmente aberta (_ultimoDetalhe, preenchido por render()), mas o
+    // usuário pode trocar livremente pelo calendário do <input type="date">.
+    const dataSugerida = _ultimoDetalhe?.operacao?.data || '';
+    const dataEscolhida = await _escolherDataDoDia(dataSugerida);
+    if (!dataEscolhida) return;
+    await _exportarDoDia(dataEscolhida);
+  }
+
+  // ── Exportação Simples — comportamento original: só a operação atual. ──
+  async function _exportarSimples() {
     const btn = document.getElementById('btn-af-exportar');
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
     try {
@@ -851,6 +921,123 @@
       );
     } catch (err) {
       console.error('Falha ao exportar Análise Focada:', err);
+      if (LW.mostrarAlerta) LW.mostrarAlerta('Não consegui gerar o arquivo agora.', { tipo: 'erro' });
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🌐 Exportar Interativo'; }
+    }
+  }
+
+  // ── Modal de escolha de data pra Exportação "Do Dia" — um <input
+  // type="date"> nativo (mesmo padrão de campo de data já usado no resto
+  // do app — ver page-registro.html, page-oee.html etc.), que abre o
+  // calendário do próprio navegador/SO. Pré-preenchido com `dataSugerida`
+  // (a data da operação que estava aberta), mas 100% editável.
+  // @param {string} dataSugerida - 'YYYY-MM-DD' ou '' se não houver uma óbvia.
+  // @returns {Promise<string|null>} 'YYYY-MM-DD' escolhida, ou null se cancelado (Cancelar, Esc ou clique fora).
+  function _escolherDataDoDia(dataSugerida) {
+    return new Promise(resolve => {
+      const anterior = document.getElementById('modal-af-data-dia');
+      if (anterior) anterior.remove();
+
+      const modal = document.createElement('div');
+      modal.id = 'modal-af-data-dia';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10100;display:flex;align-items:center;justify-content:center;padding:20px';
+
+      modal.innerHTML = `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                    padding:32px;width:380px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+          <div style="text-align:center;margin-bottom:16px">
+            <div style="font-size:2.2rem;margin-bottom:8px">📅</div>
+            <h2 style="font-family:var(--font-display);font-size:1.3rem;color:var(--text);margin:0">Exportar do Dia</h2>
+          </div>
+          <p style="color:var(--text-2);text-align:center;margin-bottom:16px;line-height:1.5">Escolha a data — todas as operações feitas nela entram no arquivo.</p>
+          <input type="date" id="af-data-dia-input" class="form-input" value="${LW.escaparHtml(dataSugerida)}"
+            style="width:100%;margin-bottom:24px;text-align:center;font-size:1rem;padding:10px">
+          <div style="display:flex;gap:12px">
+            <button id="af-data-dia-confirmar"
+              style="flex:1;padding:12px;background:var(--accent);color:#000;border:none;border-radius:var(--radius);
+                     font-weight:700;font-size:.9rem;cursor:pointer">
+              Exportar
+            </button>
+            <button id="af-data-dia-cancelar"
+              style="flex:1;padding:12px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                     border-radius:var(--radius);font-size:.9rem;cursor:pointer">
+              Cancelar
+            </button>
+          </div>
+        </div>`;
+
+      document.body.appendChild(modal);
+      const input = document.getElementById('af-data-dia-input');
+
+      const fechar = (resultado) => {
+        modal.remove();
+        document.removeEventListener('keydown', onKeydown);
+        resolve(resultado);
+      };
+      const onKeydown = (e) => {
+        if (e.key === 'Escape') fechar(null);
+        if (e.key === 'Enter') fechar(input.value || null);
+      };
+
+      document.getElementById('af-data-dia-confirmar').addEventListener('click', () => fechar(input.value || null));
+      document.getElementById('af-data-dia-cancelar').addEventListener('click', () => fechar(null));
+      modal.addEventListener('click', (e) => { if (e.target === modal) fechar(null); });
+      document.addEventListener('keydown', onKeydown);
+      input.focus();
+    });
+  }
+
+  // ── Exportação "Do Dia" — uma Análise Focada completa para CADA
+  // operação feita na `dataAlvo` escolhida (ver _escolherDataDoDia,
+  // acima), empilhadas numa página só. Reaproveita _gerarHtmlAfStandalone
+  // (a mesma peça usada pela Exportação Simples) pra montar cada bloco
+  // individual — cada operação vira um <iframe srcdoc="..."> com o MESMO
+  // documento autossuficiente que sairia se fosse exportada sozinha, só
+  // embutido dentro de uma página "casca" que os empilha um embaixo do
+  // outro. srcdoc é tratado como MESMA ORIGEM da página que o criou (spec
+  // do HTML), então dá pra ler contentWindow.document de dentro pra fora
+  // sem CORS, mesmo abrindo o arquivo exportado localmente (file://) —
+  // é assim que cada iframe se auto-ajusta de altura (ver _gerarHtmlAfDoDia).
+  // @param {string} dataAlvo - 'YYYY-MM-DD' escolhida no calendário.
+  async function _exportarDoDia(dataAlvo) {
+    const btn = document.getElementById('btn-af-exportar');
+    if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
+    try {
+      await _carregarCaches();
+
+      const opsDoDia = _cacheHistorico
+        .filter(op => op.data === dataAlvo)
+        .sort((a, b) => (a.inicio || '').localeCompare(b.inicio || ''));
+
+      if (!opsDoDia.length) { if (LW.mostrarAlerta) LW.mostrarAlerta(`Não encontrei nenhuma operação em ${_fmtData(dataAlvo)}.`, { tipo: 'erro' }); return; }
+
+      const detalhesDetalhados = await Promise.all(opsDoDia.map(async op => {
+        const detalhe = await LW.getDetalheOperacao(op.id);
+        return { op, detalhe };
+      }));
+
+      const itens = detalhesDetalhados
+        .filter(({ detalhe }) => !!detalhe)
+        .map(({ op, detalhe }) => {
+          _anotarOrigemEReaproveitamento(detalhe.tracos, op.id);
+          const paradasDaJanela = _paradasNaJanela(_cacheParadas, detalhe.operacao?.inicio, detalhe.operacao?.fim);
+          return {
+            id: detalhe.operacao?.id || op.id,
+            label: `${detalhe.operacao?.id_bateria || '—'} · ${_fmtHora(detalhe.operacao?.inicio)} — ${_fmtHora(detalhe.operacao?.fim)} · ${detalhe.operacao?.turno || '—'}`,
+            html: _gerarHtmlAfStandalone(detalhe, paradasDaJanela),
+          };
+        });
+
+      if (!itens.length) { if (LW.mostrarAlerta) LW.mostrarAlerta('Não consegui carregar os dados das operações deste dia.', { tipo: 'erro' }); return; }
+
+      const html = _gerarHtmlAfDoDia(dataAlvo, itens);
+      LW.baixarArquivoTexto(
+        `analise_focada_dia_${String(dataAlvo || 'data').replace(/[^a-zA-Z0-9_-]/g, '_')}.html`,
+        html
+      );
+    } catch (err) {
+      console.error('Falha ao exportar Análise Focada do Dia:', err);
       if (LW.mostrarAlerta) LW.mostrarAlerta('Não consegui gerar o arquivo agora.', { tipo: 'erro' });
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '🌐 Exportar Interativo'; }
@@ -913,6 +1100,15 @@
   .badge-blue { background:rgba(59,130,246,.15); color:#93c5fd; }
   .badge-red { background:rgba(239,68,68,.15); color:#fecaca; }
   .mono { font-family:var(--font-mono); }
+  /* Paradas Nesta Janela — retrátil, fechado por padrão (mesmo tratamento da tela ao vivo) */
+  details.chart-box { padding:0; }
+  details.chart-box > summary { padding:16px; margin:0; cursor:pointer; user-select:none; list-style:none; }
+  details.chart-box > summary::-webkit-details-marker { display:none; }
+  details.chart-box > summary::after { content:'▸'; float:right; color:var(--text-3); transition:transform .15s ease; }
+  details.chart-box[open] > summary { border-bottom:1px solid var(--border); }
+  details.chart-box[open] > summary::after { transform:rotate(90deg); }
+  details.chart-box > div { padding:16px; }
+  #af-paradas-contagem { text-transform:none; letter-spacing:normal; font-weight:400; }
 </style>
 </head>
 <body>
@@ -922,7 +1118,7 @@
   <div class="chart-box" style="margin-bottom:14px"><h4>Identificação</h4><div id="af-cabecalho" class="af-cabecalho-grid"></div></div>
   <div class="chart-box" style="margin-bottom:14px"><h4>📍 Berços</h4><div id="af-bercos"></div></div>
   <div class="chart-box" style="margin-bottom:14px"><h4>🧪 Receita Utilizada</h4><div id="af-receita"></div></div>
-  <div class="chart-box" style="margin-bottom:14px"><h4>🛑 Paradas Nesta Janela</h4><div id="af-paradas"></div></div>
+  <details class="chart-box" style="margin-bottom:14px"><summary><h4 style="display:inline;border:none;padding:0">🛑 Paradas Nesta Janela</h4> <span id="af-paradas-contagem"></span></summary><div id="af-paradas"></div></details>
   <div class="chart-box"><h4>✅ Avaliação de Qualidade</h4><div id="af-avaliacao"></div></div>
 
   <div class="rodape">Exportado da Análise Focada — Lightwall SC · dados embutidos neste arquivo, funciona offline. Cores de tipo de montagem são aproximadas (não refletem necessariamente a cor configurada na tela ao vivo). Os badges de "Origem"/"Reaproveitado depois em" são só informativos aqui — abrir a outra operação exige a tela ao vivo.</div>
@@ -951,6 +1147,7 @@
   ${_bercosEnchidosDoTraco}
   ${_calcularResumoTracos}
   ${_renderResumoTracos}
+  ${_fmtLeitura}
   ${_renderReceita}
   ${_renderParadas}
   ${_labelPainel}
@@ -962,6 +1159,79 @@
   _renderReceita(DETALHE.tracos, DETALHE.bercosVisuais);
   _renderParadas(PARADAS);
   _renderAvaliacao(DETALHE.avaliacao);
+})();
+</script>
+</body>
+</html>`;
+  }
+
+  // ── Página "casca" da exportação "Do Dia" — empilha um <iframe> por
+  // operação (cada um recebendo, via .srcdoc, o MESMO HTML autossuficiente
+  // que _gerarHtmlAfStandalone gera pra Exportação Simples), com um
+  // índice no topo pra pular direto pra qualquer operação. Cada iframe se
+  // auto-ajusta de altura no load (mede o scrollHeight do documento de
+  // dentro) — sem isso ficaria com scroll interno, quebrando a ideia de
+  // "uma embaixo da outra" numa página só.
+  function _gerarHtmlAfDoDia(dataISO, itens) {
+    // As strings de cada operação já têm <script> internos (ver
+    // _gerarHtmlAfStandalone) — mesma proteção contra fechar o <script>
+    // externo cedo demais já usada lá pros blobs de dados.
+    const itensJson = JSON.stringify(itens.map(it => it.html)).replace(/<\/script/gi, '<\\/script');
+    const dataFmt = _fmtData(dataISO);
+
+    const indice = itens.map((it, i) => `
+      <a href="#op-${i}" style="display:block;padding:8px 12px;border-radius:var(--radius);color:var(--text-2);text-decoration:none;font-size:.82rem;border:1px solid var(--border);margin-bottom:6px">
+        <strong style="color:var(--text)">${String(i + 1).padStart(2, '0')}.</strong>
+        ${LW.escaparHtml(it.label)}
+      </a>`).join('');
+
+    const secoes = itens.map((it, i) => `
+      <div class="af-op-section" id="op-${i}" style="margin-bottom:32px;scroll-margin-top:16px">
+        <div style="font-size:.78rem;color:var(--text-3);margin-bottom:8px">Operação ${i + 1} de ${itens.length} · ${LW.escaparHtml(it.label)}</div>
+        <iframe id="af-frame-${i}" title="Análise Focada — ${LW.escaparHtml(it.label)}"
+          style="width:100%;border:1px solid var(--border);border-radius:var(--radius-lg);display:block;background:transparent"
+          scrolling="no"></iframe>
+      </div>`).join(itens.length > 1 ? '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0 32px">' : '');
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Análise Focada — Dia ${LW.escaparHtml(dataFmt)} — Exportado</title>
+<style>${LW.gerarCssExportPadrao()}
+  .af-indice { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0; margin-bottom:24px; }
+</style>
+</head>
+<body>
+  <h1>🔎 Análise Focada — Todas as Operações do Dia ${LW.escaparHtml(dataFmt)}</h1>
+  <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')} · ${itens.length} operaç${itens.length === 1 ? 'ão' : 'ões'} neste dia</div>
+
+  <div class="chart-box" style="margin-bottom:24px">
+    <h4>Índice</h4>
+    <div class="af-indice">${indice}</div>
+  </div>
+
+  ${secoes}
+
+  <div class="rodape">Exportado da Análise Focada — Lightwall SC · dados embutidos neste arquivo, funciona offline. Cada bloco acima é o mesmo arquivo que sairia pela Exportação Simples daquela operação.</div>
+
+<script>
+(function () {
+  'use strict';
+  const HTMLS = ${itensJson};
+  HTMLS.forEach(function (html, i) {
+    const frame = document.getElementById('af-frame-' + i);
+    if (!frame) return;
+    frame.addEventListener('load', function () {
+      try {
+        const doc = frame.contentWindow.document;
+        const altura = Math.max(doc.documentElement.scrollHeight, doc.body ? doc.body.scrollHeight : 0);
+        frame.style.height = (altura + 24) + 'px';
+      } catch (e) { frame.style.height = '600px'; }
+    });
+    frame.srcdoc = html;
+  });
 })();
 </script>
 </body>

@@ -411,7 +411,7 @@
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.erro || 'Erro ao renotificar.');
-      toast('Notificação reenviada pra quem pode aceitar o chamado.');
+      toast('Notificação reenviada para quem pode aceitar o chamado.');
     } catch (e) {
       toast('Erro ao renotificar: ' + e.message, 'error');
     } finally {
@@ -433,7 +433,7 @@
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.erro || 'Erro ao renotificar.');
-      toast('Notificação reenviada pra quem pode aceitar o pedido de peça.');
+      toast('Notificação reenviada para quem pode aceitar o pedido de peça.');
     } catch (e) {
       toast('Erro ao renotificar: ' + e.message, 'error');
     } finally {
@@ -495,7 +495,7 @@
       await carregarManutencoesDoServidor();
       toast(aceitaRecusa
         ? 'Recusa aceita — chamado encerrado.'
-        : 'Recusa negada — chamado devolvido pra Manutenção dar prosseguimento.');
+        : 'Recusa negada — chamado devolvido para Manutenção dar prosseguimento.');
       renderCorretiva();
       if (!aceitaRecusa) editarManutencao(id); // se encerrou, o form nem reabre (etiqueta fechada)
       else fecharFormulario();
@@ -820,6 +820,15 @@
         tempoSupervisaoNumerico = Math.floor(diffMs / 1000 / 60);
       }
 
+      // "Peça recebida" sem Data Fim do Acompanhamento preenchida deixava
+      // o registro incompleto (ver conversa que motivou isso — mesma
+      // trava reforçada no servidor, em lib/rotas/manutencao.js).
+      const statusCompraAtual = document.getElementById('man-manStatusCompra')?.value || '';
+      if (statusCompraAtual === 'Peça recebida' && !supDtF) {
+        toast('Informe a Data Fim do Acompanhamento (Supervisão) antes de marcar "Peça recebida".', 'error');
+        return;
+      }
+
       const fotoOperadorPreview = document.getElementById('man-fotoOperadorPreview');
       let fotoOperador = '';
       if (fotoOperadorPreview.style.display !== 'none') {
@@ -915,11 +924,24 @@
     if(!id) { toast('Salve o chamado antes de fechá-lo.', 'error'); return; }
     const chamado = manutencoes.find(m => m.id === id);
     if(!chamado) { toast('Erro ao carregar dados.', 'error'); return; }
-    
+
     const dtI = document.getElementById('man-manDataInicio')?.value;
     const hrI = document.getElementById('man-manHoraInicio')?.value;
     const dtF = document.getElementById('man-manDataFim')?.value;
     const hrF = document.getElementById('man-manHoraFim')?.value;
+
+    // Data Fim (Execução) obrigatória pra fechar — antes, se estivesse
+    // vazia, era preenchida sozinha com a data/hora atual no momento da
+    // confirmação (ver confirmarFechamento()), o que deixava passar
+    // etiquetas fechadas sem ninguém realmente ter informado o término
+    // (ver conversa que motivou isso). Checado aqui, ANTES de abrir o
+    // modal de resumo, pra dar feedback imediato — reforçado de novo em
+    // confirmarFechamento() (2ª camada) e no servidor (validação real).
+    if (!dtF) {
+      toast('Informe a Data Fim (Execução) antes de fechar a etiqueta.', 'error');
+      return;
+    }
+
     let tempoExibido = chamado.tempoGasto;
     if (dtI && hrI && dtF && hrF) {
         let diffMin = Math.floor((new Date(`${dtF}T${hrF}`) - new Date(`${dtI}T${hrI}`)) / 1000 / 60);
@@ -950,13 +972,23 @@
     const id = document.getElementById('man-manId')?.value;
     const chamado = manutencoes.find(m => m.id === id);
     if(!chamado) return;
+
+    // Mesma checagem de abrirModalFechamento() (2ª camada — o modal só
+    // deveria abrir com a Data Fim já preenchida, mas confere de novo
+    // aqui, igual ao resto do app faz). Lê do FORMULÁRIO, não do
+    // `chamado` em cache, pra pegar o valor mais recente digitado.
+    const dtF = document.getElementById('man-manDataFim')?.value || '';
+    const hrF = document.getElementById('man-manHoraFim')?.value || '';
+    if (!dtF) {
+      toast('Informe a Data Fim (Execução) antes de fechar a etiqueta.', 'error');
+      fecharModal();
+      return;
+    }
+
     chamado.etiquetaFechada = true;
     chamado.situacao = 'Concluido';
-    if(!chamado.dataFim) {
-      const agora = new Date();
-      chamado.dataFim = agora.toISOString().split('T')[0];
-      chamado.horaFim = agora.toLocaleTimeString('pt-BR', { hour12: false });
-    }
+    chamado.dataFim = dtF;
+    chamado.horaFim = hrF;
     try {
       const res = await fetch('/manutencao/corretiva', {
         method: 'POST',
@@ -1371,7 +1403,7 @@
     const miniTrajetoria = _renderizarTrajetoria(_construirPassosTrajetoria(m));
     return `<div class="man-kanban-card" onclick="editarManutencao('${m.id}')"
         onmouseenter="_mostrarPreviewTrajetoria(event,'${m.id}')" onmousemove="_mostrarPreviewTrajetoria(event,'${m.id}')" onmouseleave="_esconderPreviewTrajetoria()"
-        title="Segure Ctrl + passe o mouse pra pré-visualizar a trajetória">
+        title="Segure Ctrl + passe o mouse para pré-visualizar a trajetória">
       <div class="man-kanban-card-head">
         <span><i class="fas fa-hashtag"></i> ${esc(m.id)}</span>
         <span class="dot" style="background:${_corPrioridade(m.prioridade || 'BAIXA')}" title="Prioridade ${esc(m.prioridade || '-')}"></span>
@@ -1710,7 +1742,7 @@
     const _podeFecharChamado = typeof _perfilPodeEditar === 'function' ? _perfilPodeEditar('manutencao') : true;
     alvo.innerHTML = `
       <div class="man-fechamento-resumo">
-        <p style="color:var(--text-2); font-size:13px; margin-bottom:12px;"><i class="fas fa-check-circle" style="color:var(--green);"></i> Situação Concluído — pronto pra fechar a etiqueta. Confira o resumo antes de confirmar.</p>
+        <p style="color:var(--text-2); font-size:13px; margin-bottom:12px;"><i class="fas fa-check-circle" style="color:var(--green);"></i> Situação Concluído — pronto para fechar a etiqueta. Confira o resumo antes de confirmar.</p>
         ${_podeFecharChamado
           ? `<button type="button" class="man-btn man-btn-warning" onclick="abrirModalFechamento()"><i class="fas fa-lock"></i> Fechar Chamado</button>`
           : `<div class="man-fechamento-aviso"><i class="fas fa-lock"></i> Seu perfil não pode fechar chamados de manutenção.</div>`}
@@ -2361,8 +2393,22 @@
     if (!_podeEditarManutProg) {
       // Visualização — sem ações de aprovar/reprovar/iniciar/finalizar,
       // que exigem a área 'manutencao' completa (ver lib/perfis.js).
-    } else if(a.status === 'Aprovado' || a.status === 'Pendente') {
+    } else if(a.status === 'Pendente') {
+      // Botão "Aceitar" (✓) só aparece ENQUANTO ainda está Pendente — uma
+      // vez Aprovado, não faz sentido "aceitar de novo": abrirModalAprovacao()
+      // pré-preenche o modal com a.data/a.hora (a sugestão ORIGINAL, não o
+      // período já aprovado em a.dataInicioEstimado/a.horaInicioEstimado),
+      // então confirmar de novo sobrescrevia silenciosamente quem aprovou e
+      // quando, sem nenhum aviso de que aquele agendamento já tinha sido
+      // aceito (ver conversa que motivou isso: "hoje é possível aceitar
+      // novamente uma sugestão"). Reprovar continua disponível também em
+      // Aprovado — é a única forma, hoje, de recuar uma aprovação antes de
+      // iniciar a execução (excluirAgendamento só permite excluir
+      // Pendente, e o outro jeito de "desfazer" seria ter que iniciar e
+      // finalizar como Não Executado).
       acoes += `<button class="man-btn man-btn-success" style="padding:2px 8px; font-size:11px; margin-right:4px;" onclick="aprovarAgendamento('${a.id}')"><i class="fas fa-check"></i></button><button class="man-btn man-btn-danger" style="padding:2px 8px; font-size:11px;" onclick="abrirModalReprovacao('${a.id}')"><i class="fas fa-times"></i></button>`;
+    } else if(a.status === 'Aprovado') {
+      acoes += `<button class="man-btn man-btn-danger" style="padding:2px 8px; font-size:11px;" onclick="abrirModalReprovacao('${a.id}')"><i class="fas fa-times"></i></button>`;
     } else if(a.status === 'Em Execucao') {
       acoes += `<button class="man-btn man-btn-warning" style="padding:2px 8px; font-size:11px; margin-right:4px;" onclick="abrirModalFinalizar('${a.id}')"><i class="fas fa-flag-checkered"></i></button>`;
     } else {

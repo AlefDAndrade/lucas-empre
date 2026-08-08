@@ -1059,6 +1059,114 @@ function calcPaineisPersonalizado(bercosPersonalizados) {
 }
 
 /**
+ * Determina o TIPO de placa (chave de paineis_por_tipo — '2p', 'sp', '3t'...)
+ * de UM LADO específico de UM berço — usado por aplicarNaoEnchidosNoCalc()
+ * (abaixo) pra saber de qual tipo descontar quando aquele lado é marcado
+ * "🚫 Não Enchido" em Bateria Atual.
+ *
+ *  - Montagem Personalizada: o tipo já pertence ao berço inteiro
+ *    (bercosPersonalizados[bercoNum-1]) — os 2 lados do mesmo berço são
+ *    sempre do MESMO tipo.
+ *  - Montagem simples (um tipo só, ex: "2/P"): sem ambiguidade, é o único
+ *    tipo que essa montagem produz.
+ *  - Montagem híbrida (dois tipos, 1 painel de cada por berço — um em
+ *    cada lado, ex: "HÍBRIDA 2p/sp"): NÃO existe hoje nenhum registro de
+ *    qual lado é FISICAMENTE qual tipo (ver conversa que motivou isso).
+ *    Convenção fixa adotada: 1º tipo da lista "tipos" da híbrida (definida
+ *    em Configurações → Bateria e Montagem) = lado DIREITO, 2º tipo =
+ *    lado ESQUERDO. Se a realidade física for o contrário, basta inverter
+ *    a ordem dos tipos naquela tela — não precisa mexer em código.
+ * @returns {string|null}
+ */
+function _tipoDoLadoMontagem(tipoMontagem, bercosPersonalizados, bercoNum, lado) {
+  if (tipoMontagem === TIPO_MONTAGEM_PERSONALIZADA) {
+    const grade = Array.isArray(bercosPersonalizados) ? bercosPersonalizados : [];
+    return grade[bercoNum - 1] || null;
+  }
+  const opcao = (MONTAGEM_OPCOES || []).find(o => o.label === tipoMontagem);
+  if (!opcao) return null;
+  if (opcao.modo === 'simples') return opcao.tipo || null;
+  if (opcao.modo === 'hibrida' && Array.isArray(opcao.tipos)) {
+    return lado === 'direita' ? (opcao.tipos[0] || null) : (opcao.tipos[1] || null);
+  }
+  return null;
+}
+
+/**
+ * Aplica os descontos de "🚫 Não Enchido" (Bateria Atual) em cima de um
+ * resultado de calcPaineis()/calcPaineisPersonalizado() — cada lado
+ * marcado 'nao_enchido' é 1 painel que nunca chegou a existir de
+ * verdade, então sai do total, do total POR TIPO, do m² total, do m²
+ * POR TIPO e da conta de placas cimentícia (nunca só do total geral —
+ * ver conversa que motivou isso: "cada pontinho é um painel").
+ *
+ * Recalcula tudo do zero a partir de paineis_por_tipo já descontado (em
+ * vez de decrementar total/m²/cimentícia incrementalmente) — mesma
+ * fórmula de calcPaineis()/calcPaineisPersonalizado(), sem duplicar a
+ * lógica de cimentícia (que já é condicional por tipo) em dois lugares.
+ *
+ * @param {object} calc - resultado de calcPaineis() ou calcPaineisPersonalizado()
+ * @param {string} tipoMontagem
+ * @param {Array<string|null>} bercosPersonalizados - só relevante se tipoMontagem === PERSONALIZADA
+ * @param {object} marcacoes - { 'B1': {esquerda:'nao_enchido'|'baixou', direita:..., tipos:{esquerda:'sp',direita:'2p'}}, ... }
+ *   (ver GET /bercos-andamento) — `tipos` é opcional: quando presente, é o
+ *   tipo FIXADO no instante em que aquele lado foi marcado (ver
+ *   POST /marcar-berco-andamento) e tem prioridade sobre resolver de novo
+ *   pela montagem/grade ATUAIS (ver comentário logo abaixo, no forEach).
+ */
+function aplicarNaoEnchidosNoCalc(calc, tipoMontagem, bercosPersonalizados, marcacoes) {
+  if (!marcacoes || !Object.keys(marcacoes).length) return calc;
+
+  const paineis_por_tipo = { ...(calc.paineis_por_tipo || {}) };
+
+  Object.keys(marcacoes).forEach(berco => {
+    const bercoNum = parseInt(String(berco).replace(/^B/i, ''), 10);
+    if (!bercoNum) return;
+    const doBerco = marcacoes[berco] || {};
+    ['direita', 'esquerda'].forEach(lado => {
+      if (doBerco[lado] !== 'nao_enchido') return;
+      // Prioriza o tipo FIXADO na hora da marcação (doBerco.tipos[lado]) —
+      // reconfigurar a montagem/grade DEPOIS de marcar um lado (trocar o
+      // tipo do berço na Personalizada, reordenar os tipos da Híbrida em
+      // Configurações, trocar de bateria) não pode mudar retroativamente
+      // de qual tipo aquele painel já marcado desconta. Só cai pra resolver
+      // ao vivo (comportamento antigo) quando a marcação não tem tipo
+      // fixado — registros antigos, de antes desta mudança.
+      const tipoFixado = (doBerco.tipos && doBerco.tipos[lado]) || null;
+      const tipo = tipoFixado || _tipoDoLadoMontagem(tipoMontagem, bercosPersonalizados, bercoNum, lado);
+      if (tipo && paineis_por_tipo[tipo] > 0) paineis_por_tipo[tipo] -= 1;
+    });
+  });
+
+  let paineis_total = 0;
+  Object.keys(paineis_por_tipo).forEach(tipo => { paineis_total += paineis_por_tipo[tipo]; });
+
+  const m2_por_tipo = {};
+  Object.keys(paineis_por_tipo).forEach(tipo => {
+    m2_por_tipo[tipo] = paineis_por_tipo[tipo] * M2_POR_PAINEL;
+  });
+  const m2_total = paineis_total * M2_POR_PAINEL;
+
+  let placas_cimenticia = 0;
+  Object.keys(paineis_por_tipo).forEach(tipo => {
+    const c = CIMENTICIA_POR_TIPO[tipo];
+    if (c && c.leva) placas_cimenticia += paineis_por_tipo[tipo] * (c.quantidade || 0);
+  });
+
+  return {
+    total_paineis: paineis_total,
+    m2_total,
+    placas_cimenticia,
+    paineis_por_tipo,
+    m2_por_tipo,
+    paineis_2p: paineis_por_tipo['2p'] || 0,
+    paineis_sp: paineis_por_tipo['sp'] || 0,
+    m2_2p: m2_por_tipo['2p'] || 0,
+    m2_sp: m2_por_tipo['sp'] || 0,
+  };
+}
+
+/**
  * Soma um campo do tipo { '2p': N, 'sp': N, ... } através de uma lista de registros.
  * Ex: somarPorTipo(baterias, 'paineis_por_tipo') -> { '2p': 120, 'sp': 40, '3p': 10 }
  */
@@ -1841,6 +1949,165 @@ function mostrarConfirmacao(mensagem, opcoes = {}) {
   });
 }
 
+/**
+ * Exibe um modal pro usuário escolher entre 2+ opções nomeadas — mesmo
+ * padrão visual de mostrarConfirmacao (acima), generalizado pra mais de
+ * 2 botões com rótulo/descrição próprios em vez de só Confirmar/Cancelar
+ * (usado, por exemplo, pelo "🌐 Exportar Interativo" da Análise Focada,
+ * pra escolher entre exportar só a operação atual ou todas as operações
+ * do mesmo dia).
+ * @param {string} mensagem
+ * @param {object} [opcoes]
+ * @param {string} [opcoes.titulo='Escolha uma opção']
+ * @param {string} [opcoes.icon='❓']
+ * @param {Array<{valor:string, texto:string, desc?:string}>} opcoes.itens - uma opção por botão, na ordem em que aparecem.
+ * @param {string} [opcoes.textoCancelar='Cancelar']
+ * @returns {Promise<string|null>} o `valor` da opção escolhida, ou null se cancelado (botão Cancelar, Esc ou clique fora).
+ */
+function mostrarEscolha(mensagem, opcoes = {}) {
+  const titulo = opcoes.titulo || 'Escolha uma opção';
+  const icon = opcoes.icon || '❓';
+  const itens = Array.isArray(opcoes.itens) ? opcoes.itens : [];
+  const textoCancelar = opcoes.textoCancelar || 'Cancelar';
+
+  return new Promise(resolve => {
+    const anterior = document.getElementById('modal-escolha-global');
+    if (anterior) anterior.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-escolha-global';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10100;display:flex;align-items:center;justify-content:center;padding:20px';
+
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                  padding:32px;width:440px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:2.2rem;margin-bottom:8px">${icon}</div>
+          <h2 style="font-family:var(--font-display);font-size:1.3rem;color:var(--text);margin:0">
+            ${_escaparHtml(titulo)}
+          </h2>
+        </div>
+        <p style="color:var(--text-2);text-align:center;margin-bottom:20px;line-height:1.5;white-space:pre-line">${_escaparHtml(mensagem)}</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
+          ${itens.map((item, i) => `
+            <button class="btn-escolha-item" data-valor="${_escaparHtml(item.valor)}"
+              style="text-align:left;padding:12px 14px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                     border-radius:var(--radius);cursor:pointer;font:inherit">
+              <div style="font-weight:700;font-size:.9rem">${_escaparHtml(item.texto)}</div>
+              ${item.desc ? `<div style="font-size:.78rem;color:var(--text-3);margin-top:2px;font-weight:400">${_escaparHtml(item.desc)}</div>` : ''}
+            </button>
+          `).join('')}
+        </div>
+        <button id="btn-escolha-cancelar"
+          style="width:100%;padding:10px;background:transparent;color:var(--text-2);border:1px solid var(--border);
+                 border-radius:var(--radius);font-size:.85rem;cursor:pointer">
+          ${_escaparHtml(textoCancelar)}
+        </button>
+      </div>`;
+
+    document.body.appendChild(modal);
+
+    const fechar = (resultado) => {
+      modal.remove();
+      document.removeEventListener('keydown', onKeydown);
+      resolve(resultado);
+    };
+    const onKeydown = (e) => { if (e.key === 'Escape') fechar(null); };
+
+    modal.querySelectorAll('.btn-escolha-item').forEach(btn => {
+      btn.addEventListener('click', () => fechar(btn.getAttribute('data-valor')));
+      btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'var(--accent)'; });
+      btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'var(--border)'; });
+    });
+    document.getElementById('btn-escolha-cancelar').addEventListener('click', () => fechar(null));
+    modal.addEventListener('click', (e) => { if (e.target === modal) fechar(null); });
+    document.addEventListener('keydown', onKeydown);
+  });
+}
+
+/**
+ * Exibe um modal pro usuário digitar um texto livre — mesmo padrão visual
+ * de mostrarConfirmacao (acima), com um <textarea> no lugar dos botões de
+ * Confirmar/Cancelar simples. Usado, por exemplo, pra pedir a justificativa
+ * de uma pausa de operação (ver togglePausaOperacao, operacao.js).
+ * @param {string} mensagem
+ * @param {object} [opcoes]
+ * @param {string} [opcoes.titulo='Informe um texto']
+ * @param {string} [opcoes.placeholder='']
+ * @param {string} [opcoes.textoConfirmar='Confirmar']
+ * @param {string} [opcoes.textoCancelar='Cancelar']
+ * @param {string} [opcoes.icon='📝']
+ * @param {boolean} [opcoes.obrigatorio=true] - se true, o botão de confirmar só habilita com texto preenchido.
+ * @returns {Promise<string|null>} o texto digitado (já sem espaços nas pontas), ou null se cancelado (botão, Esc ou clique fora).
+ */
+function mostrarPrompt(mensagem, opcoes = {}) {
+  const titulo = opcoes.titulo || 'Informe um texto';
+  const placeholder = opcoes.placeholder || '';
+  const textoConfirmar = opcoes.textoConfirmar || 'Confirmar';
+  const textoCancelar = opcoes.textoCancelar || 'Cancelar';
+  const icon = opcoes.icon || '📝';
+  const obrigatorio = opcoes.obrigatorio !== false;
+
+  return new Promise(resolve => {
+    const anterior = document.getElementById('modal-prompt-global');
+    if (anterior) anterior.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-prompt-global';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10100;display:flex;align-items:center;justify-content:center;padding:20px';
+
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                  padding:32px;width:440px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:2.2rem;margin-bottom:8px">${icon}</div>
+          <h2 style="font-family:var(--font-display);font-size:1.3rem;color:var(--text);margin:0">
+            ${_escaparHtml(titulo)}
+          </h2>
+        </div>
+        <p style="color:var(--text-2);text-align:center;margin-bottom:16px;line-height:1.5;white-space:pre-line">${_escaparHtml(mensagem)}</p>
+        <textarea id="prompt-textarea-global" class="form-input" rows="3" placeholder="${_escaparHtml(placeholder)}"
+          style="width:100%;margin-bottom:24px;resize:vertical;font:inherit;padding:10px"></textarea>
+        <div style="display:flex;gap:12px">
+          <button id="btn-prompt-confirmar" ${obrigatorio ? 'disabled' : ''}
+            style="flex:1;padding:12px;background:var(--accent);color:#000;border:none;border-radius:var(--radius);
+                   font-weight:700;font-size:.9rem;cursor:pointer">
+            ${_escaparHtml(textoConfirmar)}
+          </button>
+          <button id="btn-prompt-cancelar"
+            style="flex:1;padding:12px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                   border-radius:var(--radius);font-size:.9rem;cursor:pointer">
+            ${_escaparHtml(textoCancelar)}
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+    const textarea = document.getElementById('prompt-textarea-global');
+    const btnConfirmar = document.getElementById('btn-prompt-confirmar');
+
+    const fechar = (resultado) => {
+      modal.remove();
+      document.removeEventListener('keydown', onKeydown);
+      resolve(resultado);
+    };
+    const onKeydown = (e) => { if (e.key === 'Escape') fechar(null); };
+
+    if (obrigatorio) {
+      textarea.addEventListener('input', () => { btnConfirmar.disabled = !textarea.value.trim(); });
+    }
+    btnConfirmar.addEventListener('click', () => {
+      const valor = textarea.value.trim();
+      if (obrigatorio && !valor) return;
+      fechar(valor);
+    });
+    document.getElementById('btn-prompt-cancelar').addEventListener('click', () => fechar(null));
+    modal.addEventListener('click', (e) => { if (e.target === modal) fechar(null); });
+    document.addEventListener('keydown', onKeydown);
+    textarea.focus();
+  });
+}
+
 // ---- Export ----
 
 /**
@@ -2093,6 +2360,14 @@ window.LW = {
   // Cálculos
   calcPaineis,
   calcPaineisPersonalizado,
+  aplicarNaoEnchidosNoCalc,
+  // Resolve o tipo de placa ('2p'/'sp'/...) de UM LADO de UM berço, dada a
+  // montagem atual — usado por aplicarNaoEnchidosNoCalc (acima) e agora
+  // também por bateria-atual.js, pra: (1) mostrar o tipo no tooltip de
+  // cada indicador (elimina a ambiguidade visual entre os 2 lados) e (2)
+  // FIXAR esse tipo no instante da marcação, mandado pro servidor (ver
+  // POST /marcar-berco-andamento) — ver comentário em aplicarNaoEnchidosNoCalc.
+  tipoDoLadoMontagem: _tipoDoLadoMontagem,
   TIPO_MONTAGEM_PERSONALIZADA,
   normalizarPaineisRegistro,
   somarPorTipo,
@@ -2132,6 +2407,12 @@ window.LW = {
 
   // Confirmação customizada (substitui confirm() nativo)
   mostrarConfirmacao,
+
+  // Escolha entre 2+ opções nomeadas (generalização de mostrarConfirmacao)
+  mostrarEscolha,
+
+  // Texto livre customizado (substitui prompt() nativo)
+  mostrarPrompt,
 
   // Escape de HTML — usar sempre que texto livre (digitado pelo usuário)
   // for inserido via innerHTML, pra evitar XSS armazenado.

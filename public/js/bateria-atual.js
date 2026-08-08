@@ -116,20 +116,14 @@
     return ehPersonalizada ? LW.corPorTipoSimples(tipo) : LW.corMontagemPorLabel(tipo);
   }
 
-  // Capacidade real da bateria: berços reais informados na operação, ou
-  // (se não informado ainda) o número de berços cadastrado pra essa
-  // bateria em Configurações — mesma lógica de operacao.js.
-  function _baCapacidade(dados) {
-    const bateria = (LW.BATERIA_IDS || []).find(b => b.id === dados.id_bateria);
-    return parseInt(dados.bercos_reais) || (bateria?.bercos || 0);
-  }
-
   // ── Posição no Palete ───────────────────────────────────────────────
-  // SEMPRE o nº de berços CADASTRADO pra bateria (nunca bercos_reais,
-  // diferente de _baCapacidade acima) — o direcionamento é sobre ONDE
-  // FISICAMENTE cada berço empilha (a grade do molde), que não muda
-  // numa operação parcial, só a quantidade de painéis muda. Mesma
-  // distinção já documentada em _paleteDoBerco (setor-qualidade.js).
+  // SEMPRE o nº de berços CADASTRADO pra bateria — não existe mais uma
+  // capacidade "declarada" separada (bercos_reais foi removido; um berço
+  // que não vai ser usado agora se marca individualmente como 🚫 Não
+  // Enchido, logo abaixo, não muda o total da bateria). O direcionamento
+  // é sobre ONDE FISICAMENTE cada berço empilha (a grade do molde), que
+  // não muda numa operação parcial, só a quantidade de painéis muda.
+  // Mesma distinção já documentada em _paleteDoBerco (setor-qualidade.js).
   function _baCapacidadeConfigurada(dados) {
     const bateria = (LW.BATERIA_IDS || []).find(b => b.id === dados.id_bateria);
     return bateria?.bercos || 0;
@@ -214,11 +208,21 @@
   // ou "não enchido" (✕, ver _modoMarcarNaoEnchido) — os dois têm
   // aparência bem diferente, mas o tooltip deixa explícito de qualquer
   // jeito, sem depender só da forma do indicador.
-  function _tituloDot(estado, lado) {
+  //
+  // `tipo` (opcional): o código de placa ('2p'/'sp'/...) que ESTE lado
+  // representa na montagem atual (ver LW.tipoDoLadoMontagem) — mostrado
+  // sempre que resolvido, pra deixar explícito qual tipo cada indicador
+  // desconta ao marcar "🚫 Não Enchido". Antes disso os 2 indicadores eram
+  // visualmente idênticos (• em cima / ● embaixo) em montagens Híbrida/
+  // Personalizada, sem nenhuma pista de qual lado era qual tipo — motivo
+  // do desconto "trocado" que o operador via nos cards de Registrar
+  // Operação (ver conversa que motivou esta mudança).
+  function _tituloDot(estado, lado, tipo) {
     const ladoTxt = lado === 'direita' ? 'Direito' : 'Esquerdo';
-    if (estado === 'nao_enchido') return `${ladoTxt} — Não enchido`;
-    if (estado === 'baixou') return `${ladoTxt} — Baixou/Vazou`;
-    return ladoTxt;
+    const tipoTxt = tipo ? ` (${LW.escaparHtml(String(tipo).toUpperCase())})` : '';
+    if (estado === 'nao_enchido') return `${ladoTxt}${tipoTxt} — Não enchido`;
+    if (estado === 'baixou') return `${ladoTxt}${tipoTxt} — Baixou/Vazou`;
+    return `${ladoTxt}${tipoTxt}`;
   }
 
   // Indica se ESTE dispositivo pode marcar os vazamentos agora — mesmo
@@ -249,7 +253,7 @@
       return;
     }
 
-    const capacidade = _baCapacidade(dados);
+    const capacidade = _baCapacidadeConfigurada(dados);
     const tipos = _baTiposPorBerco(dados, capacidade);
     const ehPersonalizada = dados.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA;
     const podeMarcar = _podeMarcarVazamento(dados);
@@ -257,7 +261,7 @@
     const resumo = `
       <div class="ba-resumo">
         <strong>Bateria ${LW.escaparHtml(dados.id_bateria || '—')}</strong> — ${LW.escaparHtml(dados.tipo_montagem || '—')}
-        ${dados.bercos_reais ? ` — ${dados.bercos_reais} berços` : ''}
+        ${capacidade ? ` — ${capacidade} berços` : ''}
       </div>`;
     // Botão "🚫 Marcar Não Enchido" — só aparece pra quem já pode marcar
     // (mesma trava dos indicadores, ver podeMarcar); alternar o modo é só
@@ -276,7 +280,7 @@
         ${_modoDetalhesBerco ? '📋 Detalhes — clique num berço' : '📋 Detalhes do Berço'}
       </button>`;
     const dica = _modoDetalhesBerco
-      ? `<div class="ba-dica ba-dica-detalhes">📋 Clique em um berço (ex: B11) pra ver e editar os detalhes dele.</div>`
+      ? `<div class="ba-dica ba-dica-detalhes">📋 Clique em um berço (ex: B11) para ver e editar os detalhes dele.</div>`
       : !podeMarcar
         ? `<div class="ba-dica">🔒 Só o computador que está no controle desta operação pode marcar os vazamentos.</div>`
         : _modoMarcarNaoEnchido
@@ -291,9 +295,15 @@
       const cor = _baCorPorTipo(ehPersonalizada, tipo);
       const numero = String(i + 1).padStart(2, '0');
       const berco = 'B' + (i + 1);
+      const bercoNum = i + 1;
       const marcadoBerco = _bercosMarcados[berco] || {};
       const estadoDir = marcadoBerco.direita || null; // 'baixou' | 'nao_enchido' | null
       const estadoEsq = marcadoBerco.esquerda || null;
+      // Tipo que CADA LADO representa nesta montagem — mesma resolução
+      // usada pra descontar dos totais (ver LW.tipoDoLadoMontagem,
+      // data.js), só pra exibir no tooltip (ver _tituloDot acima).
+      const tipoDir = LW.tipoDoLadoMontagem(dados.tipo_montagem, dados.bercos_personalizados, bercoNum, 'direita');
+      const tipoEsq = LW.tipoDoLadoMontagem(dados.tipo_montagem, dados.bercos_personalizados, bercoNum, 'esquerda');
       // "✕" (não enchido) tem prioridade visual sobre "●" (baixou) — na
       // prática nunca deveriam coexistir no mesmo lado (POST
       // /marcar-berco-andamento sempre limpa um antes de aplicar o
@@ -308,10 +318,10 @@
         <div class="ba-celula" data-berco="${berco}"
           style="background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-3)'};border:1px solid ${cor ? cor.borda : 'var(--border)'}">
           <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}${dirNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${berco}" data-lado="direita"
-            data-tooltip="${_tituloDot(estadoDir, 'direita')}">${dirNaoEnchido ? '✕' : '•'}</span>
+            data-tooltip="${_tituloDot(estadoDir, 'direita', tipoDir)}">${dirNaoEnchido ? '✕' : '•'}</span>
           <span class="ba-numero">B${numero}</span>
           <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}${esqNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${berco}" data-lado="esquerda"
-            data-tooltip="${_tituloDot(estadoEsq, 'esquerda')}">${esqNaoEnchido ? '✕' : '•'}</span>
+            data-tooltip="${_tituloDot(estadoEsq, 'esquerda', tipoEsq)}">${esqNaoEnchido ? '✕' : '•'}</span>
         </div>`;
     }).join('')}</div>`;
 
@@ -384,6 +394,19 @@
   // (baixou OU nao_enchido), o clique sempre desmarca (volta a 'okay'),
   // nunca troca uma marcação por outra — mesma regra do servidor (ver
   // POST /marcar-berco-andamento).
+  // Cada lado marcado "🚫 Não Enchido" é 1 painel a menos nos totais
+  // mostrados em Registrar Operação (Painéis Total/por tipo, m² Total/por
+  // tipo — ver recalcPaineis, operacao.js, e aplicarNaoEnchidosNoCalc,
+  // data.js). Chamada toda vez que _bercosMarcados muda (clique local
+  // otimista, desfazer de clique com falha, ou sincronização periódica
+  // com outro dispositivo) — sem isso os cards de total só atualizariam
+  // na próxima mudança de OUTRO campo do formulário.
+  function _notificarMudancaMarcacoes() {
+    if (window.LWOp && typeof window.LWOp.recalcPaineis === 'function') {
+      window.LWOp.recalcPaineis();
+    }
+  }
+
   async function _baCliqueDot(berco, lado, dotEl, estadoDesejado) {
     if (!berco || !lado) return;
     const marcadoBerco = _bercosMarcados[berco] || {};
@@ -391,17 +414,39 @@
     const estavaMarcado = estadoAtual === 'baixou' || estadoAtual === 'nao_enchido';
     const novoEstado = estavaMarcado ? null : estadoDesejado;
 
+    // Resolve e FIXA o tipo deste lado ('2p'/'sp'/...) na montagem/grade
+    // de AGORA, no instante do clique — mandado junto pro servidor (só ao
+    // marcar, nunca ao desmarcar) pra ficar gravado com a marcação. Sem
+    // isso, reconfigurar a montagem/grade DEPOIS (trocar o tipo do berço
+    // na Personalizada, reordenar os tipos da Híbrida em Configurações)
+    // mudava retroativamente de qual tipo o desconto saía — ver
+    // aplicarNaoEnchidosNoCalc, data.js, e conversa que motivou isto.
+    const bercoNum = parseInt(String(berco).replace(/^B/i, ''), 10);
+    const tipoFixado = (novoEstado === 'nao_enchido' && _dadosAtuais && bercoNum)
+      ? LW.tipoDoLadoMontagem(_dadosAtuais.tipo_montagem, _dadosAtuais.bercos_personalizados, bercoNum, lado)
+      : null;
+
     // Otimista: já atualiza o indicador antes da resposta do servidor.
     const novoBerco = { ...marcadoBerco };
-    if (novoEstado) novoBerco[lado] = novoEstado; else delete novoBerco[lado];
+    if (novoEstado) {
+      novoBerco[lado] = novoEstado;
+      if (tipoFixado) novoBerco.tipos = { ...(novoBerco.tipos || {}), [lado]: tipoFixado };
+    } else {
+      delete novoBerco[lado];
+      if (novoBerco.tipos) {
+        const { [lado]: _descartado, ...restoTipos } = novoBerco.tipos;
+        if (Object.keys(restoTipos).length) novoBerco.tipos = restoTipos; else delete novoBerco.tipos;
+      }
+    }
     if (Object.keys(novoBerco).length) _bercosMarcados[berco] = novoBerco;
     else delete _bercosMarcados[berco];
+    _notificarMudancaMarcacoes();
 
     const ehNaoEnchido = novoEstado === 'nao_enchido';
     dotEl.classList.toggle('ba-dot-marcado', !!novoEstado);
     dotEl.classList.toggle('ba-dot-nao-enchido', ehNaoEnchido);
     dotEl.textContent = ehNaoEnchido ? '✕' : '•';
-    dotEl.setAttribute('data-tooltip', _tituloDot(novoEstado, lado));
+    dotEl.setAttribute('data-tooltip', _tituloDot(novoEstado, lado, tipoFixado));
 
     try {
       // A rota exige sessão de usuário logado com permissão de controlar
@@ -409,22 +454,22 @@
       // server.js) — deviceId continua sendo mandado só pra identificar o
       // "dono" da operação em andamento (ver donoDeviceId,
       // lib/rotas/operacao-andamento.js), não é mais usado pra autorização.
+      // `tipo` (opcional) é o tipo fixado acima — o servidor só grava
+      // quando o lado está sendo MARCADO (nunca ao desmarcar).
       const res = await fetch('/marcar-berco-andamento?deviceId=' + encodeURIComponent(LW.getDeviceId()), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ berco, lado, estado: estadoDesejado }),
+        body: JSON.stringify({ berco, lado, estado: estadoDesejado, tipo: tipoFixado }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.erro || 'Falha ao marcar berço.');
     } catch (e) {
-      // Desfaz o otimismo — volta pro estado de antes do clique.
-      if (estavaMarcado) {
-        const b = { ..._bercosMarcados[berco] };
-        b[lado] = estadoAtual;
-        _bercosMarcados[berco] = b;
-      } else if (_bercosMarcados[berco]) {
-        delete _bercosMarcados[berco][lado];
-        if (!Object.keys(_bercosMarcados[berco]).length) delete _bercosMarcados[berco];
-      }
+      // Desfaz o otimismo — volta pro estado (e tipo fixado) de antes do
+      // clique, a partir do snapshot original (marcadoBerco), em vez de
+      // reconstruir campo a campo — evita deixar `tipos` dessincronizado
+      // do `estado` depois de desfazer.
+      if (Object.keys(marcadoBerco).length) _bercosMarcados[berco] = marcadoBerco;
+      else delete _bercosMarcados[berco];
+      _notificarMudancaMarcacoes();
       _ultimaAssinatura = null; // força o redesenho mesmo se a assinatura "bater" por acaso
       _renderSeMudou(); // reconstrói a grade inteira já no estado real (desfeito o otimismo)
       if (typeof LW !== 'undefined' && LW.mostrarAlerta) {
@@ -498,7 +543,7 @@
     document.getElementById('ba-modal-detalhes-berco')?.remove();
 
     const numeroBerco = parseInt(berco.replace(/\D/g, ''), 10);
-    const capacidade = _baCapacidade(dados);
+    const capacidade = _baCapacidadeConfigurada(dados);
     const tipos = _baTiposPorBerco(dados, capacidade);
     const ehPersonalizada = dados.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA;
     const podeEditar = _podeMarcarVazamento(dados); // mesma trava de "quem controla a operação"
@@ -665,6 +710,7 @@
     try {
       const bercosMarcados = await fetch('/bercos-andamento').then(r => r.ok ? r.json() : {});
       _bercosMarcados = bercosMarcados || {};
+      _notificarMudancaMarcacoes();
       _renderSeMudou();
     } catch (_) {
       // sem conexão agora — tenta de novo na próxima rodada, mantém o que já tem na tela
@@ -680,6 +726,16 @@
     atualizarComEstado(dados) {
       _dadosAtuais = dados || null;
       _renderSeMudou();
+    },
+    // Cópia atual das marcações "baixou"/"nao_enchido" (mesmo formato de
+    // GET /bercos-andamento) — usada por operacao.js (recalcPaineis) pra
+    // descontar painéis "🚫 Não Enchido" do preview ao vivo. É só o cache
+    // LOCAL (sincronizado a cada INTERVALO_SYNC_MARCACOES_MS, acima) —
+    // suficiente pro preview; os totais que de fato são REGISTRADOS
+    // buscam uma cópia fresca do servidor na hora (ver
+    // _registrarOperacaoInterna, operacao.js).
+    obterMarcacoes() {
+      return _bercosMarcados;
     },
   };
 

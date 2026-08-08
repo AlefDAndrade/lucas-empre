@@ -19,7 +19,6 @@
     dimensaoManual: false,
     tipo_montagem: '',
     id_bateria: '',
-    bercos_reais: '',
     inicio: null,
     fim: null,
     status: 'idle',      // idle | running | finished
@@ -245,11 +244,6 @@
       persist();
       updatePendencias();
     });
-    $('op-bercos-reais').addEventListener('input', e => {
-      state.bercos_reais = e.target.value;
-      recalcPaineis();
-      persist();
-    });
     // Sair do campo (clicar fora) confirma a edição igual ao botão ✓ —
     // Enter também confirma e já tira o foco (evita quebrar linha ou
     // disparar o submit de algum form ancestral).
@@ -399,14 +393,37 @@
     // uma escolha manual — some a distinção assim que volta a ser
     // automático de novo (valor em branco, acima).
     input.classList.toggle('auto-filled', !state.dimensaoManual);
-    if (btn) { btn.textContent = '✏️'; btn.title = 'Definir uma dimensão específica pra esta operação'; }
+    if (btn) { btn.textContent = '✏️'; btn.title = 'Definir uma dimensão específica para esta operação'; }
 
     if (!state.dimensaoManual) updateCapacidade(); // reaplica o automático na hora
     persist();
   }
 
 
-  const _CORES_TIPO = ['var(--blue)', 'var(--green)', 'var(--accent)', 'var(--purple)', 'var(--yellow)'];
+  // Cor de fallback pra tipos sem cor cadastrada em Configurações (ver
+  // _corTipoCard, abaixo) — só usada quando LW.corPorTipoSimples não
+  // encontra hex/hue configurado pro tipo.
+  const _CORES_TIPO_FALLBACK = ['var(--blue)', 'var(--green)', 'var(--accent)', 'var(--purple)', 'var(--yellow)'];
+
+  // Cor de UM tipo de placa pros cards "Painéis por tipo"/"m² por tipo" —
+  // usa a MESMA cor cadastrada em Configurações → Bateria e Montagem pra
+  // aquele tipo (ver LW.corPorTipoSimples, data.js), a mesma já usada nas
+  // células da grade de Montagem Personalizada e em Bateria Atual. Antes
+  // os cards cicavam por uma paleta genérica de 5 cores (var(--blue),
+  // var(--green)...) na ORDEM em que os tipos apareciam no objeto — sem
+  // nenhuma relação com a cor de verdade do tipo, então com 3+ tipos as
+  // cores dos cards não batiam com as cores da grade, dando a impressão
+  // de "trocado" mesmo com os números corretos (ver conversa que motivou
+  // esta mudança). Cai no fallback cíclico antigo só se o tipo não tiver
+  // cor cadastrada (config antiga, cor nunca definida).
+  function _corTipoCard(tipo, i) {
+    const cor = LW.corPorTipoSimples(tipo);
+    // corPorTipoSimples nunca devolve null (cai no cinza neutro quando não
+    // acha cor) — só usamos o fallback cíclico quando o cinza neutro
+    // aparece, pra não pintar todo mundo de cinza silenciosamente.
+    const ehNeutra = !cor || cor.cor === '#5c6475';
+    return ehNeutra ? _CORES_TIPO_FALLBACK[i % _CORES_TIPO_FALLBACK.length] : cor.cor;
+  }
 
   // Labels amigáveis para tipos conhecidos; tipos novos caem no fallback (maiúsculas + "/").
   function _labelTipo(tipo) {
@@ -420,7 +437,7 @@
 
   function recalcPaineis() {
     const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
-    const bercos = parseInt(state.bercos_reais) || (bateria?.bercos || 0);
+    const bercos = bateria?.bercos || 0;
 
     const elPaineisTipo = $('op-cards-paineis-tipo');
     const elM2Tipo = $('op-cards-m2-tipo');
@@ -433,9 +450,17 @@
       if (elM2Tipo) elM2Tipo.innerHTML = '';
       return;
     }
-    const r = state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA
+    const base = state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA
       ? LW.calcPaineisPersonalizado(state.bercos_personalizados)
       : LW.calcPaineis(state.tipo_montagem, bercos);
+    // "🚫 Não Enchido" (Bateria Atual) — cada lado marcado é 1 painel a
+    // menos aqui também (preview ao vivo, ver aplicarNaoEnchidosNoCalc,
+    // data.js). Usa o cache local de marcações de bateria-atual.js
+    // (sincronizado a cada alguns segundos) — suficiente pro preview; o
+    // valor que de fato é REGISTRADO busca uma cópia fresca do servidor
+    // na hora (ver _registrarOperacaoInterna).
+    const marcacoes = (window.LWBateriaAtual && window.LWBateriaAtual.obterMarcacoes) ? window.LWBateriaAtual.obterMarcacoes() : {};
+    const r = LW.aplicarNaoEnchidosNoCalc(base, state.tipo_montagem, state.bercos_personalizados, marcacoes);
     $('op-paineis-total').textContent = r.total_paineis;
     $('op-m2-total').textContent = r.m2_total.toFixed(2) + ' m²';
     $('op-placas-cimenticia').textContent = r.placas_cimenticia;
@@ -447,7 +472,7 @@
         <div>
           <div style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
             Painéis ${_labelTipo(tipo)}</div>
-          <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:${_CORES_TIPO[i % _CORES_TIPO.length]}">
+          <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:${_corTipoCard(tipo, i)}">
             ${r.paineis_por_tipo[tipo]}</div>
         </div>
       `).join('');
@@ -457,7 +482,7 @@
         <div>
           <div style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
             m² ${_labelTipo(tipo)}</div>
-          <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:${_CORES_TIPO[i % _CORES_TIPO.length]}">
+          <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:${_corTipoCard(tipo, i)}">
             ${r.m2_por_tipo[tipo].toFixed(2)} m²</div>
         </div>
       `).join('');
@@ -488,21 +513,21 @@
     const motivo = LW.motivoBloqueioOperacao();
     if (motivo === 'perfil') {
       LW.mostrarAlerta(
-        'Você não está autorizado a controlar operações. Peça ao Administrador pra habilitar isso no seu cadastro (Configurações → Usuários).',
+        'Você não está autorizado a controlar operações. Peça ao Administrador para habilitar isso no seu cadastro (Configurações → Usuários).',
         { tipo: 'erro' }
       );
       return true;
     }
     if (motivo === 'dispositivo') {
       LW.mostrarAlerta(
-        `Este dispositivo não está autorizado a controlar operações. Peça ao Administrador pra autorizá-lo`,
+        `Este dispositivo não está autorizado a controlar operações. Peça ao Administrador para autorizá-lo`,
         { tipo: 'erro' }
       );
       return true;
     }
     if (!ignorarDono && state.donoDeviceId && state.donoDeviceId !== LW.getDeviceId()) {
       LW.mostrarAlerta(
-        'Esta operação já está sendo controlada por outra pessoa. Espere ela terminar, ou use "🗑️ Limpar Tudo" pra assumir o controle.',
+        'Esta operação já está sendo controlada por outra pessoa. Espere ela terminar, ou use "🗑️ Limpar Tudo" para assumir o controle.',
         { tipo: 'erro' }
       );
       return true;
@@ -565,7 +590,7 @@
       aviso.innerHTML = '🔒 <span>Você está só <strong>acompanhando</strong> esta operação — seu usuário não está autorizado a iniciar, encerrar ou registrar.</span>';
       aviso.style.display = 'flex';
     } else if (motivo === 'dispositivo') {
-      aviso.innerHTML = `🔒 <span>Você está só <strong>acompanhando</strong> esta operação — este dispositivo não está autorizado. Peça ao Administrador pra autorizá-lo</span>`;
+      aviso.innerHTML = `🔒 <span>Você está só <strong>acompanhando</strong> esta operação — este dispositivo não está autorizado. Peça ao Administrador para autorizá-lo</span>`;
       aviso.style.display = 'flex';
     } else {
       aviso.innerHTML = '<span>Outra pessoa autorizada está controlando esta operação agora — você está só <strong>acompanhando</strong> até ela terminar.</span>';
@@ -618,7 +643,17 @@
         { titulo: 'Pausar esta operação?', textoConfirmar: 'Pausar', icon: '⏸' }
       );
       if (!confirmou) return;
-      state.pausas.push({ pausado_em: nowBrasilia().toISOString(), retomado_em: null });
+
+      // Depois de confirmar, pede o motivo — obrigatório, senão a pausa
+      // fica sem contexto pra quem for olhar o histórico depois. Cancelar
+      // aqui desiste da pausa inteira (não fica um "meio pausado").
+      const motivo = await LW.mostrarPrompt(
+        'Explique rapidamente por que esta operação está sendo pausada.',
+        { titulo: 'Motivo da pausa', placeholder: 'Ex.: aguardando liberação de manutenção…', textoConfirmar: 'Pausar', icon: '📝' }
+      );
+      if (!motivo) return;
+
+      state.pausas.push({ pausado_em: nowBrasilia().toISOString(), retomado_em: null, motivo });
     } else {
       // Retomar não pede confirmação — é só voltar ao trabalho normal.
       state.pausas[state.pausas.length - 1].retomado_em = nowBrasilia().toISOString();
@@ -1513,7 +1548,7 @@
             <p style="color:var(--text-2);font-size:.8rem;margin-top:8px;line-height:1.4">
               ${somenteRevisao
           ? 'Clique nos berços que ficaram vazios (não foram usados nesta operação).'
-          : 'Selecione um tipo abaixo (ou use os números/Ctrl+número de atalho) e clique nos berços — ou use "De/Até" ou "Completar Vazios" pra aplicar de uma vez.'}
+          : 'Selecione um tipo abaixo (ou use os números/Ctrl+número de atalho) e clique nos berços — ou use "De/Até" ou "Completar Vazios" para aplicar de uma vez.'}
             </p>
           </div>
 
@@ -1768,12 +1803,17 @@
 
   /**
    * Confere se a quantidade de berços com tipo definido na grade bate com
-   * "berços reais". Se bater, segue o registro normalmente. Se não:
-   * - Preenchidos > berços reais: pergunta se houve berço não usado — se
-   *   sim, reabre a grade só pra marcar quais (modo de revisão); se não,
-   *   berços reais SOBE pra bater com o que está preenchido.
-   * - Preenchidos < berços reais: faltam berços sem tipo — reabre a grade
-   *   completa (com abas) pra terminar de preencher.
+   * a capacidade cadastrada da bateria. Se faltar berço sem tipo definido,
+   * reabre a grade completa (com abas) pra terminar de preencher.
+   *
+   * Berço que não vai ser usado nesta operação (fisicamente vazio) NÃO
+   * entra mais aqui — isso agora se marca em "Bateria Atual" com 🚫 Não
+   * Enchido (ver bateria-atual.js), depois do registro, berço a berço.
+   * Antes existia um 3º ramo ("preenchidos > berços reais" → pergunta se
+   * houve berço não usado) porque a pessoa podia declarar uma capacidade
+   * REDUZIDA ("Berços Injetados (Real)") na hora de registrar; esse campo
+   * foi removido — a grade sempre precisa cobrir a capacidade cheia da
+   * bateria, e a marcação fina de "não enchido" cuida do resto depois.
    * @returns {Promise<boolean>} true = pode prosseguir com o registro agora
    */
   async function _reconciliarMontagemPersonalizada() {
@@ -1781,39 +1821,15 @@
     const capacidade = bateria?.bercos || 0;
     const grade = Array.isArray(state.bercos_personalizados) ? state.bercos_personalizados : [];
     const preenchidos = grade.filter(t => !!t).length;
-    const bercosDeclarados = parseInt(state.bercos_reais) || capacidade;
 
-    if (preenchidos === bercosDeclarados) return true;
+    if (preenchidos >= capacidade) return true;
 
-    if (preenchidos < bercosDeclarados) {
-      LW.mostrarAlerta(
-        `Faltam ${bercosDeclarados - preenchidos} berço(s) sem tipo de montagem definido na grade. Complete antes de registrar.`,
-        { tipo: 'aviso' }
-      );
-      await abrirGradeMontagemPersonalizada();
-      return false; // sempre pede pra clicar Registrar de novo, depois de completar
-    }
-
-    // preenchidos > bercosDeclarados
-    const houveVazios = await LW.mostrarConfirmacao(
-      `Você definiu o tipo de ${preenchidos} berços, mas "Berços Reais" está em ${bercosDeclarados}. Houve berço que não foi usado nesta operação?`,
-      {
-        titulo: 'Berços reais não coincidem com a grade', icon: '🔢',
-        textoConfirmar: 'Sim, houve berços não usados', textoCancelar: 'Não, todos foram usados',
-      }
+    LW.mostrarAlerta(
+      `Faltam ${capacidade - preenchidos} berço(s) sem tipo de montagem definido na grade. Complete antes de registrar.`,
+      { tipo: 'aviso' }
     );
-
-    if (houveVazios) {
-      await abrirGradeMontagemPersonalizada({ somenteRevisao: true });
-      return false; // pede pra clicar Registrar de novo, depois de revisar
-    }
-
-    // "Não" -> berços reais sobe pra bater com o que está preenchido na grade
-    state.bercos_reais = String(preenchidos);
-    if ($('op-bercos-reais')) $('op-bercos-reais').value = state.bercos_reais;
-    recalcPaineis();
-    persist();
-    return true;
+    await abrirGradeMontagemPersonalizada();
+    return false; // sempre pede pra clicar Registrar de novo, depois de completar
   }
 
   /**
@@ -1949,7 +1965,7 @@
         persist();
       }, {
         titulo: 'Remover este traço?',
-        corpoHtml: `<p>Todos os dados já preenchidos pra este traço (insumos, ajustes, resultados) serão perdidos.</p><p>Deseja realmente remover?</p>`,
+        corpoHtml: `<p>Todos os dados já preenchidos para este traço (insumos, ajustes, resultados) serão perdidos.</p><p>Deseja realmente remover?</p>`,
       });
     }
   }
@@ -2290,9 +2306,9 @@
     // (antiga Identidade Leve de Operador, removida — ver conversa que
     // motivou isso).
     state.operador_nome = LW.nomeDeQuemEstaLogado();
-    // Montagem Personalizada precisa que "berços reais" bata com a
-    // quantidade de berços com tipo definido na grade — confere (e resolve
-    // com a pessoa, se precisar) ANTES de seguir com o registro de verdade.
+    // Montagem Personalizada precisa que TODOS os berços da capacidade da
+    // bateria tenham tipo definido na grade — confere (e resolve com a
+    // pessoa, se precisar) ANTES de seguir com o registro de verdade.
     if (state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA) {
       _reconciliarMontagemPersonalizada().then(podeSeguir => {
         if (podeSeguir) _registrarOperacaoInterna();
@@ -2302,13 +2318,30 @@
     _registrarOperacaoInterna();
   }
 
-  function _registrarOperacaoInterna() {
+  async function _registrarOperacaoInterna() {
     const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
-    const bercos = parseInt(state.bercos_reais) || (bateria?.bercos || 0);
+    const bercos = bateria?.bercos || 0;
 
-    const calc = state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA
+    // Marcações de "🚫 Não Enchido" (Bateria Atual) — busca uma cópia
+    // FRESCA do servidor (em vez do cache local de bateria-atual.js, que
+    // só atualiza a cada alguns segundos) pra garantir que os totais
+    // gravados aqui batem exatamente com o que o servidor vai transformar
+    // em bercos_visuais na hora do registro (ver POST /registrar-operacao,
+    // lib/rotas/registro-operacao.js, que lê o mesmo snapshot no
+    // servidor). Sem conexão, cai pro cache local — melhor esforço, mesma
+    // tolerância já usada pelo resto desta tela quando a rede falha.
+    let marcacoes = {};
+    try {
+      const resp = await fetch('/bercos-andamento');
+      marcacoes = resp.ok ? await resp.json() : {};
+    } catch (_) {
+      marcacoes = (window.LWBateriaAtual && window.LWBateriaAtual.obterMarcacoes) ? window.LWBateriaAtual.obterMarcacoes() : {};
+    }
+
+    const calcBase = state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA
       ? LW.calcPaineisPersonalizado(state.bercos_personalizados)
       : LW.calcPaineis(state.tipo_montagem, bercos);
+    const calc = LW.aplicarNaoEnchidosNoCalc(calcBase, state.tipo_montagem, state.bercos_personalizados, marcacoes);
 
     const dataLocal = state.inicio.split('T')[0];
 
@@ -2328,7 +2361,6 @@
       houve_atraso: state.houve_atraso,
       motivo_atraso: state.motivo_atraso || '',
       tipo_montagem: state.tipo_montagem,
-      bercos_reais: bercos,
       // Ver "Identidade Leve de Operador" — puramente informativo, nunca
       // obrigatório (ver registrarOperacao(), acima).
       operador_nome: state.operador_nome || null,
@@ -2567,8 +2599,8 @@
    *
    * leitura = {tipo:'berco', berco} — chega, mas AINDA SEM AÇÃO definida
    *   nesta tela (só loga) — falta decidir o que uma leitura de berço da
-   *   injetora deve mudar aqui (marcar em bercos_visuais? avançar
-   *   bercos_reais? outra coisa?) — próxima etapa.
+   *   injetora deve mudar aqui (marcar em bercos_visuais? outra coisa?) —
+   *   próxima etapa.
    */
   function _aplicarLeituraAutomatica(leitura) {
     if (!LW.MODO_AUTOMATICO_ATIVO || !leitura) return;
@@ -2614,7 +2646,6 @@
       dimensaoManual: false,
       tipo_montagem: '',
       id_bateria: '',
-      bercos_reais: '',
       inicio: null,
       fim: null,
       desemplaque: null,
@@ -2655,13 +2686,12 @@
     $('op-dimensao').classList.toggle('auto-filled', !state.dimensaoManual);
     if ($('btn-editar-dimensao')) {
       $('btn-editar-dimensao').textContent = '✏️';
-      $('btn-editar-dimensao').title = 'Definir uma dimensão específica pra esta operação';
+      $('btn-editar-dimensao').title = 'Definir uma dimensão específica para esta operação';
     }
 
     $('op-montagem').value = state.tipo_montagem || '';
     _atualizarBtnConfigurarBercos();
     $('op-id-bateria').value = state.id_bateria || '';
-    $('op-bercos-reais').value = state.bercos_reais || '';
     $('op-motivo').value = state.motivo_atraso || '';
 
     updateCapacidade();
@@ -2778,7 +2808,7 @@
   function aplicarDetalhesBerco(numeroBerco, novoTipo, novaDimensao) {
     let mudouAlgo = false;
     const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
-    const capacidade = parseInt(state.bercos_reais) || (bateria?.bercos || 0);
+    const capacidade = bateria?.bercos || 0;
 
     if (typeof novaDimensao === 'string' && novaDimensao.trim() !== '') {
       const valorFormatado = _formatarDimensaoLive(novaDimensao.trim(), true);
@@ -2842,6 +2872,11 @@
   window.LWOp = {
     init,
     aplicarDetalhesBerco,
+    // Chamada por bateria-atual.js toda vez que uma marcação "🚫 Não
+    // Enchido"/"baixou" muda (clique local, desfazer, sincronização com
+    // outro dispositivo) — reflete na hora nos cards de Painéis/m² Total
+    // e por tipo (ver recalcPaineis, aplicarNaoEnchidosNoCalc em data.js).
+    recalcPaineis,
     // Usado por app-core.js (ver _aoReceberDadosSqlExcluidosDeOutroDispositivo)
     // pra saber se é seguro recarregar a página agora ou se precisa
     // esperar — true só quando o cronômetro está de fato rodando (uma

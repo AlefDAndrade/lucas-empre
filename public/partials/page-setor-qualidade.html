@@ -29,6 +29,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;" id="sq-dash-topbar">
             <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-chart-pie"></i> Visão Executiva</span>
             <div id="sq-dash-acoes" style="display:flex;gap:8px;">
+              <button class="btn btn-ghost btn-sm" id="sq-btn-xlsx" onclick="SQ.abrirExportModal('dashboard')" title="Exporta as avaliações do período/bateria filtrados acima para uma planilha Excel"><i class="fas fa-file-excel"></i> Exportar Excel (.xlsx)</button>
               <button class="btn btn-outline-accent btn-sm" id="sq-btn-html" onclick="SQ.exportDashboardHTML()"><i class="fas fa-file-code"></i> Exportar Interativo</button>
               <button class="btn btn-danger btn-sm" id="sq-btn-pdf" onclick="SQ.exportDashboardPDF()"><i class="fas fa-file-pdf"></i> Exportar PDF</button>
             </div>
@@ -264,16 +265,16 @@
               <button class="sq-btn-shape circle active"   onclick="SQ.selectShape(this,'circle')"><span class="sq-shape-circle"></span></button>
               <button class="sq-btn-shape dash"            onclick="SQ.selectShape(this,'dash')"><span class="sq-shape-dash"></span></button>
               <button class="sq-btn-shape x"                onclick="SQ.selectShape(this,'x')" title="Painel não preenchido — sempre sozinha, cor vermelha fixa"><span class="sq-shape-x">×</span></button>
-              <button class="sq-btn-shape eraser"           onclick="SQ.selectShape(this,'eraser')" title="Borracha — selecione e clique numa placa pra apagar TODAS as marcas dela de uma vez"><i class="fas fa-eraser"></i></button>
+              <button class="sq-btn-shape eraser"           onclick="SQ.selectShape(this,'eraser')" title="Borracha — selecione e clique numa placa para apagar TODAS as marcas dela de uma vez"><i class="fas fa-eraser"></i></button>
               <div class="sq-tools-sep"></div>
-              <button class="sq-btn-indicador active" onclick="SQ.toggleIndicadorAtivo(this)" title="Indicador de qualidade — ATIVADO (padrão): a próxima marca clicada é a marca de STATUS de verdade (aprovado/2ª linha/reprovado). Desative só pra corrigir/adicionar manualmente uma marca de identidade (tipo de montagem), sem que ela conte como avaliação.">I</button>
+              <button class="sq-btn-indicador active" onclick="SQ.toggleIndicadorAtivo(this)" title="Indicador de qualidade — ATIVADO (padrão): a próxima marca clicada é a marca de STATUS de verdade (aprovado/2ª linha/reprovado). Desative só para corrigir/adicionar manualmente uma marca de identidade (tipo de montagem), sem que ela conte como avaliação.">I</button>
               <div class="sq-tools-sep"></div>
               <button class="btn btn-ghost btn-sm"         onclick="SQ.undoLastAction()"><i class="fas fa-undo-alt"></i> Desfazer</button>
               <button class="btn btn-danger btn-sm"        onclick="SQ.clearAllMarks()"><i class="fas fa-trash-alt"></i> Limpar</button>
               <div class="sq-tools-sep"></div>
               <span class="sq-tools-hint" title="Funciona em qualquer lugar da tela de Avaliação, menos com o foco num campo de texto."><i class="fas fa-keyboard"></i> Atalhos: nº = cor · Ctrl+nº = forma</span>
               <div class="sq-tools-sep"></div>
-              <span class="sq-tools-hint" title="Selecione a Borracha (na Forma, acima) e clique numa placa pra apagar TODAS as marcas dela de uma vez. No computador, clique com o botão direito ainda apaga só a marca da cor/forma selecionada ali em cima."><i class="fas fa-eraser"></i> Apagar: selecione a Borracha e clique na placa</span>
+              <span class="sq-tools-hint" title="Selecione a Borracha (na Forma, acima) e clique numa placa para apagar TODAS as marcas dela de uma vez. No computador, clique com o botão direito ainda apaga só a marca da cor/forma selecionada ali em cima."><i class="fas fa-eraser"></i> Apagar: selecione a Borracha e clique na placa</span>
               <div class="sq-tools-sep"></div>
 
               <!-- Referência visual dos marcadores — mesmo padrão do botão
@@ -309,8 +310,8 @@
                     <div style="display:flex;align-items:center;gap:9px"><span class="sq-shape-x" style="display:inline-flex;flex-shrink:0">×</span>X sozinho → <strong>Painel não preenchido</strong> (categoria própria — não conta como aprovado nem reprovado)</div>
                   </div>
                   <p style="font-size:.72rem;color:var(--text-3);margin:-6px 0 14px;line-height:1.4">
-                    A cor do traço, quando vem <strong>junto de um círculo</strong>, serve só pra identificar o tipo — quem dita
-                    aprovado/reprovado nesse caso é o círculo. Por isso qualquer cor pode ser usada dessa forma pra um tipo
+                    A cor do traço, quando vem <strong>junto de um círculo</strong>, serve só para identificar o tipo — quem dita
+                    aprovado/reprovado nesse caso é o círculo. Por isso qualquer cor pode ser usada dessa forma para um tipo
                     novo (ver "Tipos sem marcação definida", mais abaixo), mesmo as que já têm outro significado quando a
                     marca vem <strong>sozinha</strong> (ex: um traço verde isolado continua sendo SP aprovado).
                   </p>
@@ -462,7 +463,10 @@
         <div class="sq-section" id="sq-history">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
             <span style="font-size:.82rem;color:var(--text-3);"><i class="fas fa-database"></i> Base de Registros</span>
-            <span style="font-size:.75rem;color:var(--text-3);" id="sq-hist-count">0 registros</span>
+            <div style="display:flex;align-items:center;gap:14px;">
+              <span style="font-size:.75rem;color:var(--text-3);" id="sq-hist-count">0 registros</span>
+              <button class="btn btn-ghost btn-sm" id="sq-btn-exportar-xlsx" onclick="SQ.abrirExportModal('history')" title="Exporta os registros filtrados abaixo para uma planilha Excel"><i class="fas fa-file-excel"></i> Exportar Excel (.xlsx)</button>
+            </div>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);">
             <div class="form-group">
@@ -511,6 +515,50 @@
                 <tbody id="sq-hist-tbody"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════
+             MODAL EXPORTAR EXCEL (.XLSX) — REGISTROS E DASHBOARD
+             Mesmo padrão visual do modal de export do Registro de
+             Baterias (ver public/partials/modal-export.html) — só que
+             sem a parte de "período" (a aba Registros/Dashboard já tem
+             os próprios filtros de data na tela, ver _sqListaParaExport).
+        ══════════════════════════════════════════════════════════ -->
+        <div id="sq-export-modal"
+          style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;align-items:center;justify-content:center">
+          <div
+            style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+              <h2 id="sq-exp-titulo" style="font-family:var(--font-display);font-size:1.2rem;color:var(--accent);letter-spacing:.06em">⬇ EXPORTAR EXCEL (.XLSX)</h2>
+              <button onclick="SQ.fecharExportModal()"
+                style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+            </div>
+
+            <!-- Seleção de colunas -->
+            <div style="margin-bottom:20px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div style="font-size:.75rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em">Colunas</div>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-ghost btn-sm" onclick="SQ.selecionarTodasColunasSQ(true)">Marcar todas</button>
+                  <button class="btn btn-ghost btn-sm" onclick="SQ.selecionarTodasColunasSQ(false)">Desmarcar todas</button>
+                </div>
+              </div>
+              <div id="sq-exp-colunas-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+            </div>
+
+            <div style="height:1px;background:var(--border);margin-bottom:20px"></div>
+
+            <!-- Rodapé -->
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span id="sq-exp-preview-count" style="font-size:.82rem;color:var(--text-3)"></span>
+              <div style="display:flex;gap:10px">
+                <button class="btn btn-ghost" onclick="SQ.fecharExportModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="SQ.confirmarExportSQ()">⬇ Baixar Excel (.xlsx)</button>
+              </div>
+            </div>
+
           </div>
         </div>
 
