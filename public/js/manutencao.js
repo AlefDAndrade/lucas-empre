@@ -624,10 +624,16 @@
   function setPrioridade(valor) {
     prioridadeSelecionada = valor;
     document.getElementById('man-manPrioridade').value = valor;
-    const classMap = { 'BAIXA': 'active-baixa', 'MÉDIA': 'active-media', 'ALTA': 'active-alta' };
+    // Cor do botão ativo é sempre inline agora (ver _corPrioridade,
+    // acima) — cada nível tem a cor que o admin configurou em
+    // Configurações > Prioridades, não mais 3 classes CSS fixas
+    // (active-baixa/media/alta). A classe .active só marca estado
+    // visual (ver manutencao.css) — sem ela, dava pra confundir com
+    // :hover no botão selecionado.
     document.querySelectorAll('.man-prioridade-btn').forEach(el => {
-      el.classList.remove('active-baixa', 'active-media', 'active-alta');
-      if(el.dataset.value === valor) el.classList.add(classMap[valor]);
+      const ativo = el.dataset.value === valor;
+      el.classList.toggle('active', ativo);
+      el.style.background = ativo ? _corPrioridade(valor) : '';
     });
   }
 
@@ -673,7 +679,7 @@
     document.getElementById('man-manEmpresaExternaRow').style.display = 'none';
     document.getElementById('man-manTipoEtiqueta').value = 'Azul';
     prioridadeSelecionada = ''; tiposSelecionados = [];
-    document.querySelectorAll('.man-prioridade-btn').forEach(el => el.classList.remove('active-baixa', 'active-media', 'active-alta'));
+    document.querySelectorAll('.man-prioridade-btn').forEach(el => { el.classList.remove('active'); el.style.background = ''; });
     document.querySelectorAll('.man-tag-anomalia').forEach(el => el.classList.remove('active'));
 
     const turnoSelect = document.getElementById('man-manTurno');
@@ -1268,7 +1274,7 @@
             <span>${esc(chamado.data)}</span>
           </div>
           <div style="color:var(--text);"><strong>${esc(chamado.observador)}</strong> - ${esc(chamado.anomalia)}</div>
-          <div style="font-size:12px; color:var(--text-2); margin-top:2px;">Prioridade: <span style="color:${chamado.prioridade === 'ALTA' ? 'var(--red)' : chamado.prioridade === 'MÉDIA' ? 'var(--accent)' : 'var(--green)'}; font-weight:600;">${esc(chamado.prioridade)}</span> | Etiqueta: ${esc(chamado.tipoEtiqueta)} | Turno: <strong>${esc(chamado.turno)}</strong></div>
+          <div style="font-size:12px; color:var(--text-2); margin-top:2px;">Prioridade: <span style="color:${_corPrioridade(chamado.prioridade)}; font-weight:600;">${esc(chamado.prioridade)}</span> | Etiqueta: ${esc(chamado.tipoEtiqueta)} | Turno: <strong>${esc(chamado.turno)}</strong></div>
           ${exibirImagem(chamado.fotoOperador, 'Anexo do problema')}
         </div>
 
@@ -1387,8 +1393,19 @@
     return null;
   }
 
+  // Cor de uma prioridade — antes era um ternário fixo (só 3 valores
+  // possíveis, sempre nesta ordem: ALTA=vermelho, MÉDIA=azul,
+  // BAIXA=verde). Agora lê de LW.PRIORIDADE_OPTS (config.json →
+  // prioridades.opcoes, configurável em Configurações > Prioridades) —
+  // qualquer quantidade de níveis, cada um com a cor que o admin
+  // escolheu. Fallback (var(--text-2), cinza neutro) cobre um chamado
+  // ANTIGO com uma prioridade que foi removida/renomeada depois — nunca
+  // trava, só mostra sem destaque de cor nenhum (mesmo raciocínio da
+  // bateria órfã em setor-qualidade.js, _selecionarBateriaNoForm).
   function _corPrioridade(p) {
-    return p === 'ALTA' ? 'var(--red)' : p === 'MÉDIA' ? 'var(--accent)' : 'var(--green)';
+    const opts = (typeof LW !== 'undefined' && Array.isArray(LW.PRIORIDADE_OPTS)) ? LW.PRIORIDADE_OPTS : [];
+    const opt = opts.find(o => o.label === p);
+    return opt ? opt.cor : 'var(--text-2)';
   }
 
   function _renderizarCartaoCorretiva(m) {
@@ -2728,10 +2745,100 @@
   // as listas chegarem do servidor (ver carregarTudoDoServidor(), início
   // do arquivo) ANTES de renderizar qualquer coisa, senão a primeira
   // renderização mostraria tudo vazio por um instante.
+  // Popula #man-filtroTipo, #man-manTipoManutencao e #man-progTipo a
+  // partir de LW.TIPO_MANUTENCAO_OPTS — mesmo padrão de
+  // _carregarOpcoesBaterias() em setor-qualidade.js (ver comentário lá
+  // pro histórico completo desse padrão). Os 3 selects tinham só
+  // "Elétrica"/"Mecânica" fixos no HTML (ver page-manutencao.html);
+  // agora são regenerados a partir de config.json (Configurações > Tipos
+  // de Manutenção), preservando o valor já selecionado quando possível.
+  // As <option>s que continuam no HTML viram só um FALLBACK, pro campo
+  // nunca ficar vazio antes do config carregar.
+  function carregarOpcoesTipoManutencao() {
+    const aplicar = () => {
+      const tipos = (typeof LW !== 'undefined' && Array.isArray(LW.TIPO_MANUTENCAO_OPTS)) ? LW.TIPO_MANUTENCAO_OPTS : [];
+      if (!tipos.length) return; // config ainda não carregou — mantém o fallback do HTML
+
+      const selFiltro = document.getElementById('man-filtroTipo');
+      if (selFiltro) {
+        const atual = selFiltro.value;
+        selFiltro.innerHTML = '<option value="">Todos</option>' +
+          tipos.map(t => `<option value="${t}">${t}</option>`).join('');
+        if (atual && (atual === '' || tipos.includes(atual))) selFiltro.value = atual;
+      }
+
+      const selChamado = document.getElementById('man-manTipoManutencao');
+      if (selChamado) {
+        const atual = selChamado.value;
+        selChamado.innerHTML = '<option value="">Selecione...</option>' +
+          tipos.map(t => `<option value="${t}">${t}</option>`).join('');
+        if (atual && (atual === '' || tipos.includes(atual))) selChamado.value = atual;
+      }
+
+      const selProgramada = document.getElementById('man-progTipo');
+      if (selProgramada) {
+        const atual = selProgramada.value;
+        selProgramada.innerHTML = tipos.map(t => `<option value="${t}">${t}</option>`).join('');
+        if (atual && tipos.includes(atual)) selProgramada.value = atual;
+      }
+    };
+    if (typeof LW !== 'undefined' && typeof LW.waitConfig === 'function') {
+      LW.waitConfig(aplicar);
+    } else {
+      aplicar();
+    }
+  }
+
+  // Popula #man-filtroPrioridade e reconstrói os botões de Prioridade
+  // (.man-prioridade-box) a partir de LW.PRIORIDADE_OPTS — mesmo padrão
+  // de carregarOpcoesTipoManutencao, acima. Cada nível agora tem cor
+  // PRÓPRIA (configurável em Configurações > Prioridades), por isso os
+  // botões são sempre RECONSTRUÍDOS aqui (não mais 3 <button> fixos com
+  // classes CSS fixas) — a cor de cada um é aplicada inline (ver
+  // setPrioridade/_corPrioridade, acima) só quando SELECIONADO, igual
+  // sempre foi visualmente. Preserva a seleção atual
+  // (prioridadeSelecionada) depois de reconstruir — senão reabrir a
+  // tela ou o admin salvar a config no meio do preenchimento de um
+  // chamado perderia a prioridade já escolhida no formulário (o campo
+  // oculto man-manPrioridade mantém o valor de qualquer forma; só o
+  // destaque visual do botão que dependeria de existir um <button> com
+  // aquele data-value — se a prioridade foi removida/renomeada bem
+  // nesse meio-tempo raríssimo, o campo salva certo mesmo assim, só sem
+  // nenhum botão destacado).
+  function carregarOpcoesPrioridade() {
+    const aplicar = () => {
+      const opts = (typeof LW !== 'undefined' && Array.isArray(LW.PRIORIDADE_OPTS)) ? LW.PRIORIDADE_OPTS : [];
+      if (!opts.length) return; // config ainda não carregou — mantém o fallback do HTML
+
+      const selFiltro = document.getElementById('man-filtroPrioridade');
+      if (selFiltro) {
+        const atual = selFiltro.value;
+        selFiltro.innerHTML = '<option value="">Todas</option>' +
+          opts.map(o => `<option value="${o.label}">${o.label}</option>`).join('');
+        if (atual && (atual === '' || opts.some(o => o.label === atual))) selFiltro.value = atual;
+      }
+
+      const box = document.querySelector('.man-prioridade-box');
+      if (box) {
+        box.innerHTML = opts.map(o =>
+          `<button type="button" class="man-prioridade-btn" data-value="${o.label}" onclick="setPrioridade('${o.label.replace(/'/g, "\\'")}')">${o.label}</button>`
+        ).join('');
+        if (prioridadeSelecionada) setPrioridade(prioridadeSelecionada);
+      }
+    };
+    if (typeof LW !== 'undefined' && typeof LW.waitConfig === 'function') {
+      LW.waitConfig(aplicar);
+    } else {
+      aplicar();
+    }
+  }
+
   async function init() {
     const progData = document.getElementById('man-progData');
     if (progData) progData.valueAsDate = new Date();
     navegar('manutencao');
+    carregarOpcoesTipoManutencao();
+    carregarOpcoesPrioridade();
     await carregarTudoDoServidor();
     renderDashboard(); renderCorretiva(); renderProgramada();
     _aplicarVisibilidadeDeEdicao();
@@ -2837,6 +2944,8 @@
     toggleTipo,
     verificarEAgendiar,
     init,
+    carregarOpcoesTipoManutencao,
+    carregarOpcoesPrioridade,
   };
   window.abrirDetalhesProgramada = MAN.abrirDetalhesProgramada;
   window.abrirHistorico = MAN.abrirHistorico;
