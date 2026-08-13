@@ -250,6 +250,20 @@
     return bateria?.bercos || 0;
   }
 
+  // Cópia local de LW.formatDateTime (data.js) — mesmo padrão de
+  // duplicação já usado neste arquivo (ver comentário no topo desta
+  // seção): o HTML exportado standalone não tem acesso a data.js, então
+  // o modal de Detalhes do Berço embutido no export (ver
+  // _gerarHtmlAfStandalone, mais abaixo) precisa da própria cópia.
+  function _afFormatDateTime(isoString) {
+    if (!isoString) return '—';
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '—';
+    const data = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+    const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    return `${data} ${hora}`;
+  }
+
   const AF_CORES_PALETE = { 1: '#66bb6a', 2: '#42a5f5', 3: '#ab47bc', 4: '#ffa726' };
 
   function _afPaletePorMetadeELado() {
@@ -310,6 +324,18 @@
     return null;
   }
 
+  // Painel avaliado que caiu na posição (pallet+posicao) informada —
+  // mesmo cruzamento que _afPaleteDoBerco já faz pra desenhar o mini
+  // palete (acima), só que aqui contra avaliacao.paineis em vez de só
+  // devolver a posição. Usa _labelPainel/_corPainel (mesmas funções da
+  // seção "✅ Avaliação de Qualidade" da tela cheia, ver _renderAvaliacao)
+  // pra manter o mesmo texto/cor em ambos os lugares.
+  function _afPainelDoBerco(avaliacao, pos) {
+    if (!avaliacao || !pos) return null;
+    const paineis = avaliacao.paineis || [];
+    return paineis.find(p => p.pallet === pos.pallet && p.posicao === pos.posicao) || null;
+  }
+
   // Chamada pelo clique numa célula da grade (ver _renderBercos, abaixo)
   // — usa _ultimoDetalhe (preenchido por render()) em vez de receber os
   // dados por parâmetro, pra poder ser referenciada direto no onclick
@@ -363,6 +389,16 @@
     const capacidadePalete = capacidade;
     const posicaoDireito = _afPaleteDoBerco(numeroBerco, 'direito', capacidadePalete);
     const posicaoEsquerdo = _afPaleteDoBerco(numeroBerco, 'esquerdo', capacidadePalete);
+
+    // Avaliação de Qualidade DESTE berço — acha, pra cada lado, o painel
+    // avaliado que caiu na mesma posição de palete calculada acima (ver
+    // _afPainelDoBerco). Bateria sem avaliação nenhuma (avaliacao null,
+    // ver _renderAvaliacao) some o campo inteiro em vez de mostrar
+    // "— Sem marcação" nos dois lados, que sugeriria marcação zerada
+    // quando na verdade é que a bateria nunca foi avaliada.
+    const avaliacaoOp = _ultimoDetalhe.avaliacao || null;
+    const painelDireito = _afPainelDoBerco(avaliacaoOp, posicaoDireito);
+    const painelEsquerdo = _afPainelDoBerco(avaliacaoOp, posicaoEsquerdo);
 
     // Receita do traço que encheu este berço — mesmos campos e mesma
     // formatação de "Receita Utilizada" (_renderReceita, acima), só que
@@ -446,6 +482,24 @@
               </div>
             </div>
           </div>
+          ${avaliacaoOp ? `
+          <div class="ba-detalhes-campo">
+            <label class="form-label">Avaliação de Qualidade</label>
+            <div class="ba-detalhes-paletes">
+              <div class="ba-detalhes-palete-lado">
+                <span class="ba-detalhes-palete-lado-label">Direito</span>
+                <div class="af-slab" style="border-left-color:${_corPainel(painelDireito)}">
+                  <span class="af-slab-resultado" style="color:${_corPainel(painelDireito)}">${LW.escaparHtml(_labelPainel(painelDireito))}</span>
+                </div>
+              </div>
+              <div class="ba-detalhes-palete-lado">
+                <span class="ba-detalhes-palete-lado-label">Esquerdo</span>
+                <div class="af-slab" style="border-left-color:${_corPainel(painelEsquerdo)}">
+                  <span class="af-slab-resultado" style="color:${_corPainel(painelEsquerdo)}">${LW.escaparHtml(_labelPainel(painelEsquerdo))}</span>
+                </div>
+              </div>
+            </div>
+          </div>` : ''}
         </div>
 
         <div class="ba-detalhes-acoes">
@@ -492,7 +546,15 @@
 
     const podeAbrirDetalhes = typeof LWFocada !== 'undefined';
 
-    el.innerHTML = `<div class="ba-grid">${ordenados.map(b => {
+    // Dica de clique — só faz sentido mostrar quando o clique realmente
+    // funciona (podeAbrirDetalhes true tanto na tela ao vivo quanto no
+    // HTML exportado standalone, ver window.LWFocada em
+    // _gerarHtmlAfStandalone, mais abaixo).
+    const dicaClique = podeAbrirDetalhes
+      ? `<div style="text-align:center;font-size:.78rem;color:var(--text-3);margin-bottom:10px">💡 Clique em um berço para ver os detalhes.</div>`
+      : '';
+
+    el.innerHTML = `${dicaClique}<div class="ba-grid">${ordenados.map(b => {
       // "✕" (não enchido) é um estado À PARTE de "baixou" (vazamento) —
       // mesma distinção de bateria-atual.js: o painel nunca existiu pra
       // avaliar, diferente de um vazamento observado. Sem checar os dois
@@ -773,10 +835,47 @@
   }
 
   // ── Avaliação de qualidade (painéis em texto, não em marca) ──────
+  // Lista de motivos de defeito — mesma lista fixa de MOTIVOS_DEFEITO em
+  // setor-qualidade.js (terminologia de qualidade da fábrica, não
+  // configurável). Duplicada aqui porque cada página carrega seu próprio
+  // script, sem módulo compartilhado — só o necessário pro tooltip do
+  // código (nome completo do motivo), a exibição em si usa o código puro
+  // já salvo em p.motivo.
+  const _MOTIVO_POR_CODIGO = {
+    BC: 'Borra de Cimento',
+    CD: 'Cimentícia Descamando',
+    CC: 'Cimentícia Não Colada',
+    CF: 'Cimentícia Fora de Posição',
+    EM: 'Espessura Maior',
+    EP: 'Engoliu Placa',
+    FD: 'Falha Desmoldante',
+    FE: 'Falha Enchimento',
+    FT: 'Falha Traço',
+    PA: 'Painel Amassado',
+    QE: 'Quebra por Empilhadeira',
+    PQ: 'Painel Quebrado',
+    PT: 'Perfil Torto',
+    TR: 'Trincada',
+    OT: 'Outros',
+  };
+  // Sufixo " — CÓDIGO" pra rótulo de painel com motivo de defeito
+  // registrado (2ª linha ou reprovado — únicos resultados que exigem
+  // motivo, ver _corExigeMotivo em setor-qualidade.js). Sem motivo salvo
+  // (avaliação antiga, anterior à feature de motivos), fica em branco —
+  // não força nada.
+  function _sufixoMotivo(p) {
+    if (!p || !p.motivo) return '';
+    return ` — ${LW.escaparHtml(p.motivo)}`;
+  }
+  function _tituloMotivo(p) {
+    if (!p || !p.motivo) return '';
+    if (p.motivo === 'OT') return p.motivoDescricao ? LW.escaparHtml(p.motivoDescricao) : 'Outros (sem descrição)';
+    return LW.escaparHtml(_MOTIVO_POR_CODIGO[p.motivo] || p.motivo);
+  }
   function _labelPainel(p) {
     if (!p) return '— Sem marcação';
-    if (p.resultado === 'aprovado') return p.linha === '2ª' ? 'Aprovado / 2ª linha' : 'Aprovado / 1ª linha';
-    if (p.resultado === 'reprovado') return 'Reprovado';
+    if (p.resultado === 'aprovado') return (p.linha === '2ª' ? 'Aprovado / 2ª linha' : 'Aprovado / 1ª linha') + _sufixoMotivo(p);
+    if (p.resultado === 'reprovado') return 'Reprovado' + _sufixoMotivo(p);
     // Bateria excluída da fila do Setor de Qualidade antes de ser avaliada
     // de verdade (ver SQ.excluirDaFila, setor-qualidade.js) — TODOS os
     // painéis dela nascem com este resultado, tipoObtido sempre null.
@@ -817,11 +916,18 @@
     const paineis = avaliacao.paineis || [];
 
     let html = '<div class="af-paineis-grid">';
-    // Ordem visual pedida: Pallet 2/Pallet 1 na 1ª linha, Pallet 3/Pallet 4
-    // na 2ª (layout 2x2) — só a ORDEM DE EXIBIÇÃO muda; os dados de cada
-    // pallet continuam vindo do mesmo número de sempre (avaliacao.paineis,
-    // montagem['palletN']), sem nenhuma outra mudança.
-    [2, 1, 3, 4].forEach(p => {
+    // Ordem crescente (Pallet 1, 2, 3, 4) — ao contrário do Setor de
+    // Qualidade (setor-qualidade.js), que usa a ordem espelhada [2,1,3,4]
+    // de propósito pra bater com o layout FÍSICO da máquina naquela tela
+    // (ver comentário em setor-qualidade.js e
+    // test/setor-qualidade-layout-2x2-paletes.test.js). Aqui, na Análise
+    // Focada, essa mesma ordem tinha sido copiada sem necessidade e só
+    // dava a impressão de pallets trocados (ver conversa que motivou:
+    // "os paletes estão trocados... quero ordem crescente começando do
+    // 01"). Os DADOS de cada pallet continuam vindo do mesmo número de
+    // sempre (avaliacao.paineis, montagem['palletN']) — só a ordem de
+    // exibição mudou.
+    [1, 2, 3, 4].forEach(p => {
       // Tipo de montagem daquele pallet — "no cantinho", cabeçalho do
       // próprio card do pallet, não em cada painel individual.
       const tipoMontPallet = montagem['pallet' + p] || '—';
@@ -830,9 +936,10 @@
       for (let i = 1; i <= totalPorPallet; i++) {
         const painel = paineis.find(pp => pp.pallet === p && pp.posicao === i);
         const cor = _corPainel(painel);
+        const tituloMotivo = _tituloMotivo(painel);
         html += `<div class="af-slab" style="border-left-color:${cor}">
           <span class="af-slab-num">${i}</span>
-          <span class="af-slab-resultado" style="color:${cor}">${_labelPainel(painel)}</span>
+          <span class="af-slab-resultado" style="color:${cor}"${tituloMotivo ? ` title="${tituloMotivo}"` : ''}>${_labelPainel(painel)}</span>
         </div>`;
       }
       html += '</div></div>';
@@ -1221,18 +1328,84 @@
     }
   }
 
-  // Cor determinística (hash simples) por tipo de montagem — simplificação
-  // assumida aqui: sem a cor REAL configurada em Configurações → Montagem
-  // embutida (exigiria embutir MONTAGEM_OPCOES inteiro), cada tipo distinto
-  // ganha uma cor fixa e consistente dentro do próprio arquivo exportado
-  // (mesmo tipo = mesma cor sempre, só não é a mesma cor da tela ao vivo).
-  const _PALETA_TIPO = ['#4d8dff', '#2ecc71', '#8b5cf6', '#f5821f', '#06b6d4', '#e5484d', '#f1c40f'];
-  function _corPorTipoSimplificada(tipo) {
-    if (!tipo) return null;
-    let hash = 0;
-    for (let i = 0; i < tipo.length; i++) hash = (hash * 31 + tipo.charCodeAt(i)) >>> 0;
-    const cor = _PALETA_TIPO[hash % _PALETA_TIPO.length];
-    return { cor: '#fff', bg: cor, borda: cor };
+  // Cor REAL de um tipo de montagem — mesma lógica de corPorTipoSimples/
+  // corMontagemPorLabel (data.js: _hexDoTipoSimples/corCssDoHex/
+  // hslParaHex/hexParaRgba), reimplementada aqui com o prefixo "_af" porque
+  // o HTML exportado standalone não carrega data.js — ele só tem acesso ao
+  // que for colado neste template (ver _gerarHtmlAfStandalone, abaixo).
+  // Lê de LW.MONTAGEM_OPCOES, que é o retrato de configuração embutido no
+  // export (ver "const LW = {...}", mais abaixo) — cada tipo de montagem
+  // usa a MESMA cor configurada em Configurações → Montagem, igual à tela
+  // ao vivo. Substitui _corPorTipoSimplificada/_PALETA_TIPO (hash
+  // determinístico), que dava uma cor genérica e consistente mas
+  // DIFERENTE da cor real (ver conversa que motivou: "os cards de berço no
+  // export ficam todos com cores genéricas, quero a cor real que indica o
+  // tipo de montagem").
+  function _afHslParaHex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    const paraHex = x => Math.round(255 * x).toString(16).padStart(2, '0');
+    return `#${paraHex(f(0))}${paraHex(f(8))}${paraHex(f(4))}`;
+  }
+  function _afHexParaRgb(hex) {
+    let h = String(hex || '').replace('#', '').trim();
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const num = parseInt(h, 16) || 0;
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+  }
+  function _afHexParaRgba(hex, alpha) {
+    const { r, g, b } = _afHexParaRgb(hex);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  function _afCorCssDoHex(hex) {
+    return { cor: hex, bg: _afHexParaRgba(hex, .15), borda: _afHexParaRgba(hex, .3) };
+  }
+  function _afCorMontagemNeutra() {
+    return { hibrida: false, cor: '#5c6475', bg: 'rgba(156, 163, 175, .1)', borda: '#2a2f3a' };
+  }
+  // Extrai o hex de um tipo SIMPLES — aceita o objeto da opção ou o código
+  // do tipo (ex: 'sp'), buscando em LW.MONTAGEM_OPCOES nesse 2º caso.
+  function _afHexDoTipoSimples(tipoOuOpcao) {
+    const op = typeof tipoOuOpcao === 'string'
+      ? (LW.MONTAGEM_OPCOES || []).find(o => o.modo === 'simples' && o.tipo === tipoOuOpcao)
+      : tipoOuOpcao;
+    if (!op) return null;
+    if (typeof op.cor === 'string' && op.cor) return op.cor;
+    if (typeof op.corHue === 'number') return _afHslParaHex(op.corHue, 60, 52);
+    return null;
+  }
+  function _afCorMontagemPorLabel(label) {
+    const opcao = (LW.MONTAGEM_OPCOES || []).find(o => o.label === label);
+    if (!opcao) return _afCorMontagemNeutra();
+    if (opcao.modo === 'simples') {
+      const hex = _afHexDoTipoSimples(opcao);
+      if (hex) return { ..._afCorCssDoHex(hex), hibrida: false };
+    }
+    if (opcao.modo === 'hibrida' && Array.isArray(opcao.tipos) && opcao.tipos.length === 2) {
+      const [op1, op2] = opcao.tipos.map(t =>
+        (LW.MONTAGEM_OPCOES || []).find(o => o.modo === 'simples' && o.tipo === t));
+      const hex1 = _afHexDoTipoSimples(op1);
+      const hex2 = _afHexDoTipoSimples(op2);
+      if (hex1 && hex2) {
+        const c1 = _afCorCssDoHex(hex1);
+        const c2 = _afCorCssDoHex(hex2);
+        return {
+          hibrida: true,
+          cor1: c1.cor, cor2: c2.cor,
+          cor: c1.cor,
+          bg: `linear-gradient(90deg, ${c1.bg} 50%, ${c2.bg} 50%)`,
+          borda: c1.borda,
+        };
+      }
+    }
+    return _afCorMontagemNeutra();
+  }
+  function _afCorPorTipoSimples(tipo) {
+    const hex = _afHexDoTipoSimples(tipo);
+    if (!hex) return _afCorMontagemNeutra();
+    return { ..._afCorCssDoHex(hex), hibrida: false };
   }
 
   function _gerarHtmlAfStandalone(detalhe, paradasDaJanela = []) {
@@ -1286,6 +1459,39 @@
   details.chart-box[open] > summary::after { transform:rotate(90deg); }
   details.chart-box > div { padding:16px; }
   #af-paradas-contagem { text-transform:none; letter-spacing:normal; font-weight:400; }
+  /* Modal "📋 Detalhes do Berço" (ver abrirDetalhesBerco, acima) — cópia
+     das regras de .ba-detalhes-*, .ba-palete-*, .form-label, .btn de
+     styles.css, local a este export (mesmo padrão já usado acima pra
+     .af-*, .ba-grid, .ba-celula): o HTML exportado é autossuficiente, não
+     carrega styles.css. var(--bg-2)/var(--bg-3)/var(--font-display) não
+     existem nas paletas de LW.gerarCssExportPadrao (acima), por isso os
+     fallbacks abaixo (2º valor de var()). */
+  .ba-detalhes-overlay { position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .ba-detalhes-box { position:relative; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:0 24px 80px rgba(0,0,0,.6); padding:28px; width:420px; max-width:94vw; max-height:90vh; overflow-y:auto; }
+  .ba-detalhes-fechar { position:absolute; top:14px; right:14px; background:none; border:none; color:var(--text-3); font-size:1.1rem; cursor:pointer; line-height:1; padding:4px; }
+  .ba-detalhes-fechar:hover { color:var(--text); }
+  .ba-detalhes-titulo { font-family:var(--font-display, inherit); font-size:1.1rem; color:var(--accent); text-align:center; margin:0 0 18px; }
+  .ba-detalhes-desenho { display:flex; justify-content:center; margin-bottom:22px; }
+  .ba-detalhes-celula { display:flex; flex-direction:column; align-items:center; justify-content:space-between; width:110px; height:150px; border-radius:var(--radius-lg); padding:14px 0; font-weight:700; }
+  .ba-detalhes-dot { font-size:1.3rem; opacity:.45; }
+  .ba-detalhes-dot-x { opacity:1; color:var(--blue); text-shadow:0 0 6px var(--blue); }
+  .ba-detalhes-dot-vazou { opacity:1; color:var(--red); text-shadow:0 0 6px var(--red); }
+  .ba-detalhes-label { font-size:1.05rem; }
+  .ba-detalhes-campos { display:flex; flex-direction:column; gap:14px; margin-bottom:22px; }
+  .ba-det-valor { color:var(--text-2); font-size:.92rem; padding:8px 0; }
+  .ba-detalhes-acoes { display:flex; justify-content:flex-end; gap:10px; }
+  .ba-detalhes-paletes { display:flex; gap:18px; padding-top:4px; }
+  .ba-detalhes-palete-lado { flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0; }
+  .ba-detalhes-palete-lado-label { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-3); }
+  .ba-palete-mini { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .ba-palete-mini-titulo { font-size:.8rem; font-weight:700; }
+  .ba-palete-mini-stack { display:flex; flex-direction:column-reverse; gap:2px; width:70px; }
+  .ba-palete-slot { display:flex; align-items:center; justify-content:center; width:100%; height:20px; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg-2, var(--bg-1)); color:var(--text-3); font-size:.68rem; font-weight:600; }
+  .ba-palete-slot-ativo { color:#fff; box-shadow:0 0 6px rgba(0,0,0,.35); }
+  .form-label { font-size:.67rem; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--text-3); }
+  .btn { display:inline-flex; align-items:center; gap:7px; padding:9px 18px; border-radius:var(--radius); font-family:var(--font-display, inherit); font-size:.88rem; font-weight:600; letter-spacing:.05em; text-transform:uppercase; cursor:pointer; border:none; transition:all .15s; white-space:nowrap; }
+  .btn-ghost { background:transparent; color:var(--text-2); border:1px solid var(--border-2); }
+  .btn-ghost:hover { background:var(--bg-3, var(--bg-card)); color:var(--text); }
 </style>
 </head>
 <body>
@@ -1305,13 +1511,34 @@
   'use strict';
   const DETALHE = ${detalheJson};
   const PARADAS = ${paradasJson};
+  // Só leitura: retrato dos dados de CONFIG que o modal de Detalhes do
+  // Berço precisa (BATERIA_IDS/MONTAGEM_OPCOES/PALETES_CONFIG), tal como
+  // estavam quando esta exportação foi gerada — o mesmo espírito de
+  // DETALHE/PARADAS acima. Uma config alterada DEPOIS da exportação
+  // (ex: nº de berços de uma bateria, opções de montagem) não reflete
+  // aqui; é um retrato fixo, igual ao resto do arquivo.
   const LW = {
     escaparHtml: s => { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; },
     TIPO_MONTAGEM_PERSONALIZADA: 'PERSONALIZADA',
-    corPorTipoSimples: ${_corPorTipoSimplificada},
-    corMontagemPorLabel: ${_corPorTipoSimplificada},
+    corPorTipoSimples: ${_afCorPorTipoSimples},
+    corMontagemPorLabel: ${_afCorMontagemPorLabel},
+    formatDateTime: ${_afFormatDateTime},
+    MONTAGEM_OPCOES: ${JSON.stringify(LW.MONTAGEM_OPCOES || [])},
+    BATERIA_IDS: ${JSON.stringify(LW.BATERIA_IDS || [])},
+    PALETES_CONFIG: ${JSON.stringify(LW.PALETES_CONFIG || LW.PALETES_CONFIG_DEFAULT || {})},
+    PALETES_CONFIG_DEFAULT: ${JSON.stringify(LW.PALETES_CONFIG_DEFAULT || {})},
   };
-  const _PALETA_TIPO = ${JSON.stringify(_PALETA_TIPO)};
+  ${_afHslParaHex}
+  ${_afHexParaRgb}
+  ${_afHexParaRgba}
+  ${_afCorCssDoHex}
+  ${_afCorMontagemNeutra}
+  ${_afHexDoTipoSimples}
+  const AF_CORES_PALETE = ${JSON.stringify(AF_CORES_PALETE)};
+  // abrirDetalhesBerco (embaixo) lê _ultimoDetalhe por closure, igual à
+  // tela ao vivo (ver comentário original da função) — aqui é sempre
+  // DETALHE, já que o export só tem 1 operação.
+  const _ultimoDetalhe = DETALHE;
 
   ${_fmtData}
   ${_fmtHora}
@@ -1327,9 +1554,27 @@
   ${_fmtLeitura}
   ${_renderReceita}
   ${_renderParadas}
+  const _MOTIVO_POR_CODIGO = ${JSON.stringify(_MOTIVO_POR_CODIGO)};
+  ${_sufixoMotivo}
+  ${_tituloMotivo}
   ${_labelPainel}
   ${_corPainel}
+  ${_totalPorPallet}
   ${_renderAvaliacao}
+  ${_afCapacidadeConfigurada}
+  ${_afPaletePorMetadeELado}
+  ${_afPaleteDoBerco}
+  ${_afDesenhoPaleteMini}
+  ${_afTiposPorBerco}
+  ${_afTracoDoBerco}
+  ${_afPainelDoBerco}
+  ${abrirDetalhesBerco}
+
+  // Expõe abrirDetalhesBerco globalmente com o mesmo nome usado na tela
+  // ao vivo (LWFocada.abrirDetalhesBerco) — é isso que faz _renderBercos
+  // (acima) tratar as células como clicáveis (podeAbrirDetalhes = typeof
+  // LWFocada !== 'undefined') e o onclick inline de cada célula resolver.
+  window.LWFocada = { abrirDetalhesBerco };
 
   _renderCabecalho(DETALHE.operacao || {});
   _renderBercos(DETALHE.bercosVisuais, DETALHE.operacao);
