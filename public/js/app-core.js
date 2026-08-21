@@ -187,6 +187,19 @@
       return true;
     }
 
+    // Mesma ideia de _extrairChamadoIdDaUrl, acima, só que pro deep-link
+    // de "PDF pronto" (Etapa 6 do plano "PDF sobrevive a fechar a aba" —
+    // ver lib/notificacoes-push.js/notificarPdfPronto e
+    // public/js/exportar-pdf-status.js) — a URL vem como
+    // "/index.html?pdfPronto=jobId".
+    function _extrairPdfProntoJobIdDaUrl(urlStr) {
+      try {
+        return new URL(urlStr, window.location.origin).searchParams.get('pdfPronto');
+      } catch (e) {
+        return null;
+      }
+    }
+
     // Recebido do service worker quando a notificação é clicada com uma
     // aba do app JÁ aberta (ver 'notificationclick', service-worker.js —
     // nesse caso ele só FOCA a aba existente, sem recarregar a página, e
@@ -198,7 +211,9 @@
         const id = _extrairChamadoIdDaUrl(dados.url);
         if (id) { _abrirChamadoDeNotificacao(id); return; }
         const idProgramada = _extrairProgramadaIdDaUrl(dados.url);
-        if (idProgramada) _abrirProgramadaDeNotificacao(idProgramada);
+        if (idProgramada) { _abrirProgramadaDeNotificacao(idProgramada); return; }
+        const idPdfPronto = _extrairPdfProntoJobIdDaUrl(dados.url);
+        if (idPdfPronto && window.LWExportarPdfStatus) LWExportarPdfStatus.abrirDeNotificacao(idPdfPronto);
       });
     }
 
@@ -851,6 +866,14 @@
       // NUNCA pede permissão de notificação sozinho aqui (isso só
       // acontece no clique explícito do usuário no botão).
       if (window.LWPush) LWPush.iniciar();
+
+      // Etapa 6 do plano "PDF sobrevive a fechar a aba" (ver
+      // public/js/exportar-pdf-status.js) — checa se o usuário logado
+      // tem uma exportação de PDF pendente (processando ou pronta pra
+      // baixar), mesmo que tenha sido iniciada numa aba/dispositivo
+      // diferente. Roda em segundo plano, sem bloquear o boot — mesmo
+      // raciocínio de LWPush.iniciar() acima.
+      if (window.LWExportarPdfStatus) LWExportarPdfStatus.iniciar();
 
       // A navegação agora é uma tabbar horizontal sempre visível (ver
       // nav-tabbar.html) — não é mais um painel off-canvas que precisa
@@ -2181,7 +2204,7 @@
       // checagem fica explícita mesmo assim, não hardcoded pra um perfil
       // só, igual sempre foi (evita ficar obsoleta se um perfil novo
       // aparecer sem nenhuma aba de config no futuro).
-      if (role !== 'Administrador' && !_paginaPermitida('config-atalhos') && !_paginaPermitida('config-dados') && !_paginaPermitida('config-automacao') && !_paginaPermitida('config-usuarios') && !_paginaPermitida('config-autorizados') && !_paginaPermitida('config-dispositivos') && !_paginaPermitida('config-sql') && !_paginaPermitida('config-notificacoes') && !_paginaPermitida('config-paradas') && !_paginaPermitida('config-tipos-manutencao') && !_paginaPermitida('config-prioridades')) return;
+      if (role !== 'Administrador' && !_paginaPermitida('config-atalhos') && !_paginaPermitida('config-dados') && !_paginaPermitida('config-automacao') && !_paginaPermitida('config-usuarios') && !_paginaPermitida('config-autorizados') && !_paginaPermitida('config-dispositivos') && !_paginaPermitida('config-operacoes-offline') && !_paginaPermitida('config-sql') && !_paginaPermitida('config-notificacoes') && !_paginaPermitida('config-paradas') && !_paginaPermitida('config-tipos-manutencao') && !_paginaPermitida('config-prioridades')) return;
 
       // Lê o estado atual das variáveis já carregadas pelo data.js
       // BATERIA_IDS agora é array de objetos {id, label, bercos}
@@ -2220,7 +2243,7 @@
       // sempre "dados", que era o padrão fixo de antes (só fazia sentido
       // quando só o Administrador Master via este modal).
       const primeiraAbaPermitida = role === 'Administrador' ? 'dados'
-        : ['dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'dispositivos', 'automacao', 'sql', 'notificacoes', 'paradas', 'tipos-manutencao', 'prioridades'].find(s => _paginaPermitida('config-' + s)) || 'atalhos';
+        : ['dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'dispositivos', 'operacoes-offline', 'automacao', 'sql', 'notificacoes', 'paradas', 'tipos-manutencao', 'prioridades'].find(s => _paginaPermitida('config-' + s)) || 'atalhos';
       cfgMostrarSecao(primeiraAbaPermitida);
       document.getElementById('config-modal').style.display = 'flex';
       if (typeof LWTour !== 'undefined') LWTour.aoAbrirModal('config');
@@ -2242,7 +2265,7 @@
       // 'autorizados' (Operação em Andamento) faltava aqui — a aba nunca
       // era escondida de ninguém, pra nenhum perfil (bug separado, pego
       // na mesma revisão do bug do cssText, acima).
-      const MAPA = { dados: 'cfg-nav-dados', paletes: 'cfg-nav-paletes', atalhos: 'cfg-nav-atalhos', usuarios: 'cfg-nav-usuarios', autorizados: 'cfg-nav-autorizados', dispositivos: 'cfg-nav-dispositivos', automacao: 'cfg-nav-automacao', sql: 'cfg-nav-sql', notificacoes: 'cfg-nav-notificacoes', paradas: 'cfg-nav-paradas', 'tipos-manutencao': 'cfg-nav-tipos-manutencao', prioridades: 'cfg-nav-prioridades' };
+      const MAPA = { dados: 'cfg-nav-dados', paletes: 'cfg-nav-paletes', atalhos: 'cfg-nav-atalhos', usuarios: 'cfg-nav-usuarios', autorizados: 'cfg-nav-autorizados', dispositivos: 'cfg-nav-dispositivos', 'operacoes-offline': 'cfg-nav-operacoes-offline', automacao: 'cfg-nav-automacao', sql: 'cfg-nav-sql', notificacoes: 'cfg-nav-notificacoes', paradas: 'cfg-nav-paradas', 'tipos-manutencao': 'cfg-nav-tipos-manutencao', prioridades: 'cfg-nav-prioridades' };
       Object.entries(MAPA).forEach(([secao, navId]) => {
         const el = document.getElementById(navId);
         if (el) el.style.display = _paginaPermitida('config-' + secao) ? '' : 'none';
@@ -2296,6 +2319,7 @@
       const elUsuarios = document.getElementById('cfg-secao-usuarios');
       const elAutorizados = document.getElementById('cfg-secao-autorizados');
       const elDispositivos = document.getElementById('cfg-secao-dispositivos');
+      const elOperacoesOffline = document.getElementById('cfg-secao-operacoes-offline');
       const elAutomacao = document.getElementById('cfg-secao-automacao');
       const elSql = document.getElementById('cfg-secao-sql');
       const elNotificacoes = document.getElementById('cfg-secao-notificacoes');
@@ -2308,6 +2332,7 @@
       if (elUsuarios) elUsuarios.style.display = secao === 'usuarios' ? 'block' : 'none';
       if (elAutorizados) elAutorizados.style.display = secao === 'autorizados' ? 'block' : 'none';
       if (elDispositivos) elDispositivos.style.display = secao === 'dispositivos' ? 'block' : 'none';
+      if (elOperacoesOffline) elOperacoesOffline.style.display = secao === 'operacoes-offline' ? 'block' : 'none';
       if (elAutomacao) elAutomacao.style.display = secao === 'automacao' ? 'block' : 'none';
       if (elSql) elSql.style.display = secao === 'sql' ? 'block' : 'none';
       if (elNotificacoes) elNotificacoes.style.display = secao === 'notificacoes' ? 'block' : 'none';
@@ -2323,6 +2348,7 @@
       const navUsuarios = document.getElementById('cfg-nav-usuarios');
       const navAutorizados = document.getElementById('cfg-nav-autorizados');
       const navDispositivos = document.getElementById('cfg-nav-dispositivos');
+      const navOperacoesOffline = document.getElementById('cfg-nav-operacoes-offline');
       const navAutomacao = document.getElementById('cfg-nav-automacao');
       const navSql = document.getElementById('cfg-nav-sql');
       const navNotificacoes = document.getElementById('cfg-nav-notificacoes');
@@ -2335,6 +2361,7 @@
       if (navUsuarios) navUsuarios.style.cssText = secao === 'usuarios' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navAutorizados) navAutorizados.style.cssText = secao === 'autorizados' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navDispositivos) navDispositivos.style.cssText = secao === 'dispositivos' ? ESTILO_ATIVO : ESTILO_INATIVO;
+      if (navOperacoesOffline) navOperacoesOffline.style.cssText = secao === 'operacoes-offline' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navAutomacao) navAutomacao.style.cssText = secao === 'automacao' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navSql) navSql.style.cssText = secao === 'sql' ? ESTILO_ATIVO : ESTILO_INATIVO;
       if (navNotificacoes) navNotificacoes.style.cssText = secao === 'notificacoes' ? ESTILO_ATIVO : ESTILO_INATIVO;
@@ -2346,6 +2373,7 @@
       if (secao === 'usuarios') cfgRenderUsuarios();
       if (secao === 'autorizados') cfgRenderAutorizados();
       if (secao === 'dispositivos') cfgRenderDispositivos();
+      if (secao === 'operacoes-offline') cfgRenderOperacoesOffline();
       if (secao === 'automacao') cfgRenderAutomacao();
       if (secao === 'sql') cfgSqlAoAbrirSecao();
       if (secao === 'notificacoes') cfgRenderNotificacoes();
@@ -3488,6 +3516,283 @@
       }
     }
 
+    // ─── Operações a Validar (Registro Offline) — itens 6/7 do plano, ver
+    // README, "Registro de Operação Offline (PWA)". Lista o que chegou de
+    // POST /operacao-offline/enviar (tela public/offline.html), com
+    // Validar/Corrigir/Recusar por item. ────────────────────────────────
+    let _cfgOperacoesOfflineCache = []; // guarda o último GET, pra "Corrigir" ler o formRecord atual sem precisar buscar de novo
+
+    async function cfgRenderOperacoesOffline() {
+      const container = document.getElementById('cfg-operacoes-offline-lista');
+      if (!container) return;
+      container.innerHTML = '<p style="color:var(--text-3);font-size:.8rem">Carregando…</p>';
+      try {
+        const lista = await LW.listarOperacoesOfflinePendentes();
+        _cfgOperacoesOfflineCache = lista;
+        if (!lista.length) {
+          container.innerHTML = '<p style="color:var(--text-3);font-size:.8rem">Nenhuma operação offline pendente no momento. ✅</p>';
+          return;
+        }
+        // Mais recente primeiro — quem revisa normalmente quer ver o que
+        // acabou de chegar no topo.
+        const ordenada = [...lista].sort((a, b) => (b.recebidoEm || '').localeCompare(a.recebidoEm || ''));
+        container.innerHTML = ordenada.map(item => _cfgCardOperacaoOffline(item)).join('');
+      } catch (e) {
+        container.innerHTML = '<p style="color:var(--danger)">' + e.message + '</p>';
+      }
+    }
+
+    function _cfgCardOperacaoOffline(item) {
+      const f = item.formRecord || {};
+      const qtdTracos = Array.isArray(item.tracos) ? item.tracos.length : 0;
+      const recebido = item.recebidoEm ? new Date(item.recebidoEm).toLocaleString('pt-BR') : '—';
+      const inicio = f.inicio ? new Date(f.inicio).toLocaleString('pt-BR') : '—';
+      const fim = f.fim ? new Date(f.fim).toLocaleString('pt-BR') : '—';
+      const corrigidoTag = item.corrigidoEm
+        ? '<span style="font-size:.7rem;color:var(--accent);margin-left:8px">✏️ corrigido ' + new Date(item.corrigidoEm).toLocaleString('pt-BR') + '</span>'
+        : '';
+      const idSeguro = item.idTemp.replace(/[^a-zA-Z0-9_-]/g, '');
+      return `
+        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;background:var(--bg-2)">
+          <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-weight:600;font-size:.9rem">🔋 ${f.id_bateria || '(sem bateria)'} — ${f.turno || '—'}${corrigidoTag}</div>
+              <div style="font-size:.75rem;color:var(--text-3);margin-top:2px">Recebido em ${recebido} · IP ${item.ip || '—'}</div>
+            </div>
+            <div style="font-size:.75rem;color:var(--text-2);text-align:right">
+              <div>Início: ${inicio}</div>
+              <div>Fim: ${fim}</div>
+              <div>${qtdTracos} traço(s)</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button type="button" class="btn-primary" style="padding:6px 14px;font-size:.8rem" onclick="cfgAbrirRenumeracaoOperacaoOffline('${idSeguro}')">✅ Validar</button>
+            <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:.8rem" onclick="cfgAbrirCorrecaoOperacaoOffline('${idSeguro}')">✏️ Corrigir</button>
+            <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:.8rem;color:var(--danger)" onclick="cfgRecusarOperacaoOffline('${idSeguro}')">❌ Recusar</button>
+          </div>
+          <div id="cfg-corrigir-${idSeguro}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)"></div>
+          <div id="cfg-renumerar-${idSeguro}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)"></div>
+        </div>`;
+    }
+
+    // ─── Renumeração manual do dia, antes de validar ─────────────────────
+    // Não dá mais pra só clicar "Validar": o Master precisa decidir o
+    // número #1, #2... de CADA traço do dia (os já existentes de outras
+    // operações + os desta) — ver lib/rotas/operacao-offline.js,
+    // comentário "RENUMERAÇÃO MANUAL DO DIA NA VALIDAÇÃO", pro motivo
+    // (ex.: traços ao vivo feitos DEPOIS do envio offline mas ANTES da
+    // validação já pegaram números que deveriam ter sido dos offline).
+    async function cfgAbrirRenumeracaoOperacaoOffline(idTemp) {
+      const idSeguro = idTemp.replace(/[^a-zA-Z0-9_-]/g, '');
+      const painel = document.getElementById('cfg-renumerar-' + idSeguro);
+      if (!painel) return;
+      if (painel.style.display === 'block') { painel.style.display = 'none'; return; }
+
+      painel.style.display = 'block';
+      painel.innerHTML = '<p style="color:var(--text-3);font-size:.8rem">Carregando traços do dia…</p>';
+      try {
+        const { data, existentes, pendentes } = await LW.listarTracosDoDiaOffline(idTemp);
+        painel.innerHTML = _cfgRenumeracaoHtml(idSeguro, idTemp, data, existentes, pendentes);
+        _cfgAtualizarValidacaoRenumeracao(idSeguro);
+      } catch (e) {
+        painel.innerHTML = '<p style="color:var(--danger);font-size:.8rem">' + e.message + '</p>';
+      }
+    }
+
+    function _cfgRenumeracaoHtml(idSeguro, idTemp, data, existentes, pendentes) {
+      // Ordem inicial: pela sugestão de número (existentes já têm o seu;
+      // pendentes usam o que o dispositivo offline mandou) — só um ponto
+      // de partida, o Master pode digitar qualquer número em qualquer campo.
+      const linhas = [...existentes, ...pendentes]
+        .sort((a, b) => (a.num_traco ?? 9999) - (b.num_traco ?? 9999));
+
+      const linhasHtml = linhas.map((t, i) => {
+        const idAttr = 'cfg-renum-' + idSeguro + '-' + i;
+        const origemBadge = t.origem === 'pendente'
+          ? '<span style="font-size:.68rem;color:var(--accent)">🆕 desta operação</span>'
+          : '<span style="font-size:.68rem;color:var(--text-3)">já no dia</span>';
+        const refBateria = t.id_bateria ? _escaparHtmlLocal(t.id_bateria) : '—';
+        return `
+          <div class="cfg-renum-linha" data-id-traco="${_escaparHtmlLocal(t.id_traco)}"
+            style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <input type="number" min="1" step="1" value="${t.num_traco ?? ''}" data-renum-input
+              id="${idAttr}" oninput="_cfgAtualizarValidacaoRenumeracao('${idSeguro}')"
+              style="width:64px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:4px 6px;font-size:.85rem;text-align:center">
+            <div style="flex:1;font-size:.78rem;color:var(--text-2)">
+              🔋 ${refBateria} ${origemBadge}
+            </div>
+          </div>`;
+      }).join('');
+
+      return `
+        <p style="font-size:.78rem;color:var(--text-3);margin-bottom:10px;line-height:1.5">
+          Confira e ajuste o número de <strong>cada traço do dia ${data}</strong> (os que já existem + os desta
+          operação) antes de validar — sem número repetido e sem faltar nenhum.
+        </p>
+        <div id="cfg-renum-lista-${idSeguro}">${linhasHtml}</div>
+        <p id="cfg-renum-erro-${idSeguro}" style="font-size:.75rem;color:var(--danger);margin-top:8px;display:none"></p>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:.8rem"
+            onclick="_cfgPreencherSequenciaRenumeracao('${idSeguro}')">🔢 Preencher 1, 2, 3…</button>
+          <button type="button" class="btn-primary" style="padding:6px 14px;font-size:.8rem" id="cfg-renum-confirmar-${idSeguro}"
+            onclick="cfgConfirmarRenumeracaoEValidar('${idSeguro}', '${idTemp.replace(/'/g, "\\'")}')">✅ Confirmar numeração e validar</button>
+        </div>`;
+    }
+
+    // Ponto de partida rápido — preenche 1..N na ordem em que as linhas já
+    // estão na tela. Só um atalho: o Master ainda pode editar qualquer
+    // campo depois, e a validação de duplicado/faltante continua valendo.
+    function _cfgPreencherSequenciaRenumeracao(idSeguro) {
+      const inputs = document.querySelectorAll('#cfg-renum-lista-' + idSeguro + ' input[data-renum-input]');
+      inputs.forEach((input, i) => { input.value = String(i + 1); });
+      _cfgAtualizarValidacaoRenumeracao(idSeguro);
+    }
+
+    // Validação client-side (espelha a do servidor, ver
+    // lib/rotas/operacao-offline.js _validarRenumeracao) — só pra dar
+    // feedback imediato na tela; o servidor sempre reconfere antes de gravar.
+    function _cfgAtualizarValidacaoRenumeracao(idSeguro) {
+      const inputs = [...document.querySelectorAll('#cfg-renum-lista-' + idSeguro + ' input[data-renum-input]')];
+      const erroEl = document.getElementById('cfg-renum-erro-' + idSeguro);
+      const botaoConfirmar = document.getElementById('cfg-renum-confirmar-' + idSeguro);
+      if (!inputs.length || !erroEl || !botaoConfirmar) return null;
+
+      const numeros = [];
+      let faltaNumero = false;
+      inputs.forEach(input => {
+        const linha = input.closest('.cfg-renum-linha');
+        linha.style.background = '';
+        const valor = input.value.trim();
+        if (!valor || Number(valor) <= 0 || !Number.isInteger(Number(valor))) { faltaNumero = true; return; }
+        numeros.push({ input, linha, num: Number(valor) });
+      });
+
+      let mensagem = '';
+      if (faltaNumero) {
+        mensagem = 'Todo traço precisa de um número (inteiro, maior que zero).';
+      } else {
+        const contagem = new Map();
+        numeros.forEach(({ num }) => contagem.set(num, (contagem.get(num) || 0) + 1));
+        const duplicados = [...contagem.entries()].filter(([, qtd]) => qtd > 1).map(([num]) => num);
+        if (duplicados.length) {
+          mensagem = 'Número(s) repetido(s): #' + duplicados.join(', #') + '. Cada traço do dia precisa de um número único.';
+          numeros.forEach(({ num, linha }) => {
+            if (duplicados.includes(num)) linha.style.background = 'rgba(220,53,69,.12)';
+          });
+        }
+      }
+
+      if (mensagem) {
+        erroEl.textContent = mensagem;
+        erroEl.style.display = 'block';
+        botaoConfirmar.disabled = true;
+        botaoConfirmar.style.opacity = '.5';
+        return null;
+      }
+      erroEl.style.display = 'none';
+      botaoConfirmar.disabled = false;
+      botaoConfirmar.style.opacity = '1';
+      return numeros;
+    }
+
+    async function cfgConfirmarRenumeracaoEValidar(idSeguro, idTemp) {
+      const numeros = _cfgAtualizarValidacaoRenumeracao(idSeguro);
+      if (!numeros) return; // inválido — mensagem já visível na tela
+
+      const renumeracao = numeros.map(({ linha, num }) => ({
+        id_traco: linha.getAttribute('data-id-traco'),
+        num_traco: num,
+      }));
+
+      const confirmou = await LW.mostrarConfirmacao(
+        'Este registro vai virar uma operação de verdade, entrar na fila do Setor de Qualidade e somar no Contador de Traços do Dia — com a numeração que você acabou de definir.',
+        { titulo: 'Validar com esta numeração?', textoConfirmar: 'Validar', icon: '✅' }
+      );
+      if (!confirmou) return;
+
+      try {
+        await LW.validarOperacaoOffline(idTemp, renumeracao);
+        LW.mostrarAlerta('Operação validada com sucesso.', { tipo: 'sucesso' });
+        cfgRenderOperacoesOffline();
+      } catch (e) {
+        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+      }
+    }
+
+    async function cfgRecusarOperacaoOffline(idTemp) {
+      const confirmou = await LW.mostrarConfirmacao(
+        'Este registro será descartado e NUNCA vai virar uma operação. Esta ação não pode ser desfeita.',
+        { titulo: 'Recusar este registro offline?', textoConfirmar: 'Recusar', tipo: 'perigo', icon: '🛑' }
+      );
+      if (!confirmou) return;
+      try {
+        await LW.recusarOperacaoOffline(idTemp);
+        LW.mostrarAlerta('Registro recusado.', { tipo: 'sucesso' });
+        cfgRenderOperacoesOffline();
+      } catch (e) {
+        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+      }
+    }
+
+    // Correção rápida inline — só os campos mais prováveis de terem vindo
+    // errado do relógio do dispositivo offline (ver README, item 8):
+    // início/fim/ID da bateria. Não é a tela completa de Edições
+    // Avançadas (que trabalha em cima de uma operação já existente em
+    // "operacoes", não de um registro ainda pendente) — um ajuste
+    // funcional mais simples, focado no que mais provavelmente precisa de
+    // correção antes de aprovar.
+    function cfgAbrirCorrecaoOperacaoOffline(idTemp) {
+      const idSeguro = idTemp.replace(/[^a-zA-Z0-9_-]/g, '');
+      const painel = document.getElementById('cfg-corrigir-' + idSeguro);
+      if (!painel) return;
+      if (painel.style.display === 'block') { painel.style.display = 'none'; return; }
+
+      const item = _cfgOperacoesOfflineCache.find(i => i.idTemp === idTemp);
+      if (!item) return;
+      const f = item.formRecord || {};
+      const paraInputDatetime = iso => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d)) return '';
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      };
+      painel.innerHTML = `
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+          <label style="font-size:.75rem;color:var(--text-3)">Início
+            <input type="datetime-local" id="cfg-off-inicio-${idSeguro}" value="${paraInputDatetime(f.inicio)}"
+              style="display:block;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:6px 8px;font-size:.8rem">
+          </label>
+          <label style="font-size:.75rem;color:var(--text-3)">Fim
+            <input type="datetime-local" id="cfg-off-fim-${idSeguro}" value="${paraInputDatetime(f.fim)}"
+              style="display:block;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:6px 8px;font-size:.8rem">
+          </label>
+          <label style="font-size:.75rem;color:var(--text-3)">ID Bateria
+            <input type="text" id="cfg-off-bateria-${idSeguro}" value="${(f.id_bateria || '').replace(/"/g, '&quot;')}"
+              style="display:block;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:6px 8px;font-size:.8rem;width:120px">
+          </label>
+          <button type="button" class="btn-primary" style="padding:6px 14px;font-size:.8rem" onclick="cfgSalvarCorrecaoOperacaoOffline('${idSeguro}', '${idTemp.replace(/'/g, "\\'")}')">Salvar correção</button>
+        </div>`;
+      painel.style.display = 'block';
+    }
+
+    async function cfgSalvarCorrecaoOperacaoOffline(idSeguro, idTemp) {
+      const inicioEl = document.getElementById('cfg-off-inicio-' + idSeguro);
+      const fimEl = document.getElementById('cfg-off-fim-' + idSeguro);
+      const bateriaEl = document.getElementById('cfg-off-bateria-' + idSeguro);
+      const patch = { formRecord: {} };
+      if (inicioEl && inicioEl.value) patch.formRecord.inicio = new Date(inicioEl.value).toISOString();
+      if (fimEl && fimEl.value) patch.formRecord.fim = new Date(fimEl.value).toISOString();
+      if (bateriaEl && bateriaEl.value) patch.formRecord.id_bateria = bateriaEl.value.trim();
+      try {
+        await LW.corrigirOperacaoOfflinePendente(idTemp, patch);
+        LW.mostrarAlerta('Correção salva.', { tipo: 'sucesso' });
+        cfgRenderOperacoesOffline();
+      } catch (e) {
+        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+      }
+    }
+
     // existente no escopo global, então replica a mesma lógica usada em
     // data.js (_escaparHtml) só pra estes dois campos de texto livre.
     function _escaparHtmlLocal(texto) {
@@ -3983,6 +4288,266 @@
     }
 
     // ================================================================
+    //  EDIÇÕES AVANÇADAS (início/fim/pausas de uma operação já salva)
+    // ================================================================
+    // Separado do resto de Editar Operação de propósito — ver comentário
+    // grande em POST /editar-operacao-avancado (lib/rotas/edicao.js) sobre
+    // o motivo de início/fim/pausas terem um botão à parte, mais
+    // escondido, em vez de campos soltos no formulário principal.
+    //
+    // Convenção de fuso: mesma "fake UTC = hora de Brasília" já usada em
+    // nowBrasilia()/state.inicio (operacao.js) e em fmtDTL
+    // (setor-qualidade.js) — os campos ISO de inicio/fim/pausas NÃO
+    // passam por conversão real de fuso horário aqui, só extração/
+    // remontagem direta dos dígitos (ver _fmtDTL/_eaParaIsoBrasilia,
+    // abaixo). Preview de duração (LW.diffMinutes) funciona igual
+    // independente disso, por ser sempre uma DIFERENÇA entre dois
+    // horários — o fuso assumido cancela na subtração.
+
+    // Working copy das pausas sendo editadas — cada item:
+    // { pausado_em, retomado_em } em formato datetime-local
+    // ("YYYY-MM-DDTHH:MM", já em hora de Brasília — ver acima) + motivo
+    // (string). Só vira ISO (_eaParaIsoBrasilia) na hora de montar o
+    // payload em salvarEdicoesAvancadas.
+    let _eaPausas = [];
+
+    // Converte um ISO (inicio/fim/pausado_em/retomado_em, já em hora de
+    // Brasília disfarçada de UTC — ver acima) pro formato aceito por
+    // <input type="datetime-local">. Mesmo helper de setor-qualidade.js
+    // (fmtDTL), duplicado aqui por estarem em arquivos/closures diferentes.
+    function _fmtDTL(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return isNaN(d) ? '' : d.toISOString().slice(0, 16);
+    }
+
+    // Caminho inverso de _fmtDTL — NÃO faz conversão real de fuso, só
+    // completa o valor do input (ex.: "2026-08-18T14:30") com segundos +
+    // 'Z' pra virar um ISO válido com os MESMOS dígitos de hora, tratados
+    // como já sendo Brasília — é assim que inicio/fim/pausas já são
+    // gravados no banco há muito tempo (ver nowBrasilia(), data.js).
+    function _eaParaIsoBrasilia(valorInput) {
+      if (!valorInput) return null;
+      return valorInput.length === 16 ? valorInput + ':00.000Z' : valorInput + '.000Z';
+    }
+
+    async function abrirEdicoesAvancadas() {
+      if (!_eoRegistroOriginal) return;
+      document.getElementById('ea-erro').style.display = 'none';
+      document.getElementById('ea-inicio').value = _fmtDTL(_eoRegistroOriginal.inicio);
+      document.getElementById('ea-fim').value = _fmtDTL(_eoRegistroOriginal.fim);
+
+      // Busca as pausas já gravadas pra esta operação (ex.: se esta tela já
+      // foi usada nela antes) — sempre parte do servidor, nunca de uma
+      // cópia local que pode estar desatualizada.
+      _eaPausas = [];
+      try {
+        const r = await fetch('/pausas-operacao/' + encodeURIComponent(_eoRegistroOriginal.id));
+        const json = await r.json();
+        if (json.ok && Array.isArray(json.pausas)) {
+          _eaPausas = json.pausas.map(p => ({
+            pausado_em: _fmtDTL(p.pausado_em),
+            retomado_em: _fmtDTL(p.retomado_em),
+            motivo: p.motivo || '',
+          }));
+        }
+      } catch (_) { /* começa vazio — pior caso, a pessoa adiciona de novo na mão */ }
+
+      _eaRenderPausas();
+      _eaAtualizarPreview();
+      document.getElementById('edicoes-avancadas-modal').style.display = 'flex';
+    }
+
+    function fecharEdicoesAvancadas() {
+      document.getElementById('edicoes-avancadas-modal').style.display = 'none';
+    }
+
+    function _eaAdicionarPausa() {
+      _eaPausas.push({ pausado_em: '', retomado_em: '', motivo: '' });
+      _eaRenderPausas();
+      _eaAtualizarPreview();
+    }
+
+    function _eaRemoverPausa(i) {
+      _eaPausas.splice(i, 1);
+      _eaRenderPausas();
+      _eaAtualizarPreview();
+    }
+
+    // Chamado a cada tecla digitada num campo de uma pausa — só atualiza o
+    // estado + preview, NUNCA re-renderiza a lista inteira (perderia o
+    // foco do campo que a pessoa está digitando).
+    function _eaAtualizarCampoPausa(i, campo, valor) {
+      if (!_eaPausas[i]) return;
+      _eaPausas[i][campo] = valor;
+      _eaAtualizarPreview();
+    }
+
+    // LW.escapeHtml não existe (só há um escapeHtml local, fechado dentro
+    // do closure de debriefing.js) — helper próprio, só pro atributo
+    // value="..." do campo de justificativa da pausa, abaixo, que é texto
+    // livre digitado pela pessoa (evita quebrar o HTML se alguém digitar
+    // aspas, "&", "<" etc.).
+    function _eaEscapeHtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function _eaRenderPausas() {
+      const lista = document.getElementById('ea-pausas-lista');
+      const vazio = document.getElementById('ea-pausas-vazio');
+      vazio.style.display = _eaPausas.length ? 'none' : 'block';
+      lista.innerHTML = _eaPausas.map((p, i) => `
+        <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px">
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" style="font-size:.72rem">Pausado em</label>
+              <input class="form-input" type="datetime-local" step="60" value="${p.pausado_em || ''}"
+                oninput="_eaAtualizarCampoPausa(${i}, 'pausado_em', this.value)">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" style="font-size:.72rem">Retomado em</label>
+              <input class="form-input" type="datetime-local" step="60" value="${p.retomado_em || ''}"
+                oninput="_eaAtualizarCampoPausa(${i}, 'retomado_em', this.value)">
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" title="Remover esta pausa"
+              onclick="_eaRemoverPausa(${i})" style="padding:8px 10px">🗑</button>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label" style="font-size:.72rem">Justificativa</label>
+            <input class="form-input" placeholder="Motivo da pausa" value="${_eaEscapeHtml(p.motivo || '')}"
+              oninput="_eaAtualizarCampoPausa(${i}, 'motivo', this.value)">
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function _eaAtualizarPreview() {
+      const preview = document.getElementById('ea-preview');
+      const valInicio = document.getElementById('ea-inicio').value;
+      const valFim = document.getElementById('ea-fim').value;
+
+      if (!valInicio || !valFim) {
+        preview.innerHTML = '<div>Preencha início e fim.</div>';
+        return;
+      }
+      const minutosBruto = LW.diffMinutes(valInicio, valFim);
+      if (!(minutosBruto > 0)) {
+        preview.innerHTML = '<div style="color:var(--red)">⚠ O fim precisa ser depois do início.</div>';
+        return;
+      }
+      const minutosPausados = _eaPausas.reduce((acc, p) => {
+        if (!p.pausado_em || !p.retomado_em) return acc;
+        const d = LW.diffMinutes(p.pausado_em, p.retomado_em);
+        return acc + (d > 0 ? d : 0);
+      }, 0);
+      const minutosLiquido = minutosBruto - minutosPausados;
+      const atraso = minutosLiquido > LW.LIMITE_INJECAO_MIN;
+      preview.innerHTML = `
+        <div>Duração bruta: <strong class="mono">${LW.formatDuration(minutosBruto)}</strong></div>
+        <div>Tempo pausado: <strong class="mono">${LW.formatDuration(minutosPausados)}</strong></div>
+        <div>Duração líquida: <strong class="mono">${LW.formatDuration(minutosLiquido)}</strong></div>
+        <div>Houve atraso: <strong class="mono" style="color:${atraso ? 'var(--red)' : 'var(--green)'}">${atraso ? '⚠ SIM' : '✓ NÃO'}</strong></div>
+      `;
+    }
+
+    async function salvarEdicoesAvancadas() {
+      if (!_eoRegistroOriginal) return;
+      const erroEl = document.getElementById('ea-erro');
+      erroEl.style.display = 'none';
+
+      const valInicio = document.getElementById('ea-inicio').value;
+      const valFim = document.getElementById('ea-fim').value;
+      if (!valInicio || !valFim) {
+        erroEl.textContent = 'Preencha início e fim.';
+        erroEl.style.display = 'block';
+        return;
+      }
+      // Validação espelha a do servidor (POST /editar-operacao-avancado)
+      // — aqui é só feedback mais rápido; o servidor SEMPRE revalida tudo
+      // de novo, nunca confia só nesta checagem do navegador.
+      if (LW.diffMinutes(valInicio, valFim) <= 0) {
+        erroEl.textContent = 'O fim precisa ser depois do início.';
+        erroEl.style.display = 'block';
+        return;
+      }
+      for (let i = 0; i < _eaPausas.length; i++) {
+        const p = _eaPausas[i];
+        if (!p.pausado_em || !p.retomado_em || !p.motivo || !p.motivo.trim()) {
+          erroEl.textContent = `Pausa #${i + 1}: preencha início, fim e justificativa.`;
+          erroEl.style.display = 'block';
+          return;
+        }
+      }
+
+      const inicioIso = _eaParaIsoBrasilia(valInicio);
+      const fimIso = _eaParaIsoBrasilia(valFim);
+      const pausasIso = _eaPausas.map(p => ({
+        pausado_em: _eaParaIsoBrasilia(p.pausado_em),
+        retomado_em: _eaParaIsoBrasilia(p.retomado_em),
+        motivo: p.motivo.trim(),
+      }));
+
+      // Diff em texto legível pro log de auditoria (edicoes_operacao) —
+      // início/fim/pausas costumam mudar em conjunto numa correção deste
+      // tipo, não vale a pena separar um diff fino campo a campo aqui
+      // como salvarEdicaoOperacao faz pros campos do dia a dia.
+      const diff = [
+        { campo: 'inicio', de: _eoRegistroOriginal.inicio || null, para: inicioIso },
+        { campo: 'fim', de: _eoRegistroOriginal.fim || null, para: fimIso },
+        {
+          campo: 'pausas', de: null,
+          para: pausasIso.length
+            ? pausasIso.map(p => `${LW.formatDateTime(p.pausado_em)} → ${LW.formatDateTime(p.retomado_em)} (${p.motivo})`).join('; ')
+            : 'nenhuma',
+        },
+      ];
+
+      const confirmou = await LW.mostrarConfirmacao(
+        'Confirma a alteração de início, fim e pausas desta operação? A duração e o atraso serão recalculados.',
+        { titulo: 'Confirmar edições avançadas', textoConfirmar: 'Salvar', icon: '⚙' }
+      );
+      if (!confirmou) return;
+
+      const btn = document.getElementById('ea-btn-salvar');
+      const textoOriginal = btn.textContent;
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+
+        const res = await fetch('/editar-operacao-avancado', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: _eoRegistroOriginal.id, inicio: inicioIso, fim: fimIso, pausas: pausasIso, diff }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.erro || 'Erro ao salvar edições avançadas.');
+
+        // Atualiza a cópia local + os campos "capturados automaticamente"
+        // do modal principal, sem fechá-lo — a pessoa pode continuar
+        // editando os outros campos da mesma operação em seguida.
+        _eoRegistroOriginal.inicio = inicioIso;
+        _eoRegistroOriginal.fim = fimIso;
+        _eoRegistroOriginal.tempo_min = json.tempo_min;
+        _eoRegistroOriginal.houve_atraso = json.houve_atraso;
+        document.getElementById('eo-ro-inicio').textContent = LW.formatTime(inicioIso);
+        document.getElementById('eo-ro-fim').textContent = LW.formatTime(fimIso);
+        document.getElementById('eo-ro-duracao').textContent = LW.formatDuration(json.tempo_min);
+        document.getElementById('eo-ro-atraso').textContent = json.houve_atraso === 'SIM' ? '⚠ SIM' : '✓ NÃO';
+        document.getElementById('eo-motivo-atraso-wrap').style.display = json.houve_atraso === 'SIM' ? 'block' : 'none';
+
+        fecharEdicoesAvancadas();
+        await LWDash.initRegistro();
+        LW.mostrarAlerta('Início, fim e pausas atualizados com sucesso!', { tipo: 'sucesso' });
+      } catch (e) {
+        erroEl.textContent = e.message;
+        erroEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    }
+
+    // ================================================================
     //  EDITAR TRAÇO (Relatório de Injeção, admin)
     // ================================================================
     // Diferente da Edição de Operação (campo a campo, diff simples), aqui
@@ -4355,6 +4920,84 @@
         fecharEdicaoTraco();
         await LWDash.initRelatorio();
         LW.mostrarAlerta('Traço atualizado com sucesso!', { tipo: 'sucesso' });
+      } catch (e) {
+        erroEl.textContent = e.message;
+        erroEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    }
+
+    // ================================================================
+    //  EDIÇÃO AVANÇADA DO TRAÇO (data) — mesmo padrão das Edições
+    //  Avançadas de Operação (início/fim/pausas), só que aqui o único
+    //  campo é a data. Ver comentário grande em POST /editar-traco-avancado
+    //  (lib/rotas/edicao.js) pro motivo de ser um botão à parte.
+    // ================================================================
+
+    function abrirEdicaoAvancadaTraco() {
+      if (!_etTracoOriginal) return;
+      document.getElementById('eat-erro').style.display = 'none';
+      document.getElementById('eat-data').value = _etTracoOriginal.data || '';
+      document.getElementById('edicao-avancada-traco-modal').style.display = 'flex';
+    }
+
+    function fecharEdicaoAvancadaTraco() {
+      document.getElementById('edicao-avancada-traco-modal').style.display = 'none';
+    }
+
+    async function salvarEdicaoAvancadaTraco() {
+      if (!_etTracoOriginal) return;
+      const erroEl = document.getElementById('eat-erro');
+      erroEl.style.display = 'none';
+
+      const novaData = document.getElementById('eat-data').value;
+      if (!novaData) {
+        erroEl.textContent = 'Informe a data.';
+        erroEl.style.display = 'block';
+        return;
+      }
+
+      const dataAntiga = _etTracoOriginal.data || null;
+      if (novaData === dataAntiga) {
+        LW.mostrarAlerta('Nenhuma alteração foi feita.', { tipo: 'aviso' });
+        return;
+      }
+
+      const fmtData = iso => iso ? iso.split('-').reverse().join('/') : '—';
+      const diff = [{ campo: 'data', de: dataAntiga, para: novaData }];
+
+      const confirmou = await LW.mostrarConfirmacao(
+        `Confirma a alteração da data deste traço de ${fmtData(dataAntiga)} para ${fmtData(novaData)}? ` +
+        'Isso muda o dia em que o traço aparece no Relatório de Injeção, Setor de Qualidade, Debriefing e ' +
+        'exportações em PDF.',
+        { titulo: 'Confirmar edição avançada', textoConfirmar: 'Salvar', icon: '⚙' }
+      );
+      if (!confirmou) return;
+
+      const btn = document.getElementById('eat-btn-salvar');
+      const textoOriginal = btn.textContent;
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+
+        await LW.editarTracoAvancado({
+          id_traco: _etTracoOriginal.id_traco,
+          id_operacao: _etUsoOriginal?.id_operacao,
+          data: novaData,
+          diff,
+        });
+
+        // Atualiza a cópia local + a leitura "capturada automaticamente"
+        // do modal principal, sem fechá-lo — a pessoa pode continuar
+        // editando os outros campos deste mesmo traço em seguida.
+        _etTracoOriginal.data = novaData;
+        document.getElementById('et-ro-data').textContent = fmtData(novaData);
+
+        fecharEdicaoAvancadaTraco();
+        await LWDash.initRelatorio();
+        LW.mostrarAlerta('Data do traço atualizada com sucesso!', { tipo: 'sucesso' });
       } catch (e) {
         erroEl.textContent = e.message;
         erroEl.style.display = 'block';

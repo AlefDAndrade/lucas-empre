@@ -81,6 +81,26 @@
   // limpar, carregar avaliação existente) trata este objeto exatamente
   // igual a slabMotivo, sempre em paralelo, mesma chave.
   let slabMotivoDescricao = {};
+  // Fotos do defeito por PALLET — array de data-URIs (JPEG já
+  // redimensionado/comprimido, ver _comprimirFotoDefeito) por id de
+  // pallet ("stack{n}", SEM posição — o vínculo é do pallet inteiro, não
+  // de uma placa específica: um defeito costuma valer pro pallet todo, e
+  // tirar 1 foto por placa duplicava trabalho à toa). Ícone de câmera
+  // (📷, ver _renderIconeFotoPallet) aparece no CABEÇALHO do pallet assim
+  // que alguma placa dele exige motivo (2ª linha azul ou reprovada
+  // vermelho — mesmo critério de _marcaExigeMotivo), igual o badge de
+  // motivo (por placa) já fazia — e continua visível mesmo se nenhuma
+  // placa exigir motivo mais, CASO já existam fotos tiradas (não apaga
+  // foto sozinho — só a pessoa apaga, ver _renderIconeFotoPallet/
+  // _abrirGerenciadorFoto). Precisa ser resetado/restaurado em todo lugar
+  // que mexe em slabState, mas SEM entrar em _limparPlacasForaDoEscopo
+  // (chave não tem "-", não é por placa) — limpeza é por pallet inteiro,
+  // ver _removerPalletExtra. NÃO entra no snapshot de pushState/undo (ver
+  // pushState, abaixo) — fotos em base64 são pesadas demais pra duplicar
+  // a cada marca/desmarca (até 30 vezes no histórico); desfazer uma
+  // marcação não desfaz fotos já tiradas, só a pessoa remove pelo
+  // visualizador.
+  let palletFotos = {};
   let actionHistory  = [];
   let currentDraftId = null;
   let viewMode       = false;
@@ -991,6 +1011,7 @@
         <span class="sq-pallet-label">PALLET ${n}</span>
         <div class="sq-pallet-actions">
           <button class="sq-btn-select-all" onclick="SQ.selectAllPallet('${sid}')">⚡ Todas</button>
+          <button class="sq-pallet-foto" onclick="SQ.abrirFotosPallet('${sid}')" title="Fotos do defeito deste pallet">📷</button>
           <button class="sq-btn-clear-pallet" onclick="SQ.clearPallet('${sid}')" title="Limpar marcações deste pallet"><i class="fas fa-trash-alt"></i></button>
           <button class="sq-btn-remove-pallet" onclick="SQ.removerPalletExtra(${n})" title="Excluir este pallet">✕</button>
         </div>
@@ -1056,6 +1077,7 @@
       pushState();
       extraStacks = extraStacks.filter(x => x !== n);
       delete stackCounts[sid];
+      delete palletFotos[sid]; // pallet excluído — fotos dele não fazem mais sentido (era o vínculo delas)
       _limparPlacasForaDoEscopo();
       _sincronizarColunasExtras();
       renderStacks();
@@ -1176,6 +1198,12 @@
     if (!_stackIds().includes(origStack) || !_stackIds().includes(destStackId)) return;
 
     pushState(); // vira uma ação desfazível, igual marcar/desmarcar uma placa
+    // NOTA: fotos (palletFotos) NÃO viajam mais com a placa — o vínculo
+    // agora é do PALLET (ver comentário de palletFotos, topo do arquivo),
+    // então mover uma placa de um pallet pra outro nunca mexe em fotos:
+    // elas continuam plantadas no pallet de origem, mesmo que ele fique
+    // sem nenhuma placa que ainda exija motivo (ver critério em
+    // _renderIconeFotoPallet — foto já tirada nunca some sozinha).
 
     const tipoFixado = getExpectedType(origemId);
     const registro = {
@@ -1306,6 +1334,7 @@
       if (!stack) return;
       _ativarDropZone(stack, sid); // liga o "soltar" — idempotente, ver função
       stack.innerHTML = '';
+      _renderIconeFotoPallet(sid); // ícone de fotos no CABEÇALHO do pallet, 1x por pallet (não por placa)
       const total = stackCounts[sid] || 0;
       for (let i = 1; i <= total; i++) {
         const slab = document.createElement('div');
@@ -1439,6 +1468,346 @@
     }
   }
 
+  // Mostra o ícone de câmera (📷) no CABEÇALHO do pallet e atualiza a
+  // contagem de fotos já tiradas — chamado sempre que uma marca muda e
+  // ao (re)renderizar as placas do zero (renderStacks). O ícone fica
+  // SEMPRE visível, disponível para adicionar foto a qualquer momento,
+  // independente de alguma placa do pallet exigir motivo (2ª linha/
+  // reprovada) ou não — antes ficava escondido nesse caso.
+  //
+  // Aceita tanto um id de PALLET ("stack1") quanto um id de PLACA
+  // ("stack1-3") — extrai o pallet do id recebido — pra não precisar
+  // trocar toda chamada existente (marcar/desmarcar etc já tinham o id
+  // da placa em mãos) por um lookup extra de sid.
+  function _renderIconeFotoPallet(idOuSid) {
+    const sid = idOuSid.split('-')[0];
+    const icone = document.getElementById(sid)?.closest('.sq-pallet-col')?.querySelector('.sq-pallet-foto');
+    if (!icone) return;
+    const fotos = palletFotos[sid] || [];
+    icone.style.display = 'flex';
+    icone.classList.toggle('tem-foto', fotos.length > 0);
+    icone.innerHTML = fotos.length > 1
+      ? `📷<span class="sq-pallet-foto-contagem">${fotos.length}</span>`
+      : '📷';
+    icone.title = fotos.length
+      ? `${fotos.length} foto${fotos.length > 1 ? 's' : ''} do defeito neste pallet — clique para ver/adicionar`
+      : 'Adicionar foto do defeito deste pallet';
+  }
+
+  // Redimensiona/comprime uma foto antes de guardar — MESMO padrão já
+  // usado pelos anexos de Manutenção (ver compressImage, manutencao-
+  // front.js/manutencao.js): desenha a imagem num <canvas> limitado a
+  // 1000x1000 (preservando proporção) e reexporta como JPEG qualidade
+  // .75. Fotos de defeito se beneficiam de um pouco mais de resolução
+  // que os 800x600 usados lá (às vezes é preciso dar zoom pra ver uma
+  // trinca fina), mas o princípio é o mesmo: nunca guardar o arquivo
+  // bruto da câmera (podendo passar de 4-8MB por foto — inviável somando
+  // várias placas numa avaliação só).
+  // @returns {Promise<string>} data-URI (JPEG) já redimensionado.
+  function _comprimirFotoDefeito(file) {
+    return new Promise((resolve, reject) => {
+      const leitor = new FileReader();
+      leitor.onerror = () => reject(new Error('Não consegui ler o arquivo da foto.'));
+      leitor.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Arquivo selecionado não é uma imagem válida.'));
+        img.onload = () => {
+          const MAX = 1000;
+          let { width, height } = img;
+          if (width > MAX || height > MAX) {
+            if (width > height) { height = Math.round(height * (MAX / width)); width = MAX; }
+            else { width = Math.round(width * (MAX / height)); height = MAX; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', .75));
+        };
+        img.src = leitor.result;
+      };
+      leitor.readAsDataURL(file);
+    });
+  }
+
+  // Inputs de arquivo ocultos, reaproveitados por TODOS os pallets —
+  // criados uma única vez (lazy, na primeira chamada) em vez de 1 par por
+  // pallet, pra não acumular vários <input> escondidos no DOM à toa numa
+  // avaliação com muitos pallets extras. `_fotoSidAlvo` guarda pra qual
+  // pallet o input foi aberto, lido no 'change' (abaixo).
+  let _inputCamera = null;
+  let _inputGaleria = null;
+  let _fotoSidAlvo = null;
+
+  function _garantirInputsFoto() {
+    if (_inputCamera) return;
+    _inputCamera = document.createElement('input');
+    _inputCamera.type = 'file';
+    _inputCamera.accept = 'image/*';
+    _inputCamera.capture = 'environment'; // abre a câmera traseira direto, em vez da galeria
+    _inputCamera.style.display = 'none';
+    document.body.appendChild(_inputCamera);
+
+    _inputGaleria = document.createElement('input');
+    _inputGaleria.type = 'file';
+    _inputGaleria.accept = 'image/*';
+    _inputGaleria.multiple = true; // várias fotos de uma vez, escolhendo da galeria
+    _inputGaleria.style.display = 'none';
+    document.body.appendChild(_inputGaleria);
+
+    const tratarSelecao = async (input) => {
+      const arquivos = Array.from(input.files || []);
+      input.value = ''; // permite escolher o MESMO arquivo de novo depois (senão 'change' não dispara de novo)
+      if (!arquivos.length || !_fotoSidAlvo) return;
+      const sid = _fotoSidAlvo;
+      try {
+        const comprimidas = await Promise.all(arquivos.map(_comprimirFotoDefeito));
+        palletFotos[sid] = [...(palletFotos[sid] || []), ...comprimidas];
+        _renderIconeFotoPallet(sid);
+        _abrirGerenciadorFoto(sid); // reabre/atualiza a galeria já com as novas fotos
+      } catch (err) {
+        console.error('Falha ao processar foto do defeito:', err);
+        if (LW.mostrarAlerta) LW.mostrarAlerta(err.message || 'Não consegui processar a foto.', { tipo: 'erro' });
+      }
+    };
+    _inputCamera.addEventListener('change', () => tratarSelecao(_inputCamera));
+    _inputGaleria.addEventListener('change', () => tratarSelecao(_inputGaleria));
+  }
+
+  // Visor em tela cheia, em modo CARROSSEL, pra navegar entre as fotos de
+  // UM pallet (setas + teclado, com wrap-around: da última foto "próxima"
+  // volta pra primeira, e vice-versa). Compartilhado por
+  // _abrirGerenciadorFoto (edição) e _abrirFotosMirror (Espelho, só
+  // leitura, abaixo) — MESMA lógica nos dois, só muda de onde vêm as
+  // fotos. Setas/contador só aparecem com mais de 1 foto (uma foto
+  // sozinha não tem "próxima"/"anterior" pra ir), numa única barra fixa
+  // sempre embaixo da imagem (ver .sq-foto-viewer-controles,
+  // setor-qualidade.css) — não se move conforme o tamanho/proporção da
+  // foto.
+  // @param {string[]} fotos - data URIs da galeria ATUAL (mesmo array que já monta o grid de miniaturas).
+  // @param {number} indiceInicial - índice da foto clicada, pra já abrir nela.
+  function _abrirVisorCarrossel(fotos, indiceInicial) {
+    document.querySelector('.sq-foto-viewer-overlay')?.remove(); // fecha um anterior, se sobrou aberto
+
+    let indice = indiceInicial;
+
+    const visor = document.createElement('div');
+    visor.className = 'sq-foto-viewer-overlay';
+
+    const fecharVisor = () => {
+      document.removeEventListener('keydown', aoTeclar);
+      visor.remove();
+    };
+
+    const img = document.createElement('img');
+    visor.appendChild(img);
+
+    const contador = document.createElement('div');
+    contador.className = 'sq-foto-viewer-contador';
+
+    const atualizar = () => {
+      img.src = fotos[indice];
+      contador.textContent = `${indice + 1} / ${fotos.length}`;
+    };
+
+    // % dá resultado negativo pra índice negativo em JS (ex: -1 % 5 = -1,
+    // não 4) — daí o "+ fotos.length" antes do módulo, garantindo sempre
+    // voltar pro outro extremo em vez de "travar"/dar índice inválido.
+    const irPara = (delta) => { indice = (indice + delta + fotos.length) % fotos.length; atualizar(); };
+
+    if (fotos.length > 1) {
+      const controles = document.createElement('div');
+      controles.className = 'sq-foto-viewer-controles';
+      // Clique na pílula em si (o respiro entre os botões, por exemplo)
+      // não deve fechar o visor — só o fundo escuro ao redor conta como
+      // "clicar fora".
+      controles.addEventListener('click', (e) => e.stopPropagation());
+
+      const setaEsq = document.createElement('button');
+      setaEsq.type = 'button';
+      setaEsq.className = 'sq-foto-viewer-seta';
+      setaEsq.textContent = '‹';
+      setaEsq.setAttribute('aria-label', 'Foto anterior');
+      setaEsq.addEventListener('click', () => irPara(-1));
+
+      const setaDir = document.createElement('button');
+      setaDir.type = 'button';
+      setaDir.className = 'sq-foto-viewer-seta';
+      setaDir.textContent = '›';
+      setaDir.setAttribute('aria-label', 'Próxima foto');
+      setaDir.addEventListener('click', () => irPara(1));
+
+      controles.appendChild(setaEsq);
+      controles.appendChild(contador);
+      controles.appendChild(setaDir);
+      visor.appendChild(controles);
+    }
+
+    // Setas do teclado navegam, Esc fecha — mesmo espírito de atalho dos
+    // outros modais desta tela. Listener SEMPRE removido em fecharVisor
+    // (clique fora, Esc, ou clique na própria imagem/fundo) — sem isso,
+    // ficaria escutando pra sempre, mesmo depois do visor fechado.
+    const aoTeclar = (e) => {
+      if (e.key === 'Escape') fecharVisor();
+      else if (fotos.length > 1 && e.key === 'ArrowLeft') irPara(-1);
+      else if (fotos.length > 1 && e.key === 'ArrowRight') irPara(1);
+    };
+    document.addEventListener('keydown', aoTeclar);
+
+    // Clique no fundo OU na própria imagem fecha (mesmo comportamento de
+    // antes: "clicar em qualquer lugar fecha") — a barra de controles,
+    // acima, já dá stopPropagation, então um clique nela nunca chega até
+    // aqui.
+    visor.addEventListener('click', fecharVisor);
+
+    atualizar();
+    document.body.appendChild(visor);
+  }
+
+  // Modal de fotos do defeito de um PALLET — mostra a galeria já tirada
+  // (com opção de remover cada uma e de ver em tela cheia) + botões pra
+  // tirar mais fotos (câmera) ou importar da galeria do aparelho. Chamado
+  // ao clicar no ícone 📷 do cabeçalho do pallet (ver renderStacks/
+  // _criarColunaPallet) — funciona tanto pra ADICIONAR a primeira foto
+  // quanto pra gerenciar as que já existem (mesmo modal, o conteúdo só
+  // muda conforme palletFotos[sid]).
+  function _abrirGerenciadorFoto(sid) {
+    document.querySelector('.sq-foto-modal-overlay')?.remove(); // fecha um anterior, se sobrou aberto
+    _garantirInputsFoto();
+
+    const fotos = palletFotos[sid] || [];
+    const overlay = document.createElement('div');
+    overlay.className = 'sq-foto-modal-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'sq-foto-modal';
+    overlay.appendChild(modal);
+
+    const titulo = document.createElement('div');
+    titulo.className = 'sq-foto-modal-titulo';
+    titulo.innerHTML = `<span>📷 Fotos do defeito — ${sid.replace('stack', 'Pallet ')}</span>`;
+    const fechar = document.createElement('span');
+    fechar.textContent = '✕';
+    fechar.style.cursor = 'pointer';
+    fechar.addEventListener('click', () => overlay.remove());
+    titulo.appendChild(fechar);
+    modal.appendChild(titulo);
+
+    // Em modo visualização (avaliação já registrada, só consulta — ver
+    // viewMode) não faz sentido oferecer tirar/apagar foto, só ver as que
+    // já existem.
+    if (!viewMode) {
+      const acoes = document.createElement('div');
+      acoes.className = 'sq-foto-modal-acoes';
+      const btnCamera = document.createElement('button');
+      btnCamera.className = 'btn btn-outline-accent btn-sm';
+      btnCamera.textContent = '📷 Câmera';
+      btnCamera.addEventListener('click', () => { _fotoSidAlvo = sid; _inputCamera.click(); });
+      const btnGaleria = document.createElement('button');
+      btnGaleria.className = 'btn btn-outline-accent btn-sm';
+      btnGaleria.textContent = '🖼️ Galeria';
+      btnGaleria.addEventListener('click', () => { _fotoSidAlvo = sid; _inputGaleria.click(); });
+      acoes.appendChild(btnCamera);
+      acoes.appendChild(btnGaleria);
+      modal.appendChild(acoes);
+    }
+
+    if (!fotos.length) {
+      const vazio = document.createElement('div');
+      vazio.className = 'sq-foto-modal-vazio';
+      vazio.textContent = 'Nenhuma foto ainda.';
+      modal.appendChild(vazio);
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'sq-foto-modal-grid';
+      fotos.forEach((dataUri, indice) => {
+        const item = document.createElement('div');
+        item.className = 'sq-foto-modal-item';
+        const img = document.createElement('img');
+        img.src = dataUri;
+        img.addEventListener('click', () => _abrirVisorCarrossel(fotos, indice));
+        item.appendChild(img);
+        if (!viewMode) {
+          const remover = document.createElement('span');
+          remover.className = 'sq-foto-modal-item-remover';
+          remover.textContent = '✕';
+          remover.title = 'Remover esta foto';
+          remover.addEventListener('click', (e) => {
+            e.stopPropagation();
+            palletFotos[sid].splice(indice, 1);
+            if (!palletFotos[sid].length) delete palletFotos[sid];
+            _renderIconeFotoPallet(sid);
+            _abrirGerenciadorFoto(sid); // reabre atualizado, sem a foto removida
+          });
+          item.appendChild(remover);
+        }
+        grid.appendChild(item);
+      });
+      modal.appendChild(grid);
+    }
+
+    document.body.appendChild(overlay);
+  }
+
+  // Visualizador de fotos SOMENTE LEITURA do Espelho — MESMO padrão visual
+  // de _abrirGerenciadorFoto (acima), mas lê as fotos da avaliação já
+  // REGISTRADA que está aberta no Espelho (dashboardEvals[mirrorIndex].
+  // palletFotos, ver evalObj.palletFotos em registerEvaluation), não do
+  // `palletFotos` global (esse é só da avaliação em EDIÇÃO na tela
+  // principal — usar o global aqui misturaria fotos de avaliações
+  // diferentes). Nunca oferece Câmera/Galeria/remover — é consulta de
+  // um registro histórico, igual ao "viewMode" de _abrirGerenciadorFoto,
+  // só que sem depender daquela variável (o Espelho pode estar aberto
+  // com viewMode=false, ex.: olhando o Espelho antes de começar uma
+  // avaliação nova).
+  function _abrirFotosMirror(sid) {
+    document.querySelector('.sq-foto-modal-overlay')?.remove(); // fecha um anterior, se sobrou aberto
+
+    const item  = dashboardEvals[mirrorIndex];
+    const fotos = item?.palletFotos?.[sid] || [];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'sq-foto-modal-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'sq-foto-modal';
+    overlay.appendChild(modal);
+
+    const titulo = document.createElement('div');
+    titulo.className = 'sq-foto-modal-titulo';
+    titulo.innerHTML = `<span>📷 Fotos do defeito — ${sid.replace('stack', 'Pallet ')}</span>`;
+    const fechar = document.createElement('span');
+    fechar.textContent = '✕';
+    fechar.style.cursor = 'pointer';
+    fechar.addEventListener('click', () => overlay.remove());
+    titulo.appendChild(fechar);
+    modal.appendChild(titulo);
+
+    if (!fotos.length) {
+      const vazio = document.createElement('div');
+      vazio.className = 'sq-foto-modal-vazio';
+      vazio.textContent = 'Nenhuma foto ainda.';
+      modal.appendChild(vazio);
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'sq-foto-modal-grid';
+      fotos.forEach((dataUri, indice) => {
+        const item = document.createElement('div');
+        item.className = 'sq-foto-modal-item';
+        const img = document.createElement('img');
+        img.src = dataUri;
+        img.addEventListener('click', () => _abrirVisorCarrossel(fotos, indice));
+        item.appendChild(img);
+        grid.appendChild(item);
+      });
+      modal.appendChild(grid);
+    }
+
+    document.body.appendChild(overlay);
+  }
+
   function renderMarks(slabEl, marks) {
     const c = slabEl.querySelector('.sq-slab-marks');
     c.innerHTML = '';
@@ -1494,6 +1863,7 @@
       renderMarks(el, slabState[id]);
       validateAllSlabs();
       _renderBadgeMotivo(id);
+      _renderIconeFotoPallet(id);
       return;
     }
 
@@ -1544,6 +1914,7 @@
     renderMarks(el, slabState[id]);
     validateAllSlabs();
     _renderBadgeMotivo(id); // mostra o "?" pendente na hora, antes mesmo do popover abrir
+    _renderIconeFotoPallet(id);
     // Motivo obrigatório só quando é a marca de STATUS (indicador) —
     // marca de identidade nunca exige, mesmo se a cor escolhida "por
     // acaso" for azul/vermelho (ver _corExigeMotivo).
@@ -1626,7 +1997,11 @@
   function _atualizarMotivoAposDesmarcar(id) {
     const aindaExigeMotivo = (slabState[id] || []).some(_marcaExigeMotivo);
     if (!aindaExigeMotivo) { delete slabMotivo[id]; delete slabMotivoDescricao[id]; }
+    // Fotos NÃO são apagadas aqui de propósito (ver comentário de
+    // palletFotos, topo do arquivo) — só o ícone pode sumir, se não sobrou
+    // nem motivo pendente nem foto nenhuma.
     _renderBadgeMotivo(id);
+    _renderIconeFotoPallet(id);
   }
 
   // Seletor de motivo — popover flutuante com os 14 códigos (ver
@@ -1841,6 +2216,7 @@
       renderMarks(slab, slabState[id]);
       _renderBadgeMotivo(id);
     });
+    _renderIconeFotoPallet(stackId); // 1x só, fora do loop — ícone é do pallet inteiro, não de cada placa
     validateAllSlabs();
     // 1 seletor só pro pallet inteiro (não 1 por placa) — quem marca em
     // lote normalmente está registrando o MESMO defeito pra todas
@@ -1871,7 +2247,9 @@
         delete slabMotivoDescricao[id];
         renderMarks(slab, []);
       });
+      delete palletFotos[sid]; // pallet inteiro sendo limpo — sem marca, o defeito documentado nas fotos deixa de existir
       document.querySelectorAll(`#${sid} .sq-slab-motivo`).forEach(b => { b.textContent = ''; b.style.display = 'none'; });
+      _renderIconeFotoPallet(sid);
       validateAllSlabs();
     });
   }
@@ -2347,6 +2725,10 @@
     delete slabMotivo[`${sid}-${n}`];
     delete slabMotivoDescricao[`${sid}-${n}`];
     delete slabConfig[`${sid}-${n}`];
+    // palletFotos NÃO entra aqui — é chaveado por pallet (sid), não por
+    // posição, então deslocar/remover UMA placa dentro do mesmo pallet
+    // nunca precisa mexer nele (ver comentário de palletFotos, topo do
+    // arquivo).
     stackCounts[sid] = n - 1;
   }
 
@@ -2845,6 +3227,7 @@
       slabState,
       slabMotivo,
       slabMotivoDescricao,
+      palletFotos,
       palletInfos: {}
     };
     [1, 2, 3, 4, ...extraStacks].forEach(p => {
@@ -2854,9 +3237,28 @@
         data.palletInfos[p][f] = el ? el.innerText : '';
       });
     });
-    localStorage.setItem(`sq_draft_${id}`, JSON.stringify(data));
-    currentDraftId = id;
-    showAlert('Salvo', 'Avaliação salva com sucesso!');
+    // localStorage tem limite de ~5-10MB por origem (varia por navegador) —
+    // fotos em base64 (mesmo já comprimidas, ver _comprimirFotoDefeito)
+    // podem estourar isso numa avaliação com muitos defeitos fotografados.
+    // Se der QuotaExceededError, salva o rascunho SEM as fotos (nada do
+    // resto se perde) em vez de falhar silenciosamente ou perder a
+    // avaliação inteira — avisa a pessoa pra registrar logo, já que as
+    // fotos só continuam vivas em memória nesta aba/sessão.
+    try {
+      localStorage.setItem(`sq_draft_${id}`, JSON.stringify(data));
+      currentDraftId = id;
+      showAlert('Salvo', 'Avaliação salva com sucesso!');
+    } catch (err) {
+      console.error('Falha ao salvar rascunho com fotos:', err);
+      try {
+        localStorage.setItem(`sq_draft_${id}`, JSON.stringify({ ...data, palletFotos: {} }));
+        currentDraftId = id;
+        showAlert('Salvo com aviso', 'O rascunho foi salvo, mas as fotos não couberam no armazenamento do navegador (não caberia recarregar a página com elas). Elas continuam nesta aba — registre a avaliação logo para não perdê-las.');
+      } catch (err2) {
+        showAlert('Erro', 'Não consegui salvar o rascunho. Tente remover algumas fotos ou registrar a avaliação direto.');
+        return;
+      }
+    }
     // "Em Andamento" não é mais uma tela própria pra navegar até — só
     // atualiza a contagem/lista do colapsável e a fila (o rascunho salvo
     // agora sai da fila, ver carregarFilaNaoAvaliadas), e continua na
@@ -3029,6 +3431,15 @@
         return { avaliacaoId: evId, pallet: parseInt(parts[0].replace('stack','')), posicao: parseInt(parts[1]), tipoEsperado: getExpectedType(id), tipoObtido: info.tipoObtido, resultado: info.resultado, linha: info.linha, marcas: marks, motivo: slabMotivo[id] || null, motivoDescricao: slabMotivoDescricao[id] || null };
       });
       evalObj.montagem = _montagemDoRegistro(evalObj.paineis);
+      // "palletFotos" — objeto { "stack1": [dataUri, ...], ... } com as
+      // fotos do defeito tiradas/importadas POR PALLET (ver palletFotos,
+      // topo do arquivo, e _comprimirFotoDefeito) — campo NOVO no topo da
+      // avaliação (não mais dentro de cada painel), flui direto pro banco
+      // dentro do JSON da avaliação (dados: JSON.stringify(avaliacao), ver
+      // db.salvarAvaliacaoQualidade), sem precisar de coluna nova. Só
+      // entra o que tiver pelo menos 1 foto — pallet sem foto nenhuma nem
+      // aparece na chave.
+      evalObj.palletFotos = { ...palletFotos };
 
       const btnRegistrar = document.getElementById('sq-btn-register');
       if (btnRegistrar) btnRegistrar.disabled = true;
@@ -3168,6 +3579,10 @@
     slabState     = ns;
     slabMotivo    = nm;
     slabMotivoDescricao = nd;
+    // "palletFotos" mora no TOPO da avaliação (não mais em cada painel,
+    // ver evalObj.palletFotos em registerEvaluation) — copiado direto,
+    // sem precisar recompor a partir dos painéis.
+    palletFotos   = item.palletFotos ? { ...item.palletFotos } : {};
     slabConfig    = novoSlabConfig;
     stackCounts   = novasContagens;
     extraStacks   = Object.keys(novasContagens)
@@ -3569,7 +3984,24 @@
     // número de sempre.
     [2, 1, 3, 4].forEach(p => {
       const n = _totalPorPalletMirror(panels, p); // cada palete com a contagem DELE, não uma média/fixo compartilhado
-      html += `<div class="sq-mini-pallet"><div class="sq-mini-pallet-header">P${p}</div>`;
+      const sidMirror = `stack${p}`;
+      // Fotos do defeito deste pallet, já salvas junto da avaliação (ver
+      // evalObj.palletFotos em registerEvaluation) — botão fica sempre
+      // visível no cabeçalho do mini-pallet, mesmo sem foto nenhuma
+      // (mesmo padrão do ícone da grade principal, ver
+      // _renderIconeFotoPallet), só pra abrir o visualizador somente-
+      // leitura (_abrirFotosMirror, abaixo).
+      const fotosMirror = item.palletFotos?.[sidMirror] || [];
+      // IMPORTANTE: sem texto de verdade dentro do botão (nem "📷", nem a
+      // contagem) — o ícone/contador entram via CSS (::before/::after,
+      // ver .sq-mini-pallet-foto no CSS), que NÃO conta pra
+      // `element.textContent`. O parser de testes do Espelho lê
+      // `.sq-mini-pallet-header.textContent` pra extrair o número do
+      // pallet ("P1" → "1", ver setor-qualidade-espelho-paineis-a-
+      // menos.test.js) — texto de verdade aqui dentro contaminaria esse
+      // parse.
+      const btnFotoMirror = `<button type="button" class="sq-mini-pallet-foto${fotosMirror.length ? ' tem-foto' : ''}" data-contagem="${fotosMirror.length || ''}" onclick="SQ.abrirFotosMirror('${sidMirror}')" title="${fotosMirror.length ? `${fotosMirror.length} foto${fotosMirror.length > 1 ? 's' : ''} do defeito neste pallet` : 'Nenhuma foto do defeito neste pallet'}"></button>`;
+      html += `<div class="sq-mini-pallet"><div class="sq-mini-pallet-header"><span>P${p}</span>${btnFotoMirror}</div>`;
       for (let i = 1; i <= n; i++) {
         const panel = panels.find(pa => pa.pallet===p && pa.posicao===i);
         // Placa sem marca individual (a imensa maioria — só quem tem
@@ -4027,9 +4459,9 @@
     document.getElementById('sq-dash-summary').innerHTML = summ;
   }
 
-  // Descreve o período/filtro aplicado no momento — usado tanto no
-  // cabeçalho impresso do PDF quanto no subtítulo do dashboard exportado
-  // em HTML, pra o arquivo se explicar sozinho sem depender da tela.
+  // Descreve o período/filtro aplicado no momento — usado no subtítulo do
+  // dashboard exportado (HTML e PDF), pra o arquivo se explicar sozinho
+  // sem depender da tela.
   function _descricaoPeriodoAtual() {
     const sd = document.getElementById('sq-dash-start').value;
     const ed = document.getElementById('sq-dash-end').value;
@@ -4040,56 +4472,14 @@
     return `Período: ${periodo}${bf ? ' · Bateria: ' + bf : ''}`;
   }
 
-  /* ── Exportar PDF ─────────────────────────────────────────
-     Ajustado pra virar um relatório de verdade, não uma captura de tela
-     crua: os controles interativos (filtros + os próprios botões de
-     exportar) somem da captura — não fazem sentido dentro de um PDF
-     estático, só poluíam a imagem — e ganha um cabeçalho impresso
-     (título + período aplicado + data de geração) que só existe durante
-     a captura, pro arquivo final se explicar sozinho. */
-  async function exportDashboardPDF() {
-    const btn     = document.getElementById('sq-btn-pdf');
-    const acoes   = document.getElementById('sq-dash-acoes');
-    const filtros = document.getElementById('sq-dash-filtros');
-    const dash    = document.getElementById('sq-dashboard');
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando…'; btn.disabled = true;
-
-    const cabecalho = document.createElement('div');
-    cabecalho.style.cssText = 'padding:0 0 14px;margin-bottom:14px;border-bottom:2px solid var(--blue);';
-    cabecalho.innerHTML = `
-      <div style="font-size:1.3rem;font-weight:700;color:var(--text);">📋 Relatório de Qualidade — Avaliação de Baterias</div>
-      <div style="font-size:.8rem;color:var(--text-3);margin-top:4px;">${_escaparHtml(_descricaoPeriodoAtual())} · Gerado em ${new Date().toLocaleString('pt-BR')}</div>`;
-
-    if (acoes)   acoes.style.display   = 'none';
-    if (filtros) filtros.style.display = 'none';
-    dash.insertBefore(cabecalho, dash.firstChild);
-
-    try {
-      const canvas = await html2canvas(dash, { scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false, scrollX:0, scrollY:-window.scrollY });
-      const { jsPDF } = window.jspdf;
-      const w = 297, h = Math.ceil((canvas.height * w) / canvas.width);
-      const pdf = new jsPDF({ orientation:'landscape', unit:'mm', format:[w,h] });
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, w, h);
-      pdf.save(`relatorio_qualidade_${new Date().toISOString().replace(/[-:T.]/g,'').slice(0,14)}.pdf`);
-    } catch (err) {
-      console.error(err); showAlert('Erro','Falha ao gerar PDF.');
-    } finally {
-      cabecalho.remove();
-      if (acoes)   acoes.style.display   = '';
-      if (filtros) filtros.style.display = '';
-      btn.innerHTML = '<i class="fas fa-file-pdf"></i> Exportar PDF'; btn.disabled = false;
-    }
-  }
-
   /* ── Exportar Dashboard Interativo (HTML standalone) ───────
-     Diferente do PDF (imagem estática), gera 1 arquivo .html AUTOSSU-
-     FICIENTE: dados (avaliações + painéis já embutidos, cada avaliação
-     com sua lista de painéis, mesmo formato de /avaliacoes-qualidade),
-     as mesmas funções de gráfico SVG puro (cópia fiel de _svgLineChart/
-     _svgDonutChart/_svgBarChart/_svgHBarChart/_svgScatterChart/
-     _svgGroupedBarChart, sem nenhuma dependência externa) e os mesmos
-     filtros (Data Inicial/Final, Bateria) — tudo recalculado no
-     JavaScript do PRÓPRIO arquivo exportado, sem precisar do servidor.
+     Gera 1 arquivo .html AUTOSSUFICIENTE: dados (avaliações + painéis já
+     embutidos, cada avaliação com sua lista de painéis, mesmo formato de
+     /avaliacoes-qualidade), as mesmas funções de gráfico SVG puro (cópia
+     fiel de _svgLineChart/_svgDonutChart/_svgBarChart/_svgHBarChart/
+     _svgScatterChart/_svgGroupedBarChart, sem nenhuma dependência externa)
+     e os mesmos filtros (Data Inicial/Final, Bateria) — tudo recalculado
+     no JavaScript do PRÓPRIO arquivo exportado, sem precisar do servidor.
      Quem abrir esse .html em qualquer navegador consegue trocar o
      período/bateria e ver os gráficos recalcularem na hora, exatamente
      como na tela ao vivo — só não leva "Espelho Visual" (é sobre revisar
@@ -4100,24 +4490,38 @@
      Exclui avaliações "excluídaDaFila" (ver renderDashboard — mesmo
      critério: painéis marcados 'nao_avaliado_no_sistema' não contam
      como avaliados) ANTES de embutir, pra não precisar duplicar essa
-     regra dentro do script exportado. */
+     regra dentro do script exportado.
+
+     _montarExportacaoSq() monta o HTML + nome de arquivo (sem extensão) —
+     compartilhado entre exportDashboardHTML() (baixa o .html direto) e
+     exportDashboardPDF() (manda esse mesmo HTML pro servidor converter em
+     PDF de verdade via Chromium headless — ver lib/rotas/exportar-pdf.js/
+     LW.baixarPdfApartirDeHtml). Isto SUBSTITUI a captura de tela via
+     html2canvas que este botão usava antes (texto não-selecionável,
+     borrava em telas HiDPI) — o servidor agora "imprime" o MESMO HTML
+     interativo em vez de tirar foto da tela. */
+  async function _montarExportacaoSq() {
+    await carregarAvaliacoesQualidade(); // garante dataset atualizado antes de embutir
+    // MESMO filtro que está valendo no dashboard na tela agora (ver
+    // renderDashboard/_dashboardFiltrado, acima) — período
+    // (sq-dash-start/end) e bateria (sq-dash-bat) — não mais TODAS as
+    // avaliações.
+    const avaliacoes = _dashboardFiltrado();
+    const html = _gerarHtmlDashboardStandalone(avaliacoes, _descricaoPeriodoAtual());
+    const nomeBase = `dashboard_qualidade_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}`;
+    return { html, nomeBase };
+  }
+
   async function exportDashboardHTML() {
     const btn = document.getElementById('sq-btn-html');
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando…'; btn.disabled = true;
     try {
-      await carregarAvaliacoesQualidade(); // garante dataset atualizado antes de embutir
-      // MESMO filtro que está valendo no dashboard na tela agora (ver
-      // renderDashboard/_dashboardFiltrado, acima) — período
-      // (sq-dash-start/end) e bateria (sq-dash-bat) — não mais TODAS as
-      // avaliações.
-      const avaliacoes = _dashboardFiltrado();
-      const html = _gerarHtmlDashboardStandalone(avaliacoes, _descricaoPeriodoAtual());
-
+      const { html, nomeBase } = await _montarExportacaoSq();
       const blob = new Blob([html], { type: 'text/html' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href = url;
-      a.download = `dashboard_qualidade_${new Date().toISOString().replace(/[-:T.]/g,'').slice(0,14)}.html`;
+      a.download = `${nomeBase}.html`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -4129,6 +4533,26 @@
       btn.innerHTML = '<i class="fas fa-file-code"></i> Exportar Interativo'; btn.disabled = false;
     }
   }
+
+  // ── Exportar em PDF — MESMO HTML de exportDashboardHTML (acima), só que
+  // convertido no servidor via Chromium headless (Puppeteer) em vez de
+  // baixado direto — ver lib/rotas/exportar-pdf.js. Texto selecionável,
+  // sem blur, ao contrário da captura de tela (html2canvas) que este botão
+  // usava antes.
+  async function exportDashboardPDF() {
+    const btn = document.getElementById('sq-btn-pdf');
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando…'; btn.disabled = true;
+    try {
+      const { html, nomeBase } = await _montarExportacaoSq();
+      await LW.baixarPdfApartirDeHtml(`${nomeBase}.pdf`, html);
+    } catch (err) {
+      console.error('Falha ao exportar PDF (Setor de Qualidade):', err);
+      showAlert('Erro', err && err.message ? err.message : 'Falha ao gerar PDF.');
+    } finally {
+      btn.innerHTML = '<i class="fas fa-file-pdf"></i> Exportar PDF'; btn.disabled = false;
+    }
+  }
+
 
   // Cópia standalone da parte de "hover em elemento [data-tooltip]" de
   // tooltip.js (delegação no document, desktop + toque) — os gráficos SVG
@@ -4465,6 +4889,7 @@
     slabMotivo    = d.slabMotivo || {};
     slabMotivoDescricao = d.slabMotivoDescricao || {};
     slabConfig    = d.slabConfig || {};
+    palletFotos   = d.palletFotos || {};
     actionHistory = [];
     renderStacks();
     validateAllSlabs();
@@ -4529,6 +4954,7 @@
 
   function clearForm() {
     slabState = {}; slabMotivo = {}; slabMotivoDescricao = {}; actionHistory = []; palletTypes = ['','','','']; slabConfig = {};
+    palletFotos = {};
     extraStacks = []; stackCounts = { stack1: 0, stack2: 0, stack3: 0, stack4: 0 }; proximoNumeroPalletExtra = 5;
     linkedOperacaoId = null;
     dimensaoOperacaoAtual = null;
@@ -4724,8 +5150,10 @@
       slabState = {};
       slabMotivo = {};
       slabMotivoDescricao = {};
+      palletFotos = {}; // toda marca sumiu — sem defeito classificado, as fotos ficariam sem contexto
       document.querySelectorAll('.sq-slab-marks').forEach(c => { c.innerHTML = ''; });
       document.querySelectorAll('.sq-slab-motivo').forEach(b => { b.textContent = ''; b.style.display = 'none'; });
+      document.querySelectorAll('.sq-pallet-foto').forEach(f => { f.classList.remove('tem-foto'); });
       validateAllSlabs();
     });
   }
@@ -4815,6 +5243,8 @@
     selectColor, selectShape,
     toggleIndicadorAtivo,
     selectAllPallet, clearPallet,
+    abrirFotosPallet: _abrirGerenciadorFoto,
+    abrirFotosMirror: _abrirFotosMirror,
     toggleCollapsible,
     togglePopover,
     undoLastAction, clearAllMarks,

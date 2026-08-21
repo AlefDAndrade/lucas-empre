@@ -111,6 +111,20 @@ db.exec(`
     -- sobrevive sozinho mesmo se aquele usuário for removido do cadastro
     -- depois; é rótulo de auditoria, não uma referência viva.
     operador_nome         TEXT,
+    -- ─── Auditoria de Registro Offline (item 6/7 do plano — ver README,
+    -- "Registro de Operação Offline (PWA)") ────────────────────────────
+    -- origem_offline: 1 quando esta operação nasceu de um envio de
+    -- POST /operacao-offline/enviar, aprovado depois por um Administrador
+    -- em Configurações → Operações a Validar; 0 (padrão) pra toda operação
+    -- registrada ao vivo, do jeito de sempre. Puramente informativo — não
+    -- afeta NENHUMA regra de negócio existente (cálculo de painéis, fila
+    -- de avaliação, contador de traços, etc. tratam esta operação
+    -- exatamente igual a qualquer outra a partir do momento em que existe).
+    -- validado_por/validado_em: quem aprovou e quando — só preenchido
+    -- quando origem_offline = 1.
+    origem_offline        INTEGER NOT NULL DEFAULT 0,
+    validado_por          TEXT,
+    validado_em           TEXT,
     criado_em             TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_operacoes_data ON operacoes(data);
@@ -729,6 +743,43 @@ db.exec(`
     primeira_em   INTEGER NOT NULL, -- epoch ms — início da janela atual
     bloqueado_ate INTEGER           -- epoch ms, ou NULL se ainda não bloqueado
   );
+
+  -- ============================================================
+  --  EXPORTAÇÕES DE PDF — Etapa 3 do plano "PDF sobrevive a fechar a aba"
+  --  (ver README)
+  --
+  --  Espelha, em disco/SQLite, o que lib/rotas/exportar-pdf.js mantém em
+  --  memória (o Map "_jobs") enquanto o job está "vivo" pro acompanhamento
+  --  via Server-Sent Events — mas ISTO aqui sobrevive a um restart do
+  --  processo E ao TTL de limpeza da memória (JOB_TTL_MS, 10 min): o
+  --  arquivo do PDF pronto (ver caminho_arquivo, guardado em
+  --  private/pdfs-pendentes/, nunca dentro de public/ — mesmo motivo de
+  --  security.json, ver lib/security-json.js) continua disponível pra
+  --  download mesmo que a aba/processo que pediu o export tenha caído no
+  --  meio do caminho, ou que o usuário só volte a acessar minutos/horas
+  --  depois.
+  --
+  --  "status": 'processando' | 'concluido' | 'erro' | 'cancelado'.
+  --
+  --  "usuario_id" (Etapa 1 do plano, ver README) — quem pediu o export,
+  --  via lib/sessao-usuario.js (POST /exportar-pdf/iniciar exige sessão
+  --  de usuário cadastrado a partir desta etapa). Continua NULLABLE só
+  --  por segurança de schema (linhas antigas, criadas ANTES desta etapa
+  --  existir, já têm usuario_id = NULL) — toda linha NOVA sempre vem
+  --  preenchida.
+  CREATE TABLE IF NOT EXISTS exportacoes_pdf (
+    job_id          TEXT PRIMARY KEY,
+    usuario_id      TEXT,
+    nome_arquivo    TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    caminho_arquivo TEXT,             -- só preenchido quando status = 'concluido'
+    tamanho_bytes   INTEGER,
+    erro            TEXT,             -- só preenchido quando status = 'erro'
+    criado_em       INTEGER NOT NULL, -- epoch ms
+    concluido_em    INTEGER           -- epoch ms
+  );
+  CREATE INDEX IF NOT EXISTS idx_exportacoes_pdf_status ON exportacoes_pdf(status);
+  CREATE INDEX IF NOT EXISTS idx_exportacoes_pdf_usuario ON exportacoes_pdf(usuario_id);
 `);
 
 
@@ -894,6 +945,22 @@ if (!_colunasOperacoes.includes('bercos_dimensoes')) {
   db.exec('ALTER TABLE operacoes ADD COLUMN bercos_dimensoes TEXT');
   console.log('[migração] Coluna "bercos_dimensoes" adicionada à tabela operacoes.');
 }
+// origem_offline/validado_por/validado_em — Registro de Operação Offline,
+// item 6/7 do plano (ver README). Mesmo padrão de migração leve das
+// demais colunas acima; default 0/NULL não muda o comportamento de
+// nenhuma operação já existente (todas nasceram ao vivo, nunca offline).
+if (!_colunasOperacoes.includes('origem_offline')) {
+  db.exec('ALTER TABLE operacoes ADD COLUMN origem_offline INTEGER NOT NULL DEFAULT 0');
+  console.log('[migração] Coluna "origem_offline" adicionada à tabela operacoes.');
+}
+if (!_colunasOperacoes.includes('validado_por')) {
+  db.exec('ALTER TABLE operacoes ADD COLUMN validado_por TEXT');
+  console.log('[migração] Coluna "validado_por" adicionada à tabela operacoes.');
+}
+if (!_colunasOperacoes.includes('validado_em')) {
+  db.exec('ALTER TABLE operacoes ADD COLUMN validado_em TEXT');
+  console.log('[migração] Coluna "validado_em" adicionada à tabela operacoes.');
+}
 const _colunasParadas = db.prepare("PRAGMA table_info(paradas)").all().map(c => c.name);
 if (!_colunasParadas.includes('operador_nome')) {
   db.exec('ALTER TABLE paradas ADD COLUMN operador_nome TEXT');
@@ -954,6 +1021,36 @@ if (!_colunasManutencaoCorretiva.includes('recebimento_peca_confirmado')) {
   db.exec('ALTER TABLE manutencao_corretiva ADD COLUMN recebimento_peca_confirmado_por TEXT');
   db.exec('ALTER TABLE manutencao_corretiva ADD COLUMN recebimento_peca_confirmado_em TEXT');
   console.log('[migração] Colunas de confirmação de recebimento de peça adicionadas à tabela manutencao_corretiva.');
+}
+
+// ------------------------------------------------------------
+//  Migração de DADOS (não de schema): "data" da operação passa a ser a
+//  data do FIM, não a do início — ver registro-operacao.js/operacao.js
+//  (_registrarOperacaoInterna), operacao-offline.js (_aprovar) e
+//  edicao.js (/editar-operacao-avancado), que já gravam assim pra
+//  operações NOVAS a partir de agora.
+//
+//  Só isso não corrige as operações que já estavam gravadas ANTES desta
+//  mudança — a coluna "data" delas ficou "congelada" com o valor antigo
+//  (data do início). Esta migração corrige o passado: para toda operação
+//  que atravessou a meia-noite (fim é de um dia diferente de data),
+//  recalcula "data" = dia do "fim".
+//
+//  Idempotente e roda toda vez no boot (SEM check de "já rodei" — não
+//  precisa: o WHERE só pega, cada vez, as linhas que ainda estiverem
+//  divergentes; depois da 1ª vez não sobra nenhuma, então roda "no-op"
+//  para sempre). date(fim) usa o mesmo raciocínio de horaBrasilia()/
+//  dataLocal no resto do sistema: inicio/fim são gravados "disfarçados"
+//  de UTC (dígitos = hora de parede de Brasília, sem conversão real —
+//  ver comentário grande em debriefing.js, dataDoISO), então o SQLite
+//  date() aqui já extrai o dia "de parede" certo, sem precisar de
+//  timezone nenhum.
+const _opsComDataDivergente = db.prepare(`
+  UPDATE operacoes SET data = date(fim)
+  WHERE fim IS NOT NULL AND date(fim) IS NOT NULL AND data != date(fim)
+`).run();
+if (_opsComDataDivergente.changes > 0) {
+  console.log(`[migração] "data" recalculada (dia do FIM, não do início) em ${_opsComDataDivergente.changes} operação(ões) que atravessaram a meia-noite.`);
 }
 
 // ─── Operações / Berços / Avaliação de Qualidade ───────────────────────
@@ -1186,3 +1283,32 @@ module.exports.criarSessaoUsuario = criarSessaoUsuario;
 module.exports.dadosSessaoUsuario = dadosSessaoUsuario;
 module.exports.destruirSessaoUsuario = destruirSessaoUsuario;
 module.exports.limparSessoesUsuarioExpiradas = limparSessoesUsuarioExpiradas;
+
+// ============================================================
+//  EXPORTAÇÕES DE PDF — ver CREATE TABLE exportacoes_pdf, acima.
+//  Etapa 3 do plano "PDF sobrevive a fechar a aba" (ver README) —
+//  extraído pra lib/db/exportacoes-pdf.js, mesmo padrão de
+//  lib/db/sessoes.js, logo acima.
+// ============================================================
+
+const {
+  criarRegistroExportacaoPdf,
+  marcarExportacaoPdfConcluida,
+  marcarExportacaoPdfErro,
+  marcarExportacaoPdfCancelada,
+  obterExportacaoPdf,
+  obterExportacaoPdfAtivaDoUsuario,
+  apagarExportacaoPdf,
+  listarExportacoesPdfExpiradas,
+  corrigirExportacoesPdfOrfasNaSubida,
+} = require('./lib/db/exportacoes-pdf.js')(db);
+
+module.exports.criarRegistroExportacaoPdf = criarRegistroExportacaoPdf;
+module.exports.marcarExportacaoPdfConcluida = marcarExportacaoPdfConcluida;
+module.exports.marcarExportacaoPdfErro = marcarExportacaoPdfErro;
+module.exports.marcarExportacaoPdfCancelada = marcarExportacaoPdfCancelada;
+module.exports.obterExportacaoPdf = obterExportacaoPdf;
+module.exports.obterExportacaoPdfAtivaDoUsuario = obterExportacaoPdfAtivaDoUsuario;
+module.exports.apagarExportacaoPdf = apagarExportacaoPdf;
+module.exports.listarExportacoesPdfExpiradas = listarExportacoesPdfExpiradas;
+module.exports.corrigirExportacoesPdfOrfasNaSubida = corrigirExportacoesPdfOrfasNaSubida;

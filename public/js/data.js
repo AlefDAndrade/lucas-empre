@@ -844,6 +844,70 @@ async function removerDispositivo(deviceId) {
   return data.lista;
 }
 
+/**
+ * Operações a Validar (Registro Offline) — Configurações, itens 6/7 do
+ * plano (ver README, "Registro de Operação Offline (PWA)"). As 4 funções
+ * abaixo espelham exatamente lib/rotas/operacao-offline.js — todas
+ * requerem sessão de admin válida (servidor responde 403 sem ela).
+ */
+async function listarOperacoesOfflinePendentes() {
+  const res = await fetch('/operacao-offline/pendentes');
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.erro || 'Não foi possível listar as operações pendentes.');
+  return data.lista;
+}
+
+// `patch` — só os campos que devem ser sobrescritos (ex.: { formRecord: {
+// id_bateria: 'B-corrigida' } }) — PATCH parcial, não substitui o registro
+// inteiro (ver lib/fila-offline.js, atualizarNaFilaOffline).
+async function corrigirOperacaoOfflinePendente(idTemp, patch) {
+  const res = await fetch('/operacao-offline/corrigir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idTemp, ...patch }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.erro || 'Não foi possível corrigir o registro pendente.');
+  return data.item;
+}
+
+// Lista TODOS os traços do dia deste registro pendente — os já gravados
+// em "tracos" (outras operações, ao vivo ou offline já validadas) + os
+// desta própria operação (ainda não gravados) — pra tela de renumeração
+// manual que precede a validação (ver lib/rotas/operacao-offline.js,
+// comentário "RENUMERAÇÃO MANUAL DO DIA NA VALIDAÇÃO").
+async function listarTracosDoDiaOffline(idTemp) {
+  const res = await fetch('/operacao-offline/tracos-do-dia?idTemp=' + encodeURIComponent(idTemp));
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.erro || 'Não foi possível listar os traços do dia.');
+  return data; // { data, existentes, pendentes }
+}
+
+// `renumeracao` — array [{id_traco, num_traco}, ...] cobrindo TODOS os
+// traços do dia (existentes + os desta operação) — obrigatório sempre que
+// houver pelo menos 1 traço envolvido (ver validação no servidor).
+async function validarOperacaoOffline(idTemp, renumeracao) {
+  const res = await fetch('/operacao-offline/validar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idTemp, renumeracao }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.erro || 'Não foi possível validar este registro.');
+  return data;
+}
+
+async function recusarOperacaoOffline(idTemp) {
+  const res = await fetch('/operacao-offline/recusar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idTemp }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.erro || 'Não foi possível recusar este registro.');
+  return data;
+}
+
 // ============================================================
 //  OPERAÇÃO EM ANDAMENTO — sincronização ao vivo (WebSocket)
 //
@@ -1589,6 +1653,24 @@ async function editarTracoRelatorio(payload) {
 }
 
 /**
+ * Corrige a DATA de um traço já registrado (edições avançadas — mesmo
+ * padrão de POST /editar-operacao-avancado, só que pro traço). Só mexe na
+ * coluna tracos.data; não recalcula num_traco nem toca em traco_usos/
+ * operações.
+ * @param {object} payload - { id_traco, id_operacao, data, diff }
+ */
+async function editarTracoAvancado(payload) {
+  const res = await fetch('/editar-traco-avancado', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.erro || 'Erro ao editar data do traço');
+  return json;
+}
+
+/**
  * Obtém o total de traços já CONFIRMADOS hoje (Brasília) — apenas leitura,
  * não consome/incrementa nada. Usado para calcular a numeração de PRÉVIA
  * (total+1, total+2, ...) dos traços ainda em edição na operação atual.
@@ -2220,6 +2302,205 @@ function baixarArquivoTexto(nomeArquivo, conteudo, mimeType = 'text/html') {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Baixa uma versão em PDF do MESMO HTML autossuficiente que os botões
+ * "🌐 Exportar Interativo" geram — em vez de tirar um "print" da tela no
+ * navegador (frágil: borra em telas HiDPI, texto não-selecionável — ver
+ * exportDashboardPDF em setor-qualidade.js, que faz isso), este HTML já
+ * pronto é mandado pro SERVIDOR, que usa um Chromium headless (via
+ * Puppeteer) pra "imprimir" ele de verdade em PDF — ver
+ * lib/rotas/exportar-pdf.js.
+ *
+ * Fase 3 do plano de Exportação em PDF (ver README): a rota virou
+ * assíncrona/stateful, então isto aqui não é mais um único fetch — são 3
+ * passos: (1) `POST /exportar-pdf/iniciar` devolve um `jobId` na hora, sem
+ * esperar o PDF ficar pronto; (2) acompanha o progresso REAL por
+ * Server-Sent Events (`GET /exportar-pdf/eventos/:jobId`) até um evento
+ * terminal ('concluido'/'erro'/'cancelado'); (3) só então baixa o arquivo
+ * pronto (`GET /exportar-pdf/arquivo/:jobId`), com o mesmo mecanismo de
+ * download (Blob + <a> temporário) de baixarArquivoTexto().
+ * Usado pelos botões "📕 Exportar PDF" (Análise Focada — ver
+ * public/js/analise-focada.js — e, no futuro, qualquer outro dashboard que
+ * já gere seu HTML interativo do mesmo jeito).
+ * @param {string} nomeArquivoPdf - já com a extensão ".pdf".
+ * @param {string} html - o documento autossuficiente já gerado.
+ * @param {{signal?: AbortSignal, onProgresso?: (fase: string, feito: number, total: number, segundosRestantes?: number|null, progressoReal?: boolean) => void}} [opts]
+ *   `signal` cancela a exportação em andamento (botão Cancelar da barra de
+ *   progresso) — diferente da Fase 2, agora um abort manda
+ *   `POST /exportar-pdf/cancelar/:jobId` pro servidor, que fecha a `page`
+ *   do Puppeteer no MEIO do processo, não só o acompanhamento do lado do
+ *   cliente. `onProgresso` é chamado a cada evento 'progresso' recebido
+ *   por SSE (fases: 'carregando', 'ajustando', 'imprimindo' — ver
+ *   lib/rotas/exportar-pdf.js) E, também, quando a conexão SSE cai mas o
+ *   `EventSource` ainda está tentando reconectar sozinho (pseudo-fase
+ *   'reconectando', só do lado do cliente — nunca vem do servidor; ver
+ *   `eventos.onerror`, abaixo). `segundosRestantes` só vem preenchido na
+ *   fase 'imprimindo'; `null`/`undefined` nas demais fases (inclusive
+ *   'reconectando'). `progressoReal`
+ *   (Fase 5) só importa na fase 'imprimindo': quando `true`, `feito`/`total`
+ *   são uma CONTAGEM real de páginas já impressas (Análise Focada, que
+ *   sabe o total de páginas de antemão — ver `_processarJob`,
+ *   exportar-pdf.js); quando `false` (padrão), `feito` é uma PORCENTAGEM
+ *   estimada (0-95) — caminho de fallback pra dashboards sem esse
+ *   mecanismo, baseado no histórico do servidor (`_iniciarTickerImpressao`,
+ *   exportar-pdf.js). Nas fases 'carregando'/'ajustando', `feito`/`total`
+ *   sempre foram (e continuam sendo) contagem real — `progressoReal` não
+ *   se aplica a elas.
+ * @returns {Promise<void>}
+ */
+async function baixarPdfApartirDeHtml(nomeArquivoPdf, html, { signal, onProgresso } = {}) {
+  const respostaInicio = await fetch('/exportar-pdf/iniciar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html, filename: nomeArquivoPdf }),
+    signal,
+  });
+
+  if (!respostaInicio.ok) {
+    let mensagem = 'Não consegui gerar o PDF agora.';
+    try {
+      const erro = await respostaInicio.json();
+      if (erro && erro.erro) mensagem = erro.erro;
+    } catch (_) { /* resposta de erro não veio em JSON — usa a mensagem padrão */ }
+    throw new Error(mensagem);
+  }
+
+  const { jobId } = await respostaInicio.json();
+
+  // Acompanha por SSE até um evento terminal — resolve/rejeita a Promise
+  // conforme o que chegar, e SEMPRE fecha a conexão (`encerrar()`) antes,
+  // pra não deixar um EventSource pendurado depois que já sabemos o
+  // resultado.
+  await new Promise((resolve, reject) => {
+    const eventos = new EventSource(`/exportar-pdf/eventos/${jobId}`);
+    let terminado = false;
+
+    function encerrar() {
+      terminado = true;
+      eventos.close();
+      if (signal) signal.removeEventListener('abort', aoAbortar);
+    }
+
+    function aoAbortar() {
+      if (terminado) return;
+      encerrar();
+      // "Dispara e esquece" — o cancelamento do lado do usuário não deve
+      // esperar confirmação do servidor pra já liberar a UI; se a
+      // requisição falhar (ex.: já tinha terminado sozinho), não há nada
+      // útil a fazer com o erro aqui.
+      fetch(`/exportar-pdf/cancelar/${jobId}`, { method: 'POST' }).catch(() => {});
+      const erroCancelado = new Error('Exportação cancelada.');
+      erroCancelado.name = 'AbortError';
+      reject(erroCancelado);
+    }
+    if (signal) {
+      if (signal.aborted) { aoAbortar(); return; }
+      signal.addEventListener('abort', aoAbortar);
+    }
+
+    eventos.addEventListener('progresso', (ev) => {
+      if (terminado) return;
+      try {
+        const dados = JSON.parse(ev.data);
+        if (onProgresso) onProgresso(dados.fase, dados.feito, dados.total, dados.segundosRestantes, dados.progressoReal);
+      } catch (_) { /* evento mal formado — ignora, próximo evento corrige */ }
+    });
+    eventos.addEventListener('concluido', () => {
+      if (terminado) return;
+      encerrar();
+      resolve();
+    });
+    eventos.addEventListener('erro', (ev) => {
+      if (terminado) return;
+      encerrar();
+      let mensagem = 'Não consegui gerar o PDF agora.';
+      try { mensagem = JSON.parse(ev.data).erro || mensagem; } catch (_) { /* usa a mensagem padrão */ }
+      reject(new Error(mensagem));
+    });
+    eventos.addEventListener('cancelado', () => {
+      if (terminado) return;
+      encerrar();
+      const erroCancelado = new Error('Exportação cancelada.');
+      erroCancelado.name = 'AbortError';
+      reject(erroCancelado);
+    });
+    // A conexão pode cair por um motivo que não é nenhum dos eventos
+    // acima (rede, proxy, servidor reiniciado no meio) — só que
+    // `EventSource` já tenta reconectar SOZINHO nesse caso (comportamento
+    // padrão da spec: perdeu a conexão → `readyState` vira `CONNECTING` e
+    // ele tenta de novo automaticamente, sem precisar de nada daqui), e a
+    // rota `GET /exportar-pdf/eventos/:jobId` já foi feita pra aceitar
+    // essa reconexão (manda o progresso atual assim que reconecta, ou
+    // direto o evento final se o job já tiver terminado enquanto a
+    // conexão esteve fora do ar — ver comentário lá). O job em si nunca
+    // para de rodar no servidor só porque este SSE caiu (ver
+    // `req.on('close', ...)` na mesma rota — só tira este cliente da
+    // lista de quem escuta, nunca cancela o job).
+    // ANTES: qualquer `onerror` já desistia na hora (fechava a conexão de
+    // propósito, matando a reconexão automática do navegador, e mostrava
+    // "Conexão com o servidor caiu" pro usuário) mesmo quando era só uma
+    // instabilidade passageira que se resolveria sozinha em segundos —
+    // na prática, isto pegava desproporcionalmente mais as exportações
+    // "Personalizada" (mais operações/páginas = mais TEMPO com a conexão
+    // aberta = mais chance de pegar uma oscilação no meio do caminho) do
+    // que "Do Dia" (rápida o bastante pra raramente dar chance disso
+    // acontecer) — não porque houvesse algo diferente entre as duas, só
+    // pela duração maior. Corrigido: só desiste de vez quando o PRÓPRIO
+    // navegador desiste (`readyState === CLOSED` — esgotou as tentativas,
+    // ou o servidor respondeu com algo que o EventSource considera fatal,
+    // ex.: 404 se o job já tiver expirado da memória); enquanto o
+    // navegador ainda está tentando (`CONNECTING`), só avisa visualmente
+    // via `onProgresso('reconectando', ...)`, sem rejeitar nada.
+    eventos.onerror = () => {
+      if (terminado) return;
+      if (eventos.readyState === EventSource.CONNECTING) {
+        if (onProgresso) onProgresso('reconectando', 0, 0, null, false);
+        return;
+      }
+      encerrar();
+      reject(new Error('Conexão com o servidor caiu durante a geração do PDF.'));
+    };
+  });
+
+  // Job concluído no servidor — dispara o download.
+  //
+  // BUG CORRIGIDO (relatado: "Failed to fetch"/net::ERR_FAILED em PDFs
+  // grandes, ex.: 162 avaliações — mesmo com o servidor respondendo 200 e
+  // entregando tudo certinho): ANTES, este trecho fazia
+  // `fetch(...).blob()` — isso obriga o Chrome a montar o arquivo INTEIRO
+  // num Blob na memória do processo do navegador antes de disponibilizar
+  // o download. Pra um PDF grande o bastante, isso pode estourar limite
+  // de memória do renderer e falhar — mesmo que o servidor tenha
+  // entregado a resposta inteira sem erro nenhum (por isso o Content-
+  // Length batia e o status era 200, mas o download não completava do
+  // lado do navegador). Além disso, como o servidor considera "baixado"
+  // assim que ELE termina de escrever a resposta (evento 'finish' —
+  // ver `_apagarPdfAposDownloadCompleto`, lib/rotas/exportar-pdf.js),
+  // ele já apagava o arquivo antes até do Chrome terminar de processar o
+  // Blob, sem deixar nada pra investigar/tentar de novo depois.
+  //
+  // Agora: navegação direta via link com `download` — o PRÓPRIO Chrome
+  // baixa e escreve em disco através do mecanismo nativo dele (gerenciador
+  // de downloads), sem nunca precisar caber o arquivo inteiro na memória
+  // do JavaScript. Mais robusto pra arquivos grandes, e mais rápido (sem
+  // o passo extra de materializar um Blob só pra descartar em seguida).
+  //
+  // Troca envolvida: perde a checagem prévia de erro via
+  // `fetch(...).ok`/`.json()` que existia antes (o download nativo não dá
+  // pra "ler" a resposta do lado do JS pra checar se veio um JSON de erro
+  // em vez do PDF) — aceitável aqui porque o SSE, logo acima, JÁ confirmou
+  // que o job terminou com sucesso (evento 'concluido') antes deste ponto
+  // ser alcançado; o caminho de erro real (job não encontrado/não pronto)
+  // continua coberto pelos eventos 'erro'/'cancelado' do SSE, que rejeitam
+  // a Promise antes de chegar aqui.
+  const a = document.createElement('a');
+  a.href = `/exportar-pdf/arquivo/${jobId}`;
+  a.download = nomeArquivoPdf;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 // CSS compartilhado por TODOS os exports de "Dashboard Interativo" (Setor
 // de Qualidade, OEE, Desempenho Turnos, Análise Operacional, Análise de
 // Berços, CEP, Análise Focada) — cada um gera seu próprio HTML
@@ -2444,6 +2725,11 @@ window.LW = {
   listarDispositivosAutorizados, autorizarDispositivo, removerDispositivo,
   get DISPOSITIVOS_AUTORIZADOS() { return DISPOSITIVOS_AUTORIZADOS; },
 
+  // Operações a Validar (Registro Offline — Configurações, itens 6/7 do
+  // plano, ver README)
+  listarOperacoesOfflinePendentes, corrigirOperacaoOfflinePendente,
+  validarOperacaoOffline, recusarOperacaoOffline, listarTracosDoDiaOffline,
+
   // Cálculos
   calcPaineis,
   calcPaineisPersonalizado,
@@ -2482,6 +2768,7 @@ window.LW = {
   registrarAjusteTraco,
   getAjustesTracos,
   editarTracoRelatorio,
+  editarTracoAvancado,
 
   // Dados e analytics
   registrarOperacao, getStats,
@@ -2505,6 +2792,7 @@ window.LW = {
   // for inserido via innerHTML, pra evitar XSS armazenado.
   escaparHtml: _escaparHtml,
   baixarArquivoTexto,
+  baixarPdfApartirDeHtml,
   gerarCssExportPadrao,
   TOOLTIP_JS_FONTE,
 };

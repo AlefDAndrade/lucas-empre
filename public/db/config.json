@@ -90,34 +90,25 @@
         "label": "2/P",
         "modo": "simples",
         "tipo": "2p",
-        "paineis_2p_por_berco": 2,
+        "cor": "#3b85ce",
         "cimenticia": {
           "leva": true,
           "quantidade": 2
         },
-        "corHue": 210
+        "combinacaoAvaliacao": null,
+        "paineis_2p_por_berco": 2
       },
       {
         "label": "S/P",
         "modo": "simples",
         "tipo": "sp",
-        "paineis_sp_por_berco": 2,
+        "cor": "#60ce3b",
         "cimenticia": {
           "leva": false,
           "quantidade": 0
         },
-        "corHue": 105
-      },
-      {
-        "label": "3T",
-        "modo": "simples",
-        "tipo": "3t",
-        "paineis_3t_por_berco": 2,
-        "cimenticia": {
-          "leva": false,
-          "quantidade": 0
-        },
-        "corHue": 53
+        "combinacaoAvaliacao": null,
+        "paineis_sp_por_berco": 2
       },
       {
         "label": "HÍBRIDA 2p/sp",
@@ -128,6 +119,74 @@
         ],
         "paineis_2p_por_berco": 1,
         "paineis_sp_por_berco": 1
+      },
+      {
+        "label": "2/T",
+        "modo": "simples",
+        "tipo": "2t",
+        "cor": "#ae00ff",
+        "cimenticia": {
+          "leva": true,
+          "quantidade": 2
+        },
+        "combinacaoAvaliacao": null,
+        "paineis_2t_por_berco": 2
+      },
+      {
+        "label": "1/T",
+        "modo": "simples",
+        "tipo": "1t",
+        "cor": "#5a4064",
+        "cimenticia": {
+          "leva": true,
+          "quantidade": 2
+        },
+        "combinacaoAvaliacao": {
+          "marcas": [
+            {
+              "shape": "circle",
+              "color": "laranja"
+            },
+            {
+              "shape": "circle",
+              "color": "laranja"
+            },
+            {
+              "shape": "circle",
+              "color": "laranja"
+            }
+          ],
+          "indicadorIndex": 1
+        },
+        "paineis_1t_por_berco": 2
+      },
+      {
+        "label": "3/T",
+        "modo": "simples",
+        "tipo": "3t",
+        "cor": "#9a8f4c",
+        "cimenticia": {
+          "leva": true,
+          "quantidade": 2
+        },
+        "combinacaoAvaliacao": {
+          "marcas": [
+            {
+              "shape": "circle",
+              "color": "amarelo"
+            },
+            {
+              "shape": "circle",
+              "color": "verde"
+            },
+            {
+              "shape": "circle",
+              "color": "amarelo"
+            }
+          ],
+          "indicadorIndex": 1
+        },
+        "paineis_3t_por_berco": 2
       }
     ]
   },
@@ -156,5 +215,81 @@
       "label": "2/P - 12 cm",
       "volume": 0.1903
     }
-  ]
+  ],
+  "dispositivosAutorizados": [
+    {
+      "deviceId": "dev_1782433045145_jlsd071r9ur",
+      "nome": "Alef - dev",
+      "autorizadoEm": "2026-07-02T00:59:54.089Z"
+    },
+    {
+      "deviceId": "dev_1782558167507_gn4mgeaomgb",
+      "nome": "PC injetora",
+      "autorizadoEm": "2026-07-02T11:44:29.337Z"
+    },
+    {
+      "deviceId": "dev_1782564133217_mpowsuqqhbi",
+      "nome": "Celular Lucas",
+      "autorizadoEm": "2026-07-03T17:30:21.957Z"
+    },
+    {
+      "deviceId": "dev_1785150421434_4ujsebxj5ul",
+      "nome": "pc injetora",
+      "autorizadoEm": "2026-07-27T11:35:24.336Z"
+    },
+    {
+      "deviceId": "dev_1784979511707_pj4gxuyceu",
+      "nome": "alef pc",
+      "autorizadoEm": "2026-07-31T14:58:14.783Z"
+    },
+    {
+      "deviceId": "dev_86291c074f4eb36b9886840548830994",
+      "nome": "pc injetora",
+      "ip": "127.0.0.1",
+      "autorizadoEm": "2026-08-04T11:35:09.773Z",
+      "religadoEm": "2026-08-04T11:59:41.052Z"
+    },
+    {
+      "deviceId": "dev_594c6a92fa7bacb8604e17fc0971c19c",
+      "nome": "pc injetora",
+      "ip": "127.0.0.1",
+      "autorizadoEm": "2026-08-05T11:56:52.064Z"
+    },
+    {
+      "deviceId": "dev_91ff0302f1d7359d7bb50ce22d9b4de8",
+      "nome": "pc injetora",
+      "ip": "127.0.0.1",
+      "autorizadoEm": "2026-08-18T13:58:24.559Z"
+    },
+    {
+      "deviceId": "dev_5a815587ba51f62f816791b168715144",
+      "nome": "",
+      "ip": "127.0.0.1",
+      "autorizadoEm": "2026-08-18T23:26:14.119Z"
+    },
+    {
+      "deviceId": "dev_92f138f3c7d5f4b4f0ccde975b3c0517",
+      "nome": "",
+      "ip": "127.0.0.1",
+      "autorizadoEm": "2026-08-20T18:12:16.320Z"
+    },
+    {
+      "deviceId": "dev_4e07429c2c2b7841dba9f952594acb39",
+      "nome": "ra",
+      "ip": "127.0.0.1",
+      "autorizadoEm": "2026-08-20T18:18:43.457Z"
+    }
+  ],
+  "paletes": {
+    "direitoPrimeira": 2,
+    "direitoSegunda": 4,
+    "esquerdoPrimeira": 1,
+    "esquerdoSegunda": 3
+  },
+  "paletesOrdem": {
+    "stack1": 3,
+    "stack2": 4,
+    "stack3": 1,
+    "stack4": 2
+  }
 }
