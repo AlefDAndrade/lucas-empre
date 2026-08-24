@@ -18,7 +18,7 @@ npm start
 
 `npm start` (e `npm run dev`) já rodam `node build-index.js` automaticamente antes de subir o servidor (via `prestart`/`predev` no `package.json`) — então `public/index.html` está sempre atualizado com o que tiver em `public/partials/`, sem precisar lembrar de um passo manual. Pra gerar manualmente sem subir o servidor (ex: só pra conferir o resultado), `npm run build`.
 
-O servidor sobe em `http://localhost:3000` (ou na porta da variável de ambiente `PORT`, se definida — útil pra rodar os testes numa porta separada sem conflitar com um servidor de desenvolvimento já aberto). Requer Node `>= 18`.
+O servidor sobe em `http://localhost:5000` (ou na porta da variável de ambiente `PORT`, se definida — útil pra rodar os testes numa porta separada sem conflitar com um servidor de desenvolvimento já aberto). Requer Node `>= 18`.
 
 ## Testes automatizados
 
@@ -332,10 +332,10 @@ Em todos os casos: só dispara na **transição** de estado (nunca de novo em sa
 
 ### HTTPS via Caddy + nip.io (VM sem domínio próprio)
 
-Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é acessado só pelo IP da VM (`http://34.123.45.67:3000`, por exemplo), o navegador esconde o sino 🔔 porque a API nem fica disponível. `deploy/instalar-https.sh` resolve isso colocando o [Caddy](https://caddyserver.com/) (servidor com emissão automática de certificado Let's Encrypt) na frente do Node, usando o [nip.io](https://nip.io) — um serviço de DNS público e gratuito que resolve `A-B-C-D.nip.io` pro IP `A.B.C.D` automaticamente, sem precisar cadastrar nem comprar domínio nenhum.
+Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é acessado só pelo IP da VM (`http://34.123.45.67:5000`, por exemplo), o navegador esconde o sino 🔔 porque a API nem fica disponível. `deploy/instalar-https.sh` resolve isso colocando o [Caddy](https://caddyserver.com/) (servidor com emissão automática de certificado Let's Encrypt) na frente do Node, usando o [nip.io](https://nip.io) — um serviço de DNS público e gratuito que resolve `A-B-C-D.nip.io` pro IP `A.B.C.D` automaticamente, sem precisar cadastrar nem comprar domínio nenhum.
 
 **Pré-requisitos**
-- VM com o Lightwall já rodando (`npm start`, ver *Como rodar*) — o script assume que o Node está escutando em `localhost` numa porta (padrão `3000`).
+- VM com o Lightwall já rodando (`npm start`, ver *Como rodar*) — o script assume que o Node está escutando em `localhost` numa porta (padrão `5000`).
 - Portas **80** e **443** liberadas no firewall da VM (necessário pro Let's Encrypt validar o domínio e emitir o certificado). No Google Cloud: Console → VPC network → Firewall → criar/editar regra permitindo `tcp:80,443` de `0.0.0.0/0`.
 - Acesso root/sudo na VM.
 
@@ -345,13 +345,13 @@ Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é
    ```bash
    sudo bash deploy/instalar-https.sh [porta-do-node]
    ```
-   `[porta-do-node]` é opcional — padrão `3000` (mesma porta padrão de `server.js`). Só informe se o `PORT` estiver configurado com outro valor.
+   `[porta-do-node]` é opcional — padrão `5000` (mesma porta padrão de `server.js`). Só informe se o `PORT` estiver configurado com outro valor.
 3. O script faz tudo sozinho:
    - Descobre o IP externo da VM (via metadata do Google Cloud; se não conseguir — ex: VM fora do GCP — pergunta o IP manualmente).
    - Instala o Caddy (repositório oficial via `apt`).
    - Gera `/etc/caddy/Caddyfile` apontando `SEU-IP-COM-HIFENS.nip.io` → `localhost:PORTA` (ver `deploy/Caddyfile.exemplo` pra um modelo de referência, caso prefira editar manualmente).
    - Recarrega o Caddy — ele mesmo emite e renova o certificado HTTPS automaticamente, sem passo manual nenhum.
-4. Ao final, acesse `https://SEU-IP-COM-HIFENS.nip.io` (ex: IP `34.123.45.67` → `https://34-123-45-67.nip.io`) — deve aparecer o cadeado do navegador. A URL antiga (`http://SEU-IP:3000`) para de ser usada.
+4. Ao final, acesse `https://SEU-IP-COM-HIFENS.nip.io` (ex: IP `34.123.45.67` → `https://34-123-45-67.nip.io`) — deve aparecer o cadeado do navegador. A URL antiga (`http://SEU-IP:5000`) para de ser usada.
 5. Peça pra cada pessoa clicar em "Ativar notificações" (🔔) de novo — inscrições feitas sob HTTP simples nunca existiram de verdade pro navegador, então não migram sozinhas.
 
 **Depois de instalado**

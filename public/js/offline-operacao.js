@@ -28,7 +28,8 @@
 (function () {
   'use strict';
 
-  const DB_KEY = 'lw_operacao_offline_pendente';
+  const DB_KEY = 'lw_operacao_offline_pendente'; // rascunho ÚNICO em preenchimento (autosave)
+  const FILA_KEY = 'lw_operacao_offline_fila'; // ARRAY de operações já "Registradas", aguardando sincronizar (permite mais de 1)
   const M2_POR_PAINEL = 1.83;
   const LIMITE_INJECAO_MIN = 59;
   const TEMPO_CURA_HORAS = 8;
@@ -70,6 +71,13 @@
       status: 'idle', // idle | running | finished
       pausas: [],
       tracos: [],
+      // "🚫 Não Enchido" / vazamento (ver card Bateria Atual, abaixo) —
+      // mesmo formato usado no online (bateria-atual.js/GET
+      // /bercos-andamento): mapa esparso { 'B1': { esquerda:'baixou',
+      // direita:'nao_enchido', tipos:{esquerda:'sp',direita:'2p'} } }.
+      // Lado ausente (ou berço ausente por inteiro) = 'okay'. Só LOCAL —
+      // não existe "outro dispositivo" pra sincronizar offline.
+      bercos_marcados: {},
     };
   }
 
@@ -93,7 +101,11 @@
   //  ARMAZENAMENTO LOCAL — item 3 do plano
   // ============================================================
 
-  function persist(status) {
+  // Autosave do rascunho ATUAL em preenchimento (1 por vez — faz sentido,
+  // já que só existe 1 formulário na tela). Operações já "Registradas"
+  // não passam mais por aqui: vão direto pra fila (ver adicionarNaFila),
+  // que aceita várias.
+  function persist() {
     const pendente = {
       idTemp,
       iniciadoEm,
@@ -101,7 +113,7 @@
       formRecord: montarFormRecord(),
       tracos: state.tracos,
       pausas: state.pausas,
-      status: status || 'preenchendo',
+      status: 'preenchendo',
     };
     try {
       localStorage.setItem(DB_KEY, JSON.stringify(pendente));
@@ -109,6 +121,57 @@
       console.warn('[LWOff] Falha ao salvar localmente:', e.message);
     }
     return pendente;
+  }
+
+  // ---- Fila de operações Registradas, aguardando sincronizar ----
+  // (permite salvar mais de uma operação offline, uma atrás da outra)
+
+  function lerFila() {
+    let raw;
+    try { raw = localStorage.getItem(FILA_KEY); } catch (_) { return []; }
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  }
+
+  function salvarFila(fila) {
+    try {
+      localStorage.setItem(FILA_KEY, JSON.stringify(fila));
+    } catch (e) {
+      console.warn('[LWOff] Falha ao salvar fila localmente:', e.message);
+    }
+  }
+
+  function adicionarNaFila(pendente) {
+    const fila = lerFila();
+    fila.push(pendente);
+    salvarFila(fila);
+    return fila;
+  }
+
+  function removerDaFila(idTempAlvo) {
+    const fila = lerFila().filter((p) => p.idTemp !== idTempAlvo);
+    salvarFila(fila);
+    return fila;
+  }
+
+  // Compatibilidade com dados salvos ANTES desta mudança: no formato
+  // antigo, uma operação já "Registrada" ficava sozinha em DB_KEY com
+  // status "aguardando_conexao" (só existia 1 de cada vez). Se o
+  // aparelho tiver algo assim, migra pra fila na entrada, sem perder o
+  // registro.
+  function migrarPendenteAntigoSeExistir() {
+    let raw;
+    try { raw = localStorage.getItem(DB_KEY); } catch (_) { return; }
+    if (!raw) return;
+    let pendenteAntigo;
+    try { pendenteAntigo = JSON.parse(raw); } catch (_) { return; }
+    if (pendenteAntigo && pendenteAntigo.status === 'aguardando_conexao') {
+      adicionarNaFila(pendenteAntigo);
+      try { localStorage.removeItem(DB_KEY); } catch (_) { /* ignore */ }
+    }
   }
 
   function montarFormRecord() {
@@ -127,6 +190,12 @@
       houve_atraso: state.houve_atraso,
       motivo_atraso: state.motivo_atraso || '',
       qtd_tracos: state.tracos.length,
+      // Marcações de "baixou/vazou" e "🚫 Não Enchido" feitas no card
+      // Bateria Atual (ver seção BATERIA ATUAL, abaixo) — só entra no
+      // formRecord quando houver alguma, pra não poluir registros sem
+      // nenhuma marcação. Aplicadas de verdade nos totais de painéis só
+      // na hora de registrar() (ver ali) — aqui é só o rascunho salvo.
+      ...(Object.keys(state.bercos_marcados || {}).length ? { bercos_marcados: state.bercos_marcados } : {}),
     };
   }
 
@@ -136,7 +205,7 @@
     if (!raw) return false;
     let pendente;
     try { pendente = JSON.parse(raw); } catch (_) { return false; }
-    if (!pendente || pendente.status === 'sincronizado') return false;
+    if (!pendente) return false;
 
     idTemp = pendente.idTemp;
     iniciadoEm = pendente.iniciadoEm;
@@ -159,6 +228,7 @@
       status: fr.fim ? 'finished' : (fr.inicio ? 'running' : 'idle'),
       pausas: pendente.pausas || [],
       tracos: pendente.tracos || [],
+      bercos_marcados: fr.bercos_marcados || {},
     };
     return true;
   }
@@ -270,6 +340,8 @@
     if (!Array.isArray(state.bercos_personalizados)) return;
     state.bercos_personalizados[i] = valor || null;
     persist();
+    renderBateriaAtual(); // cor/tipo do berço na grade de Bateria Atual acompanha a Personalizada
+    renderCalculoPaineis(); // total/por tipo mudam a cada berço definido na grade
   }
 
   // ============================================================
@@ -316,6 +388,387 @@
       if (c && c.leva) placas_cimenticia += paineis_por_tipo[tipo] * (c.quantidade || 0);
     });
     return { total_paineis: paineis_total, m2_total: paineis_total * M2_POR_PAINEL, placas_cimenticia, paineis_por_tipo, m2_por_tipo };
+  }
+
+  // Desconta cada lado marcado "🚫 Não Enchido" (nunca "baixou/vazou" — só
+  // vazamento não tira painel nenhum, é só um alerta visual) do resultado
+  // de calcPaineis()/calcPaineisPersonalizado() — portado de
+  // aplicarNaoEnchidosNoCalc (data.js) pra funcionar 100% offline. Chamado
+  // só na hora de registrar() (ver abaixo), não a cada clique — o card
+  // Bateria Atual em si não mostra totais, só a grade de berços.
+  function aplicarNaoEnchidosNoCalc(calc, tipoMontagem, bercosPersonalizados, marcacoes) {
+    if (!marcacoes || !Object.keys(marcacoes).length) return calc;
+
+    const paineis_por_tipo = { ...(calc.paineis_por_tipo || {}) };
+
+    Object.keys(marcacoes).forEach((berco) => {
+      const bercoNum = parseInt(String(berco).replace(/^B/i, ''), 10);
+      if (!bercoNum) return;
+      const doBerco = marcacoes[berco] || {};
+      ['direita', 'esquerda'].forEach((lado) => {
+        if (doBerco[lado] !== 'nao_enchido') return;
+        // Prioriza o tipo FIXADO no instante da marcação (ver
+        // _offBaCliqueDot, abaixo) — mesma regra do online.
+        const tipoFixado = (doBerco.tipos && doBerco.tipos[lado]) || null;
+        const tipo = tipoFixado || tipoDoLadoMontagem(tipoMontagem, bercosPersonalizados, bercoNum, lado);
+        if (tipo && paineis_por_tipo[tipo] > 0) paineis_por_tipo[tipo] -= 1;
+      });
+    });
+
+    let paineis_total = 0;
+    Object.keys(paineis_por_tipo).forEach((tipo) => { paineis_total += paineis_por_tipo[tipo]; });
+
+    const m2_por_tipo = {};
+    Object.keys(paineis_por_tipo).forEach((tipo) => { m2_por_tipo[tipo] = paineis_por_tipo[tipo] * M2_POR_PAINEL; });
+
+    let placas_cimenticia = 0;
+    Object.keys(paineis_por_tipo).forEach((tipo) => {
+      const c = CIMENTICIA_POR_TIPO[tipo];
+      if (c && c.leva) placas_cimenticia += paineis_por_tipo[tipo] * (c.quantidade || 0);
+    });
+
+    return {
+      total_paineis: paineis_total,
+      m2_total: paineis_total * M2_POR_PAINEL,
+      placas_cimenticia,
+      paineis_por_tipo,
+      m2_por_tipo,
+    };
+  }
+
+  // Mesma convenção do online (ver _tipoDoLadoMontagem, data.js): qual
+  // TIPO de placa ('2p'/'sp'/...) um LADO específico de um berço produz —
+  // usado só pra saber de qual tipo descontar quando o lado é marcado
+  // "🚫 Não Enchido". Personalizada: tipo do berço inteiro (os 2 lados
+  // sempre batem). Simples: único tipo possível. Híbrida: 1º tipo da
+  // lista = direito, 2º = esquerdo (mesma convenção fixa do online).
+  function tipoDoLadoMontagem(tipoMontagem, bercosPersonalizados, bercoNum, lado) {
+    if (tipoMontagem === TIPO_MONTAGEM_PERSONALIZADA) {
+      const grade = Array.isArray(bercosPersonalizados) ? bercosPersonalizados : [];
+      return grade[bercoNum - 1] || null;
+    }
+    const opcao = (MONTAGEM_OPCOES || []).find((o) => o.label === tipoMontagem);
+    if (!opcao) return null;
+    if (opcao.modo === 'simples') return opcao.tipo || null;
+    if (opcao.modo === 'hibrida' && Array.isArray(opcao.tipos)) {
+      return lado === 'direita' ? (opcao.tipos[0] || null) : (opcao.tipos[1] || null);
+    }
+    return null;
+  }
+
+  // ============================================================
+  //  CORES POR TIPO — portado de data.js (hslParaHex/hexParaRgba/
+  //  corPorTipoSimples/corMontagemPorLabel), duplicado aqui (mesmo
+  //  padrão já usado pra calcPaineis, acima) pra não depender de data.js
+  //  nesta página standalone/offline.
+  // ============================================================
+
+  const COR_SATURACAO_SUGESTAO = 60;
+  const COR_LUMINOSIDADE_SUGESTAO = 52;
+
+  function hslParaHex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    const paraHex = (x) => Math.round(255 * x).toString(16).padStart(2, '0');
+    return `#${paraHex(f(0))}${paraHex(f(8))}${paraHex(f(4))}`;
+  }
+
+  function hexParaRgb(hex) {
+    let h = String(hex || '').replace('#', '').trim();
+    if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+    const num = parseInt(h, 16) || 0;
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+  }
+
+  function hexParaRgba(hex, alpha) {
+    const { r, g, b } = hexParaRgb(hex);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  function corCssDoHex(hex) {
+    return { cor: hex, bg: hexParaRgba(hex, .15), borda: hexParaRgba(hex, .3) };
+  }
+
+  function corMontagemNeutra() {
+    return { cor: '#5c6475', bg: 'rgba(156, 163, 175, .1)', borda: '#2a2f3a' };
+  }
+
+  function hexDoTipoSimples(tipoOuOpcao) {
+    const op = typeof tipoOuOpcao === 'string'
+      ? (MONTAGEM_OPCOES || []).find((o) => o.modo === 'simples' && o.tipo === tipoOuOpcao)
+      : tipoOuOpcao;
+    if (!op) return null;
+    if (typeof op.cor === 'string' && op.cor) return op.cor;
+    if (typeof op.corHue === 'number') return hslParaHex(op.corHue, COR_SATURACAO_SUGESTAO, COR_LUMINOSIDADE_SUGESTAO);
+    return null;
+  }
+
+  // Cor de um tipo SIMPLES pelo código (ex: 'sp') — usado na grade de
+  // Montagem Personalizada.
+  function corPorTipoSimples(tipo) {
+    const hex = hexDoTipoSimples(tipo);
+    return hex ? corCssDoHex(hex) : corMontagemNeutra();
+  }
+
+  // Cor de um tipo de montagem pelo LABEL (ex: '2/P', 'HÍBRIDA 2p/sp') —
+  // usado pra bateria uniforme (todo berço com o mesmo tipo).
+  function corMontagemPorLabel(label) {
+    const opcao = (MONTAGEM_OPCOES || []).find((o) => o.label === label);
+    if (!opcao) return corMontagemNeutra();
+    if (opcao.modo === 'simples') {
+      const hex = hexDoTipoSimples(opcao);
+      if (hex) return corCssDoHex(hex);
+    }
+    if (opcao.modo === 'hibrida' && Array.isArray(opcao.tipos) && opcao.tipos.length === 2) {
+      const [op1, op2] = opcao.tipos.map((t) => (MONTAGEM_OPCOES || []).find((o) => o.modo === 'simples' && o.tipo === t));
+      const hex1 = hexDoTipoSimples(op1);
+      const hex2 = hexDoTipoSimples(op2);
+      if (hex1 && hex2) {
+        const c1 = corCssDoHex(hex1);
+        const c2 = corCssDoHex(hex2);
+        return { cor: c1.cor, bg: `linear-gradient(90deg, ${c1.bg} 50%, ${c2.bg} 50%)`, borda: c1.borda };
+      }
+    }
+    return corMontagemNeutra();
+  }
+
+  function corPorTipoBerco(ehPersonalizada, tipo) {
+    if (!tipo) return null;
+    return ehPersonalizada ? corPorTipoSimples(tipo) : corMontagemPorLabel(tipo);
+  }
+
+  // Mesmas 5 cores de fallback do online (_CORES_TIPO_FALLBACK,
+  // operacao.js) — usadas só quando o tipo não tem cor cadastrada em
+  // Configurações → Bateria e Montagem.
+  const CORES_TIPO_FALLBACK = ['var(--blue)', 'var(--green)', 'var(--accent)', 'var(--purple)', 'var(--yellow)'];
+
+  // Cor de UM tipo (código, ex: '2p'/'sp') pros cards de Painéis/m² por
+  // tipo — igual _corTipoCard (operacao.js): sempre corPorTipoSimples
+  // (as chaves de paineis_por_tipo são sempre CÓDIGOS de tipo simples,
+  // mesmo numa montagem híbrida ou personalizada), com fallback cíclico
+  // só quando o tipo não tem cor cadastrada (cai no cinza neutro).
+  function corTipoCard(tipo, i) {
+    const cor = corPorTipoSimples(tipo);
+    const ehNeutra = !cor || cor.cor === '#5c6475';
+    return ehNeutra ? CORES_TIPO_FALLBACK[i % CORES_TIPO_FALLBACK.length] : cor.cor;
+  }
+
+  // Labels amigáveis pra tipos conhecidos — igual _labelTipo (operacao.js).
+  function labelTipo(tipo) {
+    const conhecidos = { '2p': '2/P', 'sp': 'S/P', '3p': '3/P' };
+    if (conhecidos[tipo]) return conhecidos[tipo];
+    const m = tipo.match(/^(\d+)p$/i);
+    if (m) return `${m[1]}/P`;
+    return tipo.toUpperCase();
+  }
+
+  // ============================================================
+  //  CÁLCULO DE PAINÉIS (preview ao vivo) — mesmo cartão/grid do online
+  //  (ver recalcPaineis, operacao.js): Total Painéis + cards por tipo
+  //  (2/P, S/P, ...), m² Total + cards por tipo, Placas Cimentícia. Já
+  //  aplica o desconto de "🚫 Não Enchido" marcado em Bateria Atual (ver
+  //  state.bercos_marcados) — só o preview em tela; o total que de fato
+  //  é REGISTRADO é recalculado do zero em registrar() (mesma fórmula).
+  // ============================================================
+
+  function renderCalculoPaineis() {
+    const elTotal = $('off-paineis-total');
+    if (!elTotal) return; // card só existe nesta tela
+
+    const elM2Total = $('off-m2-total');
+    const elCimenticia = $('off-placas-cimenticia');
+    const elPaineisTipo = $('off-cards-paineis-tipo');
+    const elM2Tipo = $('off-cards-m2-tipo');
+
+    const bercos = state.capacidade || 0;
+    if (!bercos || !state.tipo_montagem) {
+      elTotal.textContent = '—';
+      elM2Total.textContent = '—';
+      elCimenticia.textContent = '—';
+      if (elPaineisTipo) elPaineisTipo.innerHTML = '';
+      if (elM2Tipo) elM2Tipo.innerHTML = '';
+      return;
+    }
+
+    const base = state.tipo_montagem === TIPO_MONTAGEM_PERSONALIZADA
+      ? calcPaineisPersonalizado(state.bercos_personalizados)
+      : calcPaineis(state.tipo_montagem, bercos);
+    const r = aplicarNaoEnchidosNoCalc(base, state.tipo_montagem, state.bercos_personalizados, state.bercos_marcados);
+
+    elTotal.textContent = r.total_paineis;
+    elM2Total.textContent = r.m2_total.toFixed(2) + ' m²';
+    elCimenticia.textContent = r.placas_cimenticia;
+
+    const tipos = Object.keys(r.paineis_por_tipo);
+    if (elPaineisTipo) {
+      elPaineisTipo.innerHTML = tipos.map((tipo, i) => `
+        <div>
+          <div style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
+            Painéis ${labelTipo(tipo)}</div>
+          <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:800;color:${corTipoCard(tipo, i)}">
+            ${r.paineis_por_tipo[tipo]}</div>
+        </div>
+      `).join('');
+    }
+    if (elM2Tipo) {
+      elM2Tipo.innerHTML = tipos.map((tipo, i) => `
+        <div>
+          <div style="font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px">
+            m² ${labelTipo(tipo)}</div>
+          <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:800;color:${corTipoCard(tipo, i)}">
+            ${r.m2_por_tipo[tipo].toFixed(2)} m²</div>
+        </div>
+      `).join('');
+    }
+  }
+
+  // ============================================================
+  //  BATERIA ATUAL — versão offline do card sempre visível de
+  //  bateria-atual.js, reaproveitando as MESMAS classes CSS (.ba-*,
+  //  ver styles.css) pra ficar visualmente idêntico ao online. Duas
+  //  diferenças de propósito em relação ao online:
+  //   1) Sem trava de "dono da operação" nem sincronização entre
+  //      dispositivos — offline não tem nenhum dos dois conceitos, os
+  //      indicadores ficam sempre clicáveis.
+  //   2) Sem o modo "📋 Detalhes do Berço" (modal com traço/receita/
+  //      posição no palete) — não pedido aqui, e boa parte dos dados que
+  //      ele mostra (traço já lançado, posição no palete configurado)
+  //      não faz tanto sentido reaproveitar nesta tela mais simples.
+  // ============================================================
+
+  // Modo "🚫 Marcar Não Enchido" — enquanto ATIVO, clicar num indicador
+  // marca aquele lado como 'nao_enchido' (✕) em vez de 'baixou' (● o
+  // vazamento de sempre). Só estado local da tela (não precisa
+  // persistir sozinho — o que importa é o que já foi marcado, guardado
+  // em state.bercos_marcados).
+  let _offModoNaoEnchido = false;
+
+  // Lista de tipos por berço — igual _baTiposPorBerco (bateria-atual.js).
+  function tiposPorBerco(capacidade) {
+    if (state.tipo_montagem === TIPO_MONTAGEM_PERSONALIZADA) {
+      const grade = Array.isArray(state.bercos_personalizados) ? state.bercos_personalizados : [];
+      return Array.from({ length: capacidade }, (_, i) => grade[i] || null);
+    }
+    return Array.from({ length: capacidade }, () => state.tipo_montagem || null);
+  }
+
+  function tituloDot(estado, lado, tipo) {
+    const ladoTxt = lado === 'direita' ? 'Direito' : 'Esquerdo';
+    const tipoTxt = tipo ? ` (${escaparHtml(String(tipo).toUpperCase())})` : '';
+    if (estado === 'nao_enchido') return `${ladoTxt}${tipoTxt} — Não enchido`;
+    if (estado === 'baixou') return `${ladoTxt}${tipoTxt} — Baixou/Vazou`;
+    return `${ladoTxt}${tipoTxt}`;
+  }
+
+  function renderBateriaAtual() {
+    const el = $('off-bateria-atual-content');
+    if (!el) return;
+
+    if (!state.id_bateria || !state.tipo_montagem) {
+      el.innerHTML = '<span class="ba-vazio">Defina a bateria e o tipo de montagem para ver a prévia aqui.</span>';
+      return;
+    }
+
+    const capacidade = state.capacidade || 0;
+    const tipos = tiposPorBerco(capacidade);
+    const ehPersonalizada = state.tipo_montagem === TIPO_MONTAGEM_PERSONALIZADA;
+    const marcacoes = state.bercos_marcados || {};
+
+    const resumo = `
+      <div class="ba-resumo">
+        <strong>Bateria ${escaparHtml(state.id_bateria || '—')}</strong> — ${escaparHtml(state.tipo_montagem || '—')}
+        ${capacidade ? ` — ${capacidade} berços` : ''}
+      </div>`;
+
+    const botaoModo = `<button type="button" id="off-ba-btn-nao-enchido" class="btn btn-sm ${_offModoNaoEnchido ? 'btn-danger' : 'btn-ghost'}">
+        ${_offModoNaoEnchido ? '✕ Marcando Não Enchido — clique p/ desligar' : '🚫 Marcar Não Enchido'}
+      </button>`;
+
+    const dica = _offModoNaoEnchido
+      ? `<div class="ba-dica ba-dica-nao-enchido">✕ Clique num indicador para marcar aquele lado como <strong>não enchido</strong> — o painel correspondente sai da grade de avaliação da Qualidade.</div>`
+      : `<div class="ba-dica">🖱️ Clique num indicador (•) para marcar que aquele lado do berço baixou ou vazou</div>`;
+
+    const grid = `<div class="ba-grid">${tipos.map((tipo, i) => {
+      const cor = corPorTipoBerco(ehPersonalizada, tipo);
+      const numero = String(i + 1).padStart(2, '0');
+      const berco = 'B' + (i + 1);
+      const bercoNum = i + 1;
+      const marcadoBerco = marcacoes[berco] || {};
+      const estadoDir = marcadoBerco.direita || null;
+      const estadoEsq = marcadoBerco.esquerda || null;
+      const dirMarcado = !!estadoDir;
+      const esqMarcado = !!estadoEsq;
+      const dirNaoEnchido = estadoDir === 'nao_enchido';
+      const esqNaoEnchido = estadoEsq === 'nao_enchido';
+      const tipoDir = (marcadoBerco.tipos && marcadoBerco.tipos.direita) || tipoDoLadoMontagem(state.tipo_montagem, state.bercos_personalizados, bercoNum, 'direita');
+      const tipoEsq = (marcadoBerco.tipos && marcadoBerco.tipos.esquerda) || tipoDoLadoMontagem(state.tipo_montagem, state.bercos_personalizados, bercoNum, 'esquerda');
+
+      return `
+        <div class="ba-celula" data-berco="${berco}"
+          style="background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-3)'};border:1px solid ${cor ? cor.borda : 'var(--border)'}">
+          <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}${dirNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${berco}" data-lado="direita"
+            data-tooltip="${tituloDot(estadoDir, 'direita', tipoDir)}">${dirNaoEnchido ? '✕' : '•'}</span>
+          <span class="ba-numero">B${numero}</span>
+          <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}${esqNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${berco}" data-lado="esquerda"
+            data-tooltip="${tituloDot(estadoEsq, 'esquerda', tipoEsq)}">${esqNaoEnchido ? '✕' : '•'}</span>
+        </div>`;
+    }).join('')}</div>`;
+
+    el.innerHTML = resumo + `<div class="ba-botoes">${botaoModo}</div>` + dica + grid;
+
+    const btnModo = $('off-ba-btn-nao-enchido');
+    if (btnModo) {
+      btnModo.addEventListener('click', () => {
+        _offModoNaoEnchido = !_offModoNaoEnchido;
+        renderBateriaAtual(); // redesenha na hora (botão, dica e cursor dos indicadores mudam com o modo)
+      });
+    }
+
+    el.querySelectorAll('.ba-dot').forEach((dot) => {
+      dot.addEventListener('click', () => {
+        cliqueDotBateriaAtual(dot.getAttribute('data-berco'), dot.getAttribute('data-lado'), _offModoNaoEnchido ? 'nao_enchido' : 'baixou');
+      });
+    });
+  }
+
+  // Alterna (toggle) o estado de UM lado de UM berço — 100% local (sem
+  // rede, sem otimismo/desfazer, diferente do online): grava direto em
+  // state.bercos_marcados e persiste. Clique de novo no mesmo indicador
+  // (já marcado, seja como 'baixou' ou 'nao_enchido') sempre desmarca —
+  // nunca troca uma marcação por outra sem antes desmarcar, mesma regra
+  // do online.
+  function cliqueDotBateriaAtual(berco, lado, estadoDesejado) {
+    if (!berco || !lado) return;
+    const marcacoes = state.bercos_marcados || (state.bercos_marcados = {});
+    const marcadoBerco = marcacoes[berco] || {};
+    const estadoAtual = marcadoBerco[lado] || null;
+    const estavaMarcado = estadoAtual === 'baixou' || estadoAtual === 'nao_enchido';
+    const novoEstado = estavaMarcado ? null : estadoDesejado;
+
+    const bercoNum = parseInt(String(berco).replace(/^B/i, ''), 10);
+    const tipoFixado = (novoEstado === 'nao_enchido' && bercoNum)
+      ? tipoDoLadoMontagem(state.tipo_montagem, state.bercos_personalizados, bercoNum, lado)
+      : null;
+
+    const novoBerco = { ...marcadoBerco };
+    if (novoEstado) {
+      novoBerco[lado] = novoEstado;
+      if (tipoFixado) novoBerco.tipos = { ...(novoBerco.tipos || {}), [lado]: tipoFixado };
+    } else {
+      delete novoBerco[lado];
+      if (novoBerco.tipos) {
+        const { [lado]: _descartado, ...restoTipos } = novoBerco.tipos;
+        if (Object.keys(restoTipos).length) novoBerco.tipos = restoTipos; else delete novoBerco.tipos;
+      }
+    }
+    if (Object.keys(novoBerco).length) marcacoes[berco] = novoBerco;
+    else delete marcacoes[berco];
+
+    persist();
+    renderBateriaAtual();
+    renderCalculoPaineis(); // "🚫 Não Enchido" desconta painéis do preview na hora (ver aplicarNaoEnchidosNoCalc)
   }
 
   // ============================================================
@@ -710,9 +1163,81 @@
   }
 
   // ============================================================
-  //  REGISTRAR — tenta sincronizar (item 5, rota ainda não existe);
-  //  se falhar, fica salvo localmente como "aguardando_conexao".
+  //  REGISTRAR — SALVA localmente na hora (item 3) e tenta sincronizar
+  //  em segundo plano (item 5). O usuário nunca precisa "reenviar" na
+  //  mão: enquanto houver um registro aguardando_conexao no aparelho,
+  //  checarReconexao() (evento 'online' + polling a cada 15s, mais
+  //  abaixo) tenta de novo sozinho até dar certo.
   // ============================================================
+
+  let _sincronizando = false;
+
+  // Faz de fato a chamada de rede pra um pendente já salvo (objeto no
+  // formato { idTemp, formRecord, tracos, pausas, ... }). Lança erro
+  // se não conseguir — quem chama decide o que fazer com isso.
+  async function enviarPendenteParaServidor(pendente) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch('/operacao-offline/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idTemp: pendente.idTemp,
+          formRecord: pendente.formRecord,
+          tracos: pendente.tracos,
+          pausas: pendente.pausas,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error('Servidor recusou o envio (HTTP ' + res.status + ')');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  // Percorre a FILA (0, 1 ou várias operações já "Registradas" neste
+  // aparelho) tentando enviar uma a uma, na ordem em que foram salvas.
+  // Vai removendo da fila cada uma que o servidor confirmar. Para no
+  // primeiro erro (sinal de que a rede ainda está fora) — o que já
+  // sincronizou fica sincronizado, o resto tenta de novo no próximo
+  // ciclo (evento 'online' ou polling de 15s). Devolve true só quando
+  // pelo menos 1 item foi enviado com sucesso agora.
+  async function tentarSincronizarAgora() {
+    if (_sincronizando) return false;
+    const fila = lerFila();
+    if (!fila.length) return false;
+
+    _sincronizando = true;
+    let algumSincronizou = false;
+    try {
+      for (const pendente of fila) {
+        try {
+          await enviarPendenteParaServidor(pendente);
+          removerDaFila(pendente.idTemp);
+          algumSincronizou = true;
+        } catch (e) {
+          break; // sem servidor disponível — o restante da fila tenta depois
+        }
+      }
+    } finally {
+      _sincronizando = false;
+    }
+
+    if (algumSincronizou) {
+      const restantes = lerFila().length;
+      mostrarBanner(
+        restantes > 0
+          ? `🌐 Conexão restabelecida — registro(s) enviado(s) para validação! Ainda restam ` +
+            `${restantes} salvo(s) neste aparelho, tentando enviar os demais...`
+          : `🌐 Conexão restabelecida — todos os registros salvos neste aparelho foram enviados ` +
+            `para validação!`,
+        'sucesso'
+      );
+      renderFila();
+    }
+    return algumSincronizou;
+  }
 
   async function registrar() {
     if ($('off-btn-registrar').disabled) return;
@@ -720,64 +1245,130 @@
 
     const bateria = BATERIA_IDS.find((b) => b.id === state.id_bateria);
     const bercos = bateria?.bercos || 0;
-    const calc = state.tipo_montagem === TIPO_MONTAGEM_PERSONALIZADA
+    const calcBruto = state.tipo_montagem === TIPO_MONTAGEM_PERSONALIZADA
       ? calcPaineisPersonalizado(state.bercos_personalizados)
       : calcPaineis(state.tipo_montagem, bercos);
+    // Desconta cada lado marcado "🚫 Não Enchido" em Bateria Atual (ver
+    // seção BATERIA ATUAL, acima) — mesma regra do online: só entra na
+    // conta final aqui, no Registrar, não durante o preenchimento.
+    const calc = aplicarNaoEnchidosNoCalc(calcBruto, state.tipo_montagem, state.bercos_personalizados, state.bercos_marcados);
 
-    const pendente = persist('preenchendo');
-    pendente.formRecord = { ...pendente.formRecord, ...calc };
+    // Salva JÁ, no aparelho — isso é o "Registrar": não depende de rede
+    // nem de servidor responder. calc (painéis/m²) entra direto no
+    // formRecord salvo, então uma sincronização automática horas depois
+    // manda os dados completos, sem precisar do state em memória.
+    const pendente = {
+      idTemp,
+      iniciadoEm,
+      atualizadoEm: new Date().toISOString(),
+      formRecord: { ...montarFormRecord(), ...calc },
+      tracos: state.tracos,
+      pausas: state.pausas,
+      status: 'aguardando_conexao',
+    };
+    adicionarNaFila(pendente);
+    try { localStorage.removeItem(DB_KEY); } catch (_) { /* ignore */ } // o rascunho virou item definitivo da fila
 
-    $('off-btn-registrar').disabled = true;
-    $('off-btn-registrar').textContent = 'Enviando…';
+    const idRegistrado = idTemp;
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch('/operacao-offline/enviar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idTemp, formRecord: pendente.formRecord, tracos: state.tracos, pausas: state.pausas }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) throw new Error('Servidor recusou o envio (HTTP ' + res.status + ')');
+    // Libera a tela NA HORA — não espera confirmação do servidor — pra
+    // dar pra registrar outra operação em seguida, ainda offline.
+    limparFormularioNovoRegistro();
+    mostrarBanner(
+      `💾 Registro salvo neste aparelho (código ${idRegistrado}). Você já pode preencher outra ` +
+      `operação — assim que a conexão com o servidor voltar, tudo que estiver salvo é enviado sozinho.`,
+      'aviso'
+    );
+    renderFila();
 
-      // Sucesso — sincronizado de verdade, remove o pendente local.
-      localStorage.removeItem(DB_KEY);
-      mostrarTelaSucesso();
-    } catch (e) {
-      // Sem rota de sincronização disponível ainda, ou sem conexão —
-      // mantém salvo localmente (status aguardando_conexao) e avisa.
-      persist('aguardando_conexao');
-      $('off-btn-registrar').disabled = false;
-      $('off-btn-registrar').textContent = '✅ Registrar';
-      mostrarBanner(
-        `📡 Não foi possível enviar agora. Seu registro está salvo NESTE APARELHO ` +
-        `(código ${idTemp}) e não será perdido — tente novamente quando a conexão ` +
-        `com o servidor estiver disponível.`,
-        'aviso'
-      );
-    }
+    // Tenta sincronizar JÁ, em segundo plano — se a conexão já estiver
+    // de volta, o aviso acima é rapidamente substituído pelo de sucesso.
+    await tentarSincronizarAgora();
   }
 
-  function mostrarTelaSucesso() {
-    document.querySelector('.off-wrap').innerHTML = `
-      <div class="card" style="text-align:center;padding:40px 24px">
-        <div style="font-size:2.4rem;margin-bottom:12px">✅</div>
-        <div class="card-title" style="justify-content:center">Enviado para validação</div>
-        <p style="color:var(--text-2);margin-top:10px;line-height:1.5">
-          Peça a alguém com perfil Administrador para revisar e validar este
-          registro em "Operações a Validar".
-        </p>
-        <a href="login.html" class="btn-primary" style="text-decoration:none;display:inline-block;margin-top:20px">← Voltar ao login</a>
-      </div>`;
-    document.querySelector('.off-actions-bar').style.display = 'none';
+  // Reseta todo o estado/formulário depois de um registro enviado com
+  // sucesso, pra abrir espaço pra registrar outra operação sem sair
+  // desta tela (o slot local — DB_KEY — já foi liberado antes de
+  // chamar esta função, ver registrar()).
+  function limparFormularioNovoRegistro() {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = null;
+
+    $('off-fieldset-trava').disabled = false;
+    idTemp = gerarIdTemp();
+    iniciadoEm = new Date().toISOString();
+    expandedTracoIndex = 0;
+    state = criarStateVazio();
+
+    // Identificação
+    $('off-turno').value = state.turno;
+    popularSelects(); // repopula ID da Bateria / Tipo de Montagem já sem seleção (state está vazio)
+
+    // Controle de Injeção
+    $('off-inicio').value = '';
+    $('off-btn-iniciar').disabled = false;
+    $('off-fim').value = '';
+    $('off-btn-finalizar').disabled = true;
+    $('off-atraso').innerHTML = '—';
+    $('off-motivo-row').style.display = 'none';
+    $('off-motivo').value = '';
+    $('off-desemplaque-row').style.display = 'none';
+    $('off-desemplaque').textContent = '—';
+    const timerEl = $('off-timer-display');
+    timerEl.textContent = '0:00:00';
+    timerEl.className = 'timer-display';
+    atualizarBtnPausar();
+
+    // Traços e pendências
+    renderTracos();
+    updatePendencias();
+    _offModoNaoEnchido = false; // volta pro modo padrão (vazamento) no próximo registro
+    renderBateriaAtual();
+    renderCalculoPaineis(); // volta pro placeholder '—' (state novo, sem bateria/tipo definidos)
+
+    $('off-btn-registrar').textContent = '✅ Registrar';
   }
 
   function descartarPendente() {
     if (!confirm('Tem certeza? Isso apaga TODOS os dados preenchidos neste rascunho offline — não tem como desfazer.')) return;
     localStorage.removeItem(DB_KEY);
     location.reload();
+  }
+
+  // ============================================================
+  //  FILA — lista visual das operações já Registradas neste aparelho,
+  //  aguardando conexão pra sincronizar (permite mais de uma)
+  // ============================================================
+
+  function renderFila() {
+    const el = $('off-fila-lista');
+    if (!el) return;
+    const fila = lerFila();
+    if (!fila.length) { el.innerHTML = ''; return; }
+
+    el.innerHTML = `
+      <div class="card" style="padding:14px 16px">
+        <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
+          📥 Salvos neste aparelho, aguardando envio (${fila.length})
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${fila.map((p) => {
+            const fr = p.formRecord || {};
+            return `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.82rem;flex-wrap:wrap">
+              <span>🆔 ${escaparHtml(p.idTemp)} — Bateria ${escaparHtml(fr.id_bateria || '—')} ·
+                ${escaparHtml(String(fr.qtd_tracos ?? 0))} traço(s)</span>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="LWOff.descartarDaFila('${p.idTemp}')" title="Descartar este registro">✕ Descartar</button>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }
+
+  function descartarDaFila(idTempAlvo) {
+    if (!confirm('Tem certeza? Isso apaga esse registro salvo neste aparelho — não tem como desfazer.')) return;
+    removerDaFila(idTempAlvo);
+    renderFila();
   }
 
   // ============================================================
@@ -793,21 +1384,26 @@
     el.innerHTML = `<div style="padding:12px 16px;border-radius:8px;font-size:.85rem;line-height:1.5;${cores[tipo] || cores.aviso}">${mensagem}</div>`;
   }
 
-  // item 4 do plano: conexão volta NO MEIO do preenchimento (antes de
-  // clicar Registrar) — mesma checagem ativa por fetch usada no item 1
-  // (login.html) e no item 9 (operacao.js), já que o evento 'online' do
-  // navegador sozinho não é confiável.
+  // item 4 do plano: conexão volta a qualquer momento (durante o
+  // preenchimento OU depois de já ter clicado Registrar) — mesma
+  // checagem ativa por fetch usada no item 1 (login.html) e no item 9
+  // (operacao.js), já que o evento 'online' do navegador sozinho não é
+  // confiável. Ao detectar conexão, tenta sincronizar sozinho qualquer
+  // registro já salvo como "aguardando_conexao" (ver
+  // tentarSincronizarAgora) — só cai no aviso genérico abaixo quando
+  // NÃO havia nada pra sincronizar (ex: ainda em preenchimento).
   let _avisouReconexao = false;
   async function checarReconexao() {
-    if (state.status === 'finished' && _avisouReconexao) return; // já avisou, nada novo a dizer
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2500);
     try {
       await fetch('/minha-sessao', { method: 'GET', cache: 'no-store', signal: controller.signal });
-      if (!_avisouReconexao) {
-        _avisouReconexao = true;
+      const primeiraVezOnline = !_avisouReconexao;
+      _avisouReconexao = true;
+      const sincronizou = await tentarSincronizarAgora();
+      if (primeiraVezOnline && !sincronizou) {
         mostrarBanner(
-          '🌐 Conexão restabelecida. Termine este registro; depois disso, o modo offline ficará bloqueado até alguém entrar com um perfil.',
+          '🌐 Conexão restabelecida. Pode continuar preenchendo — quando clicar em "Registrar", o envio é automático.',
           'sucesso'
         );
       }
@@ -823,6 +1419,8 @@
   // ============================================================
 
   async function init() {
+    migrarPendenteAntigoSeExistir();
+
     const retomando = carregarPendenteExistente();
     if (!retomando) {
       idTemp = gerarIdTemp();
@@ -838,15 +1436,27 @@
       state.id_bateria = e.target.value;
       atualizarDimensaoAutoFill();
       atualizarGradePersonalizada();
+      // Troca de bateria muda a quantidade/numeração dos berços — as
+      // marcações antigas de vazamento/não enchido não fazem mais
+      // sentido pro novo tamanho, então zera (mesmo espírito de
+      // `bercos_personalizados` ser reconstruído em atualizarGradePersonalizada).
+      state.bercos_marcados = {};
       persist();
       updatePendencias();
+      renderBateriaAtual();
+      renderCalculoPaineis();
     });
     $('off-tipo-montagem').addEventListener('change', (e) => {
       state.tipo_montagem = e.target.value;
       if (state.tipo_montagem !== TIPO_MONTAGEM_PERSONALIZADA) state.bercos_personalizados = null;
+      // Mudar o tipo de montagem muda de qual TIPO cada lado desconta —
+      // zera as marcações antigas pelo mesmo motivo da troca de bateria.
+      state.bercos_marcados = {};
       atualizarGradePersonalizada();
       persist();
       updatePendencias();
+      renderBateriaAtual();
+      renderCalculoPaineis();
     });
     $('off-motivo').addEventListener('input', (e) => { state.motivo_atraso = e.target.value; persist(); });
 
@@ -869,14 +1479,18 @@
     atualizarBtnPausar();
     renderTracos();
     updatePendencias();
+    renderFila();
+    renderBateriaAtual(); // mostra a grade já com as marcações restauradas, se estava retomando um rascunho
+    renderCalculoPaineis(); // idem — totais já batendo com o rascunho restaurado
 
     if (retomando) {
-      mostrarBanner('↩️ Retomando um registro offline salvo neste aparelho, ainda não enviado.', 'aviso');
+      mostrarBanner('↩️ Retomando um rascunho salvo neste aparelho, ainda não registrado.', 'aviso');
     }
 
     window.addEventListener('offline', () => { _avisouReconexao = false; });
     window.addEventListener('online', checarReconexao);
     setInterval(checarReconexao, 15000);
+    checarReconexao(); // tenta sincronizar já de cara, sem esperar o primeiro polling de 15s
   }
 
   document.addEventListener('DOMContentLoaded', init);
@@ -884,6 +1498,6 @@
   window.LWOff = {
     iniciarInjecao, togglePausa, finalizarInjecao,
     addTraco, removeTraco, updateTraco, updateInsumo, updateTempoBatida, expandirTraco,
-    updateBercoPersonalizado, registrar, descartarPendente,
+    updateBercoPersonalizado, registrar, descartarPendente, descartarDaFila,
   };
 })();
