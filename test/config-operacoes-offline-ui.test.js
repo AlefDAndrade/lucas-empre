@@ -11,9 +11,10 @@
 // Cobre:
 //   - A aba lista o que foi enviado por POST /operacao-offline/enviar.
 //   - Clicar em "✅ Validar" chama a rota e some da lista depois.
-//   - Clicar em "✏️ Corrigir" abre o painel inline com os campos atuais
-//     pré-preenchidos; salvar aplica a correção (some o "corrigido" some
-//     na recarga do card).
+//   - Clicar em "✏️ Corrigir" abre o modal "papel A4" com os campos atuais
+//     pré-preenchidos (dados gerais, horários, pausas, traços); salvar
+//     aplica a correção e fecha o modal (o card mostra "corrigido" na
+//     recarga da lista).
 //   - Clicar em "❌ Recusar" chama a rota e some da lista.
 //   - Perfil sem a permissão 'config-operacoes-offline' não vê a aba no
 //     menu lateral (mesmo comportamento de qualquer outra aba de config).
@@ -123,6 +124,58 @@ test('aba "Operações a Validar" lista o que foi enviado offline', async () => 
   }
 });
 
+// Reproduz o bug relatado: início/fim gravados no formRecord seguem a
+// convenção "UTC falso = hora de Brasília" (mesmos dígitos do ISO SÃO a
+// hora de Brasília, ver _offcParaInputDatetime/LW.formatDateTime,
+// coluna "Hora Início/Fim" do Registro de Baterias em dashboard.js) —
+// então o card desta lista PRECISA ler os dígitos direto (timeZone:
+// 'UTC'), nunca aplicar o fuso REAL do processo que está rodando o
+// navegador. _cfgCardOperacaoOffline usava `new Date(f.inicio)
+// .toLocaleString('pt-BR')` sem forçar UTC — inofensivo enquanto o fuso
+// do processo já era UTC (por isso não pegava antes), mas mostrava um
+// horário DIFERENTE do que a mesma operação mostra depois de validada
+// (Registro de Baterias, que sempre força timeZone:'UTC') sempre que o
+// servidor/navegador roda num fuso que não é UTC — o caso real relatado
+// (Corrigir mostrando um horário, Registro de Bateria mostrando outro
+// pra mesma operação). Força process.env.TZ pra um fuso bem diferente
+// de UTC pra expor isso de forma determinística, independente de em
+// que fuso esta suíte normalmente roda.
+test('card de "Operações a Validar" mostra início/fim na hora de Brasília gravada, não deslocada pelo fuso do processo', async () => {
+  const tzOriginal = process.env.TZ;
+  process.env.TZ = 'America/New_York'; // bem diferente de UTC — qualquer deslocamento indevido fica óbvio
+  try {
+    const idTemp = 'OFF-ui-fuso-' + Date.now();
+    // payloadValido: inicio '2026-08-19T08:00:00.000Z' / fim
+    // '2026-08-19T09:00:00.000Z' — dígitos que, pela convenção "UTC
+    // falso", REPRESENTAM 08:00/09:00 de Brasília, não 08:00/09:00UTC de
+    // verdade. O card precisa mostrar exatamente esses dígitos.
+    await enviarOffline(payloadValido(idTemp));
+
+    const dom = await abrirSpaComoAdminMaster();
+    const { window } = dom;
+    const document = window.document;
+    try {
+      window.abrirConfig();
+      await new Promise(r => setTimeout(r, 200));
+      window.cfgMostrarSecao('operacoes-offline');
+      await new Promise(r => setTimeout(r, 400));
+
+      const container = document.getElementById('cfg-operacoes-offline-lista');
+      assert.ok(container.innerHTML.includes('08:00'), 'card deveria mostrar 08:00 (hora de Brasília gravada), não deslocado pelo fuso do processo — HTML: ' + container.innerHTML);
+      assert.ok(container.innerHTML.includes('09:00'), 'card deveria mostrar 09:00 (hora de Brasília gravada), não deslocado pelo fuso do processo — HTML: ' + container.innerHTML);
+      // Nunca deve aparecer o horário deslocado (America/New_York é
+      // UTC-4 no verão daquela data — 08:00/09:00 "reais UTC" virariam
+      // 04:00/05:00 se o bug de fuso real estivesse presente).
+      assert.ok(!container.innerHTML.includes('04:00'), 'não deveria mostrar o horário deslocado pelo fuso — HTML: ' + container.innerHTML);
+      assert.ok(!container.innerHTML.includes('05:00'), 'não deveria mostrar o horário deslocado pelo fuso — HTML: ' + container.innerHTML);
+    } finally {
+      window.close();
+    }
+  } finally {
+    if (tzOriginal === undefined) delete process.env.TZ; else process.env.TZ = tzOriginal;
+  }
+});
+
 test('clicar em "✅ Validar" abre a renumeração do dia; confirmar aprova o registro e ele some da lista', async () => {
   const idTemp = 'OFF-ui-validar-' + Date.now();
   await enviarOffline(payloadValido(idTemp));
@@ -227,7 +280,7 @@ test('na renumeração, dar o mesmo número pra dois traços trava o botão de c
   }
 });
 
-test('clicar em "✏️ Corrigir" abre o painel com os campos pré-preenchidos, e salvar aplica a correção', async () => {
+test('clicar em "✏️ Corrigir" abre o modal com os campos pré-preenchidos, e salvar aplica a correção', async () => {
   const idTemp = 'OFF-ui-corrigir-' + Date.now();
   await enviarOffline(payloadValido(idTemp));
 
@@ -243,16 +296,21 @@ test('clicar em "✏️ Corrigir" abre o painel com os campos pré-preenchidos, 
     window.cfgAbrirCorrecaoOperacaoOffline(idTemp);
     await new Promise(r => setTimeout(r, 100));
 
-    const idSeguro = idTemp.replace(/[^a-zA-Z0-9_-]/g, '');
-    const painel = document.getElementById('cfg-corrigir-' + idSeguro);
-    assert.equal(painel.style.display, 'block', 'painel de correção deveria estar visível');
+    const modal = document.getElementById('offline-corrigir-modal');
+    assert.equal(modal.style.display, 'flex', 'modal de correção deveria estar visível');
 
-    const inputBateria = document.getElementById('cfg-off-bateria-' + idSeguro);
+    const inputBateria = document.getElementById('offc-bateria');
     assert.equal(inputBateria.value, 'B-ui-teste', 'campo deveria vir pré-preenchido com o valor atual');
 
+    // O traço enviado no payload também deveria ter vindo pré-preenchido.
+    const inputSilo = document.querySelector('#offc-tracos-lista .offc-traco-row[data-idx="0"] [data-campo="silo"]');
+    assert.equal(inputSilo.value, 'Silo 1', 'campo do traço deveria vir pré-preenchido');
+
     inputBateria.value = 'B-corrigida-pela-ui';
-    await window.cfgSalvarCorrecaoOperacaoOffline(idSeguro, idTemp);
+    await window.cfgSalvarCorrecaoOperacaoOffline();
     await new Promise(r => setTimeout(r, 400));
+
+    assert.equal(modal.style.display, 'none', 'modal deveria fechar depois de salvar');
 
     const container = document.getElementById('cfg-operacoes-offline-lista');
     assert.ok(container.innerHTML.includes('B-corrigida-pela-ui'), 'card deveria mostrar o valor já corrigido depois de recarregar a lista');

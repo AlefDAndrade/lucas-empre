@@ -18,7 +18,7 @@ npm start
 
 `npm start` (e `npm run dev`) já rodam `node build-index.js` automaticamente antes de subir o servidor (via `prestart`/`predev` no `package.json`) — então `public/index.html` está sempre atualizado com o que tiver em `public/partials/`, sem precisar lembrar de um passo manual. Pra gerar manualmente sem subir o servidor (ex: só pra conferir o resultado), `npm run build`.
 
-O servidor sobe em `http://localhost:5000` (ou na porta da variável de ambiente `PORT`, se definida — útil pra rodar os testes numa porta separada sem conflitar com um servidor de desenvolvimento já aberto). Requer Node `>= 18`.
+O servidor sobe em `http://localhost:3000` (ou na porta da variável de ambiente `PORT`, se definida — útil pra rodar os testes numa porta separada sem conflitar com um servidor de desenvolvimento já aberto). Requer Node `>= 18`.
 
 ## Testes automatizados
 
@@ -332,10 +332,10 @@ Em todos os casos: só dispara na **transição** de estado (nunca de novo em sa
 
 ### HTTPS via Caddy + nip.io (VM sem domínio próprio)
 
-Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é acessado só pelo IP da VM (`http://34.123.45.67:5000`, por exemplo), o navegador esconde o sino 🔔 porque a API nem fica disponível. `deploy/instalar-https.sh` resolve isso colocando o [Caddy](https://caddyserver.com/) (servidor com emissão automática de certificado Let's Encrypt) na frente do Node, usando o [nip.io](https://nip.io) — um serviço de DNS público e gratuito que resolve `A-B-C-D.nip.io` pro IP `A.B.C.D` automaticamente, sem precisar cadastrar nem comprar domínio nenhum.
+Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é acessado só pelo IP da VM (`http://34.123.45.67:3000`, por exemplo), o navegador esconde o sino 🔔 porque a API nem fica disponível. `deploy/instalar-https.sh` resolve isso colocando o [Caddy](https://caddyserver.com/) (servidor com emissão automática de certificado Let's Encrypt) na frente do Node, usando o [nip.io](https://nip.io) — um serviço de DNS público e gratuito que resolve `A-B-C-D.nip.io` pro IP `A.B.C.D` automaticamente, sem precisar cadastrar nem comprar domínio nenhum.
 
 **Pré-requisitos**
-- VM com o Lightwall já rodando (`npm start`, ver *Como rodar*) — o script assume que o Node está escutando em `localhost` numa porta (padrão `5000`).
+- VM com o Lightwall já rodando (`npm start`, ver *Como rodar*) — o script assume que o Node está escutando em `localhost` numa porta (padrão `3000`).
 - Portas **80** e **443** liberadas no firewall da VM (necessário pro Let's Encrypt validar o domínio e emitir o certificado). No Google Cloud: Console → VPC network → Firewall → criar/editar regra permitindo `tcp:80,443` de `0.0.0.0/0`.
 - Acesso root/sudo na VM.
 
@@ -345,13 +345,13 @@ Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é
    ```bash
    sudo bash deploy/instalar-https.sh [porta-do-node]
    ```
-   `[porta-do-node]` é opcional — padrão `5000` (mesma porta padrão de `server.js`). Só informe se o `PORT` estiver configurado com outro valor.
+   `[porta-do-node]` é opcional — padrão `3000` (mesma porta padrão de `server.js`). Só informe se o `PORT` estiver configurado com outro valor.
 3. O script faz tudo sozinho:
    - Descobre o IP externo da VM (via metadata do Google Cloud; se não conseguir — ex: VM fora do GCP — pergunta o IP manualmente).
    - Instala o Caddy (repositório oficial via `apt`).
    - Gera `/etc/caddy/Caddyfile` apontando `SEU-IP-COM-HIFENS.nip.io` → `localhost:PORTA` (ver `deploy/Caddyfile.exemplo` pra um modelo de referência, caso prefira editar manualmente).
    - Recarrega o Caddy — ele mesmo emite e renova o certificado HTTPS automaticamente, sem passo manual nenhum.
-4. Ao final, acesse `https://SEU-IP-COM-HIFENS.nip.io` (ex: IP `34.123.45.67` → `https://34-123-45-67.nip.io`) — deve aparecer o cadeado do navegador. A URL antiga (`http://SEU-IP:5000`) para de ser usada.
+4. Ao final, acesse `https://SEU-IP-COM-HIFENS.nip.io` (ex: IP `34.123.45.67` → `https://34-123-45-67.nip.io`) — deve aparecer o cadeado do navegador. A URL antiga (`http://SEU-IP:3000`) para de ser usada.
 5. Peça pra cada pessoa clicar em "Ativar notificações" (🔔) de novo — inscrições feitas sob HTTP simples nunca existiram de verdade pro navegador, então não migram sozinhas.
 
 **Depois de instalado**
@@ -442,6 +442,66 @@ Se a lista de ajustes de um campo ficar vazia depois da edição, ele volta a se
 Auditoria em `relatorio_edicoes.json` (mesmo padrão de `historico_edicoes.json`, indexado por `id_traco` + `id_operacao`) — por bloco de dados alterado (identificação, uso, originais, ajustes, densidade, flow), não campo a campo.
 
 **Limitação conhecida**: igual à Edição de Operação, não há checagem de senha no servidor pra essa rota — a trava de "só Administrador" é só na tela (mesmo modelo de confiança já usado ali).
+
+## Registro de Traço Descartado (Perda) — plano
+
+**Objetivo**: hoje, quando um traço dá errado no meio da batelada (erro de dosagem, falha de equipamento, contaminação etc.) e precisa ser descartado, ele simplesmente não é registrado em lugar nenhum — os insumos foram consumidos de verdade, mas o sistema não sabe disso. A ideia é dar um jeito de registrar essa perda (o que foi gasto + o motivo), sem que esse traço vire uma operação, um traço "de verdade" no Relatório de Injeção, ou entre em qualquer cálculo que hoje assume que todo traço em `tracos` representa produção real.
+
+**Por que não é só mais uma linha na tabela `tracos`**: um traço sem nenhum uso vinculado (`ultilizado.operacao` vazio) já é um caso previsto pelo schema — não aparece no Registro de Baterias, na Análise Focada nem na exportação do Relatório de Injeção (todos esses são "por uso"; zero usos = zero linhas). **Mas** o painel de CEP do Setor de Qualidade (`public/js/qualidade-tracos.js`, `getTracosComFiltros`) busca **todos** os traços de `db/relatorio_injecao.json` (via `db.todosOsTracos()`) sem filtrar por uso, e soma isso em `totalTracos`, na Taxa de Acerto, no desvio por insumo e no ranking de receita mais instável. Inserir o traço perdido ali contaminaria esses indicadores — o processo não "errou" nesse caso, o traço nem chegou a ser usado numa bateria. Por isso este plano usa uma tabela e um endpoint **isolados**, isentos por construção (nenhuma tela hoje lê essa tabela), em vez de depender de lembrar de filtrar em todo lugar que lê `todosOsTracos()`.
+
+### 1. Estrutura de dados — tabela `tracos_descartados`
+
+Tabela nova, sem nenhuma relação com `tracos`/`traco_usos`/`ajustes`/`leituras_resultado`:
+
+| Campo | Descrição |
+|---|---|
+| `id` | gerado, ex: `descarte_<timestamp>` |
+| `data`, `turno` | mesmo padrão dos traços normais |
+| `cimento`, `agua`, `eps`, `superplast`, `incorporador` | insumos efetivamente usados nesse traço perdido — números simples, sem a complexidade `{original, ajustes}` (não faz sentido remedir/ajustar um traço que foi descartado) |
+| `tempo_batida` | opcional |
+| `motivo` | texto livre, **obrigatório** (decisão tomada — ver "Perguntas respondidas", abaixo) |
+| `registrado_por`, `device_id` | autoria, mesmo padrão de auditoria já usado no resto do sistema (ver *Autoria automática de registro*) |
+| `registrado_em` | timestamp automático no servidor |
+
+Sem `id_operacao` e sem equivalente a `ultilizado.operacao` — por definição esse traço nunca virou produto, não há elo com operação nenhuma.
+
+### 2. Backend
+
+- `lib/db/tracos-descartados.js` (novo, mesmo padrão factory de `lib/db/tracos.js`): cria a tabela (migração leve, mesmo estilo das outras tabelas novas), `inserirTracoDescartado`, `todosOsTracosDescartados`.
+- `lib/rotas/tracos-descartados.js` (novo, mesmo padrão factory + `tentar(req, res, urlPath, queryParams)` do resto de `lib/rotas/`):
+  - `POST /registrar-traco-descartado` — exige permissão de área `injetora` (mesma checagem de `/salvar-sobra`, ver `podeEditarArea`/`negarEdicao`); valida `motivo` não vazio (400 se vazio); grava e responde `{ ok: true }`.
+  - `GET /db/tracos_descartados.json` — mesma estratégia de reconstrução a partir da tabela usada por `GET /db/sobra.json`.
+- **Backup**: entra no ciclo de Restaurar/Mesclar Backup de Dados (ver *Backup e Restauração*) do mesmo jeito que `sobra` — senão um restore apaga esse histórico silenciosamente. Precisa de `substituirTracosDescartados`/`mesclarTracosDescartados` (mesmo padrão de `substituirTracosEAjustes`/`mesclarTracosEAjustes`, sem a complexidade de usos/ajustes por não existirem aqui) e um novo campo no payload de backup (`db.js`, junto de `tracos`/`ajustes`/`sobra`).
+- **Não** entra em `todosOsTracos()`, `detalheOperacao()`, nem em nenhuma consulta hoje lida pelo CEP ou pela Análise Focada — isolamento por construção, não por filtro.
+
+### 3. Frontend
+
+- **Ponto de entrada** (decisão tomada — ver "Perguntas respondidas", abaixo): na tela de Registro de Traço/Relatório de Injeção (`public/js/operacao.js`), perto de onde o operador lança os insumos de cada traço, um link discreto **"⚠️ Descartar este traço"**.
+- Ao clicar, abre um **formulário simples dedicado** (modal, não a tela cheia de Registrar Operação): os campos de insumo já preenchidos pelo operador para aquele traço vêm pré-carregados (evita digitar tudo de novo), turno/data preenchidos automaticamente, e um campo de texto livre obrigatório para o motivo.
+- Ao salvar (`POST /registrar-traco-descartado`): o traço desaparece da lista de traços pendentes da operação atual — não vira uma linha "pendente" nem exige berço início/fim (não tem berço, não encheu nada).
+- Fetch correspondente em `public/js/data.js`, seguindo o mesmo padrão dos demais.
+
+### 4. Tela de histórico ("Traços Descartados") — implementada
+
+Estava listada como "fora de escopo" na versão original deste plano — decisão deliberada de não vazar o dado pra dentro de um dashboard já existente antes de decidir **onde** ele deveria aparecer. Decisão tomada depois: **tela nova e dedicada**, só leitura (sem editar/excluir — um traço descartado nasce e morre no ato do registro).
+
+- **Menu Principal** (`public/partials/page-menu.html`) e **tabbar** (`public/partials/nav-tabbar.html`): novo item "Traços Descartados", logo depois de "Registro de Paradas".
+- **Página** (`public/partials/page-tracos-descartados.html` + `public/js/tracos-descartados-lista.js`, novo módulo, mesmo padrão de `paradas.js`): KPIs simples (total de descartes + soma de cimento/água/EPS perdidos no período filtrado — de propósito SEM desvio-padrão, taxa de acerto ou ranking, pra não virar um "CEP" disfarçado), filtro por data e por busca livre (motivo/operador), tabela com todos os campos.
+- **Permissão**: página liberada pra visualização de todos os perfis (`PAGINAS_DE_TRABALHO`, `lib/perfis.js`) — mesmo modelo do resto do sistema ("quase todas as páginas são abertas pra visualização por todos"; a escrita já é protegida por área `injetora`, ver passo 2).
+- **Isolamento continua intacto**: esta tela lê só `GET /db/tracos_descartados.json` — nenhuma linha de código dela toca `todosOsTracos()`, `qualidade-tracos.js`, `analise-focada.js` ou `dashboard.js`.
+
+### 5. Fora de escopo (o que ainda fica pra depois)
+
+- Editar ou excluir um traço descartado já registrado (por design: é um registro que só existe pra criação, ver `lib/rotas/tracos-descartados.js`).
+- Exportação (CSV/PDF) do histórico de descartes.
+- Qualquer tentativa de vincular um traço descartado a um "motivo padronizado" ou transformá-lo em indicador de qualidade automático (ver item 6, abaixo, sobre a decisão de motivo em texto livre).
+
+### 6. Perguntas respondidas (registradas aqui para não se perderem)
+
+- **Onde registrar**: atalho na tela atual de Registro de Traço, que abre um formulário dedicado simples (não uma tela cheia nova, nem só embutido inline na tela atual).
+- **Formato do motivo**: texto livre (não lista padronizada) — decisão tomada para não travar o operador numa lista fixa nesta primeira versão; pode virar lista padronizada depois, se o texto livre gerado no uso real mostrar poucos padrões repetidos que valham a pena fechar em opções.
+
+**Status**: passos 1 (estrutura de dados), 2 (backend), 3 (frontend de registro) e 4 (tela de histórico) concluídos. Passo 3: link discreto "⚠️ Descartar este traço" no card de cada traço (`public/js/operacao.js`, próximo à seção "Receita Real Pesada"), abrindo um modal dedicado com Data/Turno preenchidos automaticamente e os insumos já pesados pré-carregados; motivo em texto livre obrigatório; ao salvar, chama `LW.registrarTracoDescartado` (`public/js/data.js`) e remove o traço da lista de pendentes da operação atual (sem virar linha "pendente" nem exigir berço). Indisponível em Modo de Teste — a rota grava direto na tabela real, sem a distinção real/teste que outras rotas de registro têm; o link fica visualmente desabilitado nesse modo, com tooltip explicando o motivo. Passo 4: tela "Traços Descartados" (menu + tabbar), só leitura, com KPIs de insumo perdido e filtro por data/busca — ver item 4, acima. Cobertura de testes em `test/tracos-descartados-crud.test.js` (backend) e `test/operacao-descarte-traco.test.js` (UI, jsdom).
 
 ## Configuração (Administrador)
 
@@ -544,6 +604,103 @@ O próprio `server.js` gera um backup de dados todo fim de dia, sem depender de 
 - Mantém sempre os **últimos 3 dias**: ao criar um novo, remove automaticamente o mais antigo se já houver 3.
 - Arquivos ficam em `backups-automaticos/` (fora de `public/`, nunca servida como arquivo estático comum), nomeados por data: `backup-dados_AAAA-MM-DD.zip`.
 - Acessível só pelas rotas dedicadas (`/backups-automaticos` e `/backups-automaticos/<nome>`) — essa pasta cresce e diminui sozinha, sem precisar de limpeza manual (diferente de `backups-seguranca/`).
+
+## Backup Automático no Google Drive (plano)
+
+**Objetivo**: hoje os 3 backups automáticos diários (`backup-dados_AAAA-MM-DD.zip`, ver seção acima) só existem no disco do próprio servidor — se a máquina falhar, são perdidos junto. Pedido: em **Configurações → Backup e Restauração**, o Administrador conecta uma conta do Google (fluxo de autorização, não login/senha próprio) e, a partir daí, cada backup automático gerado também é enviado sozinho pro Google Drive dessa conta, sem precisar de ninguém com o navegador aberto.
+
+**Decisão de desenho** (ver conversa que motivou este plano): a ideia original era "e-mail + código de confirmação enviado pelo sistema" — descartada porque confirmar um e-mail por código não dá, por si só, permissão de escrever no Drive de ninguém. Em vez disso, o fluxo usa a autorização OAuth2 padrão do Google ("Autorizar acesso ao Google Drive"): a mesma tela do Google já confirma o e-mail e concede a permissão de gravar arquivos, num passo só, sem o projeto precisar mandar e-mail nenhum (evita adicionar uma dependência nova só pra isso, tipo nodemailer/SMTP).
+
+**Escopo de credencial**: uma única conta Google conectada por instalação (não por usuário do sistema) — mesmo modelo de `security.json` (uma credencial de administração, não por perfil). Guardada em `private/` (fora de `public/`, nunca servida por URL), no mesmo espírito de `SECURITY_PATH`/`USUARIOS_PATH` já existentes.
+
+### 1. Projeto no Google Cloud (fora do código, manual, uma vez) — PENDENTE
+
+- Criar um projeto no Google Cloud Console, ativar a **Google Drive API** e configurar a tela de consentimento OAuth (modo "Externo", sem submeter pra verificação do Google — uso interno, então a pessoa vê o aviso "app não verificado" na 1ª autorização e segue por "Avançado", como já combinado).
+- Gerar um **Client ID** e **Client Secret** OAuth2, com URI de redirecionamento apontando pra `/backup-drive/callback` do próprio servidor (ex.: `https://<domínio-do-caddy>/backup-drive/callback`, ver `deploy/Caddyfile.exemplo`).
+- Client ID/Secret/Redirect URI entram como variáveis de ambiente (ver item 3, abaixo) — nunca hardcoded no repositório, mesmo padrão de segredo-fora-do-git já usado pelo projeto.
+- **Sem isso feito**, tudo dos itens 2 a 8 abaixo já está implementado e funciona normalmente — só que `GET /backup-drive/status` sempre devolve `credenciaisConfiguradas: false`, e `POST /backup-drive/autorizar` recusa com **503** (mensagem explícita apontando de volta pra este passo) antes de chegar perto do Google.
+
+### 2. Dependência nova — ~~cliente OAuth leve~~ nenhuma dependência nova (mudança de plano) — FEITO
+
+- Cheguei a instalar `google-auth-library` e testar: ela sozinha trouxe **~270 pacotes transitivos** (gaxios, gtoken, gcp-metadata etc.) — pesado demais pra o que era necessário, e destoa do resto do projeto (hoje só 6 dependências, todas essenciais, nenhum cliente HTTP genérico). Revertido.
+- Implementado em vez disso só com `fetch` nativo do Node (Node 18+, já o mínimo exigido — ver `engines` em `package.json`): a troca de código por token é um `POST` form-urlencoded, e o upload é um `POST` multipart — nenhuma lib adicional necessária. `package.json` continua com as mesmas 6 dependências de antes.
+
+### 3. `lib/google-drive.js` — wrapper de autenticação e upload — FEITO
+
+Módulo isolado, sem depender de nada de `lib/rotas/` — só concentra a conversa com o Google:
+
+- `gerarUrlAutorizacao()` — monta a URL de consentimento do Google, escopo `drive.file` (acesso só aos arquivos que o próprio app cria — nunca ao Drive inteiro da pessoa; é o escopo mínimo necessário, mesmo raciocínio de permissão mínima já usado em `lib/permissoes-area.js`).
+- `trocarCodigoPorTokens(code)` — troca o `code` do callback por `access_token` + `refresh_token`.
+- `obterAccessTokenValido()` — usa o `refresh_token` guardado pra emitir um `access_token` novo sempre que precisar (eles expiram em ~1h; o `refresh_token` não expira sozinho, só se revogado).
+- `enviarArquivoParaODrive(nomeArquivo, buffer)` — upload multipart pra uma pasta fixa (`"Lightwall — Backups Automáticos"`, criada automaticamente na 1ª vez, `id` guardado junto da credencial pra não precisar procurar de novo a cada upload).
+- `revogarAcesso()` — chama o endpoint de revogação do Google e limpa a credencial local (usado por "Desconectar", item 6).
+
+### 4. Onde a credencial fica guardada (novo arquivo, fora de `public/`) — FEITO
+
+`private/backup-drive.json` (mesmo diretório de `security.json`/`usuarios.json`, mesma razão: nunca servido por URL):
+
+```json
+{
+  "conectado": true,
+  "email": "fabrica@gmail.com",
+  "refreshToken": "...",
+  "pastaId": "...",
+  "ativo": true,
+  "conectadoEm": "2026-08-26T12:00:00Z"
+}
+```
+
+- `ativo` é o toggle liga/desliga (item 6) — permite desativar o envio sem precisar desconectar a conta de novo.
+- `refreshToken` é o único dado realmente sensível aqui — entra na lista de arquivos que o Backup Geral **não** deve incluir (mesmo raciocínio que já vale pra `security.json`: um backup não deve virar um vetor de vazamento de credencial).
+
+### 5. Rotas novas — `lib/rotas/backup-drive.js` (novo módulo, mesmo padrão factory + `tentar()` do resto de `lib/rotas/`) — FEITO
+
+| Rota | O que faz |
+|---|---|
+| `GET /backup-drive/status` | Devolve `{ conectado, email, ativo, credenciaisConfiguradas }` pro front renderizar a seção (exige sessão de Administrador). Nunca inclui `refreshToken`/`pastaId`. |
+| `POST /backup-drive/autorizar` | `{ senha }` — exige senha do Administrador reverificada (mesmo padrão de `/mesclar-backup-dados`), gera um `state` de uso único e devolve `{ url }`; **é POST, não GET** (diferente do desenho original do plano) — precisava do corpo com a senha antes de gerar a URL, então o front é quem redireciona (`window.location.href = url`), não o servidor. |
+| `GET /backup-drive/callback` | Chamado pelo próprio Google. Confere o `state`, troca o `code` por tokens, descobre o e-mail da conta, grava `private/backup-drive.json`, redireciona de volta pra `/?config=backup-drive&ok=1|0&msg=...`. |
+| `POST /backup-drive/toggle` | `{ ativo }` — liga/desliga sem desconectar a conta; recusa (400) se não há conta conectada. |
+| `POST /backup-drive/desconectar` | `{ senha }` — exige senha do Administrador, chama `revogarToken` (best-effort — segue e limpa mesmo se o Google estiver inalcançável) e apaga a credencial de `private/backup-drive.json`. |
+
+**Variáveis de ambiente necessárias** (só depois do Passo 1):
+
+```
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://seu-dominio/backup-drive/callback
+```
+
+Sem elas, `credenciaisConfiguradas` vem `false` em `/status` e `/autorizar` recusa com 503 — nada quebra, só a conexão em si não avança.
+
+### 6. Frontend — nova sub-seção em Configurações → Backup e Restauração — FEITO
+
+- Card **"☁️ Backup na Nuvem (Google Drive)"** dentro do próprio painel "Backup e Restauração" (`backup-hub-modal`, junto dos cards de Backup de Dados/Geral/Automáticos já existentes) — fonte em `public/partials/modal-backup-hub.html`.
+- **Sem credenciais do Google configuradas** (Passo 1 pendente): mostra um aviso neutro, nada clicável.
+- **Desconectado** (credenciais ok): botão **"☁️ Conectar Google Drive"** → abre um modal de senha (reaproveitado também por "Desconectar") → `POST /backup-drive/autorizar` → `window.location.href` pra tela de consentimento do Google.
+- **Conectado**: mostra o e-mail conectado, um toggle **Ativo/Pausado** (chama `POST /backup-drive/toggle` direto, sem pedir senha — reversível e de baixo risco) e botão **"Desconectar"** (pede senha, `POST /backup-drive/desconectar`).
+- **Volta do Google** (`GET /backup-drive/callback` redireciona pra `/?config=backup-drive&ok=1|0&msg=...`): `public/js/app-core.js` captura esse parâmetro logo no início do boot (mesmo padrão de `_extrairChamadoIdDaUrl`, usado pra notificações push), limpa a URL, e depois do boot normal terminar abre o hub de backup automaticamente com a mensagem de sucesso/erro.
+- **Nota de bug encontrado, não relacionado a este plano**: `build-index.js` reescreve `public/index.html` inteiro com quebra de linha LF, enquanto o arquivo committado usa CRLF — isso não muda nada pro navegador (HTML não liga pra isso), mas gera um diff gigante e irrelevante em qualquer ambiente sem `core.autocrlf=true` (típico de Linux/CI). Por isso as mudanças de HTML deste item foram aplicadas **diretamente em `public/index.html`** (mesmo conteúdo do partial, mesmo CRLF do arquivo), além do partial-fonte `modal-backup-hub.html` (pra quem rodar `build-index.js` no futuro já sair correto). Vale um `.gitattributes` fixando `public/index.html` como CRLF, ou ajustar `build-index.js` pra preservar a quebra de linha original — fora do escopo deste plano, só registrando aqui.
+
+### 7. Envio automático — gancho em `executarBackupAutomaticoSeNecessario` — FEITO
+
+Depois que o zip do dia é gravado em `backups-automaticos/` (`lib/rotas/backup.js`, ver seção acima), se `private/backup-drive.json` existir e `ativo === true`:
+
+- Sobe o mesmo buffer já gerado pro Drive, na pasta dedicada (`enviarArquivoParaODrive`).
+- **Fail-safe, igual ao resto deste job**: falha de upload (token revogado, sem internet, cota excedida) só loga erro (`logger.error('backup-drive', ...)`) — nunca impede nem desfaz o backup local, que já está seguro em disco de qualquer forma.
+- Mantém a mesma retenção de **3 arquivos** também no Drive: ao subir um novo, apaga o mais antigo de lá (mirror da rotação que `_rotacionarBackupsAutomaticos` já faz localmente).
+
+### 8. Testes — `test/backup-drive.test.js` — FEITO
+
+Segue o padrão de `test/helpers/servidor-teste.js` (servidor real isolado, nunca mock de HTTP). Sem contato real com o Google (exigiria credenciais e conta de teste, fora do escopo de CI) — cobre tudo que dá pra testar sem isso: sessão obrigatória em todas as rotas, `/status` refletindo `private/backup-drive.json` sem nunca vazar `refreshToken`, `/autorizar` exigindo senha e recusando com 503 sem credenciais do Google configuradas, `/toggle` recusando sem conexão e persistindo corretamente, `/desconectar` exigindo senha e limpando a credencial, e Backup Geral **não** incluindo `backup-drive.json`. 10 testes, todos passando, junto com o restante da suíte de backup (39 no total entre os dois arquivos relacionados).
+
+### 9. Coisas a decidir antes de implementar
+
+- **Criptografar `refreshToken` em repouso?** Hoje `security.json`/`usuarios.json` guardam só hashes (nunca a senha em si) — já o `refreshToken` do Google precisa ser guardado em texto reversível (é assim que a API funciona). Vale considerar cifrar esse campo com uma chave derivada de algo já existente no servidor (ex.: mesmo mecanismo de `lib/security-json.js`), em vez de gravar em claro.
+- **O que fazer se a conta for desconectada do lado do Google** (revogado direto na conta Google, não pelo botão "Desconectar" daqui)? O upload passaria a falhar sempre — o plano cobre isso como uma falha silenciosa (item 7), mas talvez valha um aviso visível em Configurações depois de N falhas seguidas, pra não passar despercebido por dias.
+- **Nome/local da pasta no Drive** fixo (`"Lightwall — Backups Automáticos"`) — ok trocar por algo configurável, mas não parece necessário pro caso de uso.
+
+**Status:** implementado (Passos 2–8) — falta só o **Passo 1** (criar o projeto no Google Cloud e gerar `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI` de verdade). Sem isso, tudo já funciona normalmente — `credenciaisConfiguradas` vem `false` e o card mostra o aviso correspondente, em vez de quebrar ou esconder a seção.
 
 ## Operação em Andamento (tempo real)
 
@@ -859,7 +1016,17 @@ Reaproveita 100% da UI (`_mostrarAvisoConexao`) e da lógica de fila (`enfileira
 
 **Status:** plano ainda não implementado — nenhuma linha de código deste item existe hoje.
 
-## Limitações conhecidas
+### 10. Numeração inicial customizável + marcação de "sobra" (com nota e vínculo na validação) — IMPLEMENTADO
+
+Dois pedidos distintos, ambos só na tela offline (`public/offline.html`/`public/js/offline-operacao.js`):
+
+**a) Número inicial do contador de traços editável** — antes, todo rascunho novo sempre numerava os traços a partir do 1. Agora, ao entrar num rascunho **novo** (nunca ao retomar um em andamento), um modal pergunta *"Quantos traços já foram feitos hoje?"* — a pessoa digita um número e clica **Salvar** (os traços desta operação passam a contar a partir do seguinte), ou clica **"Não sei — começar do 1"**. Puramente uma ajuda visual/de memória pro operador: a numeração que efetivamente entra no sistema continua sendo decidida de novo pelo Administrador na validação (item 6, "renumeração manual do dia") — esse número nunca é gravado como `num_traco` final. Implementado em `criarStateVazio`/`numeroDoTraco`/`mostrarModalNumeroInicial` (`offline-operacao.js`) e persiste no rascunho salvo (`numero_inicial_traco`, sobrevive a um F5).
+
+**b) Marcador "Este traço é uma sobra" + nota + vínculo na validação** — dentro de cada card de traço, um checkbox "♻️ Este traço é uma sobra" revela um campo de nota livre (`nota_sobra`) — **só uma ajuda de memória pro próprio operador**, já que offline não tem como consultar o sistema pra saber se existe sobra ativa de verdade (mesmo motivo do item 8 do plano original, acima, ter descartado o reaproveitamento automático). Na tela **Configurações → Operações a Validar**, o Administrador vê a nota de cada traço marcado e pode digitar uma referência ao traço/operação original num campo de texto + **"🔗 Salvar vínculo"** — reaproveita a rota `POST /operacao-offline/corrigir` já existente (aceita substituir o array `tracos` inteiro, não precisou de rota nova).
+
+Como a tabela `tracos` tem uma lista fechada de colunas na hora de aprovar (`_tracosParaLinhasRelatorio`, sem espaço pra `eh_sobra`/`nota_sobra`/vínculo como colunas próprias — mudar o schema só pra isso não valeu a pena), a informação é **dobrada dentro do próprio campo `obs`** do traço no momento da validação (`_montarObsComSobra`, `lib/rotas/operacao-offline.js`), como um marcador `[♻️ SOBRA — nota do operador: ... — vinculado a: ... ]` prefixado ao `obs` original — inclusive avisando explicitamente quando ainda não foi vinculado, pra nunca ficar silencioso/ambíguo.
+
+**Status:** implementado. Testes em `test/operacao-offline-sobra.test.js` (5 casos: marcação chega e persiste na fila, `/corrigir` grava o vínculo sem afetar outros campos/traços, validação dobra nota+vínculo no `obs` — nos dois campos `obs` que existem —, validação sem vínculo ainda avisa explicitamente, e um traço comum sem `eh_sobra` continua gravando `obs` exatamente como antes). Suíte completa de operação offline (38 testes) passando.
 
 
 - **3 rotas continuam exigindo senha a cada chamada, por design**: `/mesclar-backup-dados`, `/restaurar-backup-dados` e `/restaurar-backup-geral` — as mais destrutivas do sistema (a última pode sobrescrever dados de produção, configurações e o cadastro de usuários) — não usam sessão, mesmo o resto das rotas administrativas já tendo migrado (ver *Autenticação e Sessão*, acima). É intencional (defesa em profundidade), não um esquecimento.

@@ -21,6 +21,10 @@
        acima: extraído do protótipo standalone "Etiqueta - Manutenção.html"
        (rodava sozinho, fora da SPA), agora entra como mais uma página. -->
   <link rel="stylesheet" href="css/manutencao.css">
+  <!-- CSS da aba "Operações a Validar" (Configurações → Registro
+       Offline) — extraído do estilo inline que havia em app-core.js,
+       ver public/css/operacoes-offline.css. -->
+  <link rel="stylesheet" href="css/operacoes-offline.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   <!-- Font Awesome — usado só pelos ícones do Setor de Qualidade (o
@@ -76,6 +80,7 @@
 <!-- INCLUDE:page-metas.html -->
 <!-- INCLUDE:page-analise-operacional.html -->
 <!-- INCLUDE:page-paradas.html -->
+<!-- INCLUDE:page-tracos-descartados.html -->
 <!-- INCLUDE:page-setor-qualidade.html -->
 <!-- INCLUDE:page-manutencao.html -->
 
@@ -106,6 +111,7 @@
   <script src="js/paletes-ordem.js"></script>
   <script src="js/paletes-combinacoes.js"></script>
 <!-- INCLUDE:modal-editar-operacao.html -->
+<!-- INCLUDE:modal-offline-corrigir.html -->
 <!-- INCLUDE:modal-editar-traco.html -->
 <!-- INCLUDE:modal-export.html -->
 <!-- INCLUDE:modal-export-relatorio.html -->
@@ -122,6 +128,7 @@
   <script src="js/analise-bercos.js"></script>
   <script src="js/analise-focada.js"></script>
   <script src="js/paradas.js"></script>
+  <script src="js/tracos-descartados-lista.js"></script>
   <script src="js/debriefing.js"></script>
   <script src="js/bateria-atual.js"></script>
   <script src="js/keyboard-shortcuts.js"></script>

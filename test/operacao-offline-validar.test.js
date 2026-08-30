@@ -208,6 +208,58 @@ test('validar aprovado: vira operação real com origem_offline/validado_por/val
   assert.ok(!pendentesDepois.lista.some(i => i.idTemp === idTemp));
 });
 
+// Regressão: o formulário offline (public/js/offline-operacao.js) sempre
+// calculou paineis_por_tipo/m2_por_tipo certos (por isso total_paineis/
+// m2_total sempre bateram), mas nunca mandava paineis_2p/paineis_sp/m2_2p/
+// m2_sp — os "aliases de compatibilidade" que a tabela Registro de Baterias
+// e os dashboards leem diretamente (colunas fixas "Painéis 2/P"/"S/P",
+// "m² 2/P"/"S/P"). Sem esses 4 campos, a operação era gravada com 0 nessas
+// colunas mesmo tendo painéis reais daquele tipo — o total aparecia certo,
+// mas "o tipo específico" nunca aparecia. Este teste envia exatamente o
+// payload que um dispositivo offline manda (sem os aliases, só o
+// paineis_por_tipo/m2_por_tipo) e confirma que a validação (_aprovar,
+// lib/rotas/operacao-offline.js) deriva os aliases corretamente antes de
+// gravar — tanto pra uma montagem simples (1 tipo) quanto híbrida (2 tipos).
+test('validar deriva paineis_2p/paineis_sp/m2_2p/m2_sp a partir de paineis_por_tipo/m2_por_tipo quando o dispositivo offline não os manda (regressão)', async () => {
+  const idTemp = 'OFF-derivar-aliases-' + Date.now();
+  await enviarOffline(payloadValido(idTemp, {
+    tipo_montagem: 'HIBRIDA',
+    total_paineis: 12,
+    m2_total: 6,
+    // Só o formato genérico por tipo — igual ao que offline-operacao.js
+    // manda de verdade (calcPaineis local, ANTES desta correção). Note as
+    // chaves em minúsculo ('2p'/'sp'), que são as chaves de verdade usadas
+    // em produção — o payloadValido() default usa '2P' maiúsculo só pra
+    // não colidir com este teste.
+    paineis_por_tipo: { '2p': 8, 'sp': 4 },
+    m2_por_tipo: { '2p': 4, 'sp': 2 },
+    // Sem paineis_2p/paineis_sp/m2_2p/m2_sp — de propósito: é exatamente o
+    // que faltava no payload real antes da correção.
+    paineis_2p: undefined,
+    paineis_sp: undefined,
+    m2_2p: undefined,
+    m2_sp: undefined,
+  }));
+
+  const respValidar = await validar(idTemp);
+  assert.equal(respValidar.status, 200);
+  const idOperacao = (await respValidar.json()).idOperacao;
+
+  const historico = await (await fetch(`${servidor.baseUrl}/db/historico.json`)).json();
+  const op = historico.find(o => o.id === idOperacao);
+  assert.ok(op, 'operação deveria existir em historico.json');
+
+  // Total continua correto (nunca foi o problema).
+  assert.equal(op.total_paineis, 12);
+  assert.equal(op.m2_total, 6);
+
+  // Os 4 aliases, antes gravados como 0, agora batem com paineis_por_tipo/m2_por_tipo.
+  assert.equal(op.paineis_2p, 8);
+  assert.equal(op.paineis_sp, 4);
+  assert.equal(op.m2_2p, 4);
+  assert.equal(op.m2_sp, 2);
+});
+
 test('validar o mesmo idTemp 2 vezes seguidas não duplica a operação nem incrementa o contador de novo', async () => {
   const idTemp = 'OFF-validar-2x-' + Date.now();
   await enviarOffline(payloadValido(idTemp));
@@ -277,6 +329,41 @@ test('corrigir aplica o patch, e depois validar usa o valor já corrigido', asyn
   const historico = await (await fetch(`${servidor.baseUrl}/db/historico.json`)).json();
   const op = historico.find(o => o.id === 'op_off_' + idTemp.slice(4));
   assert.equal(op.id_bateria, 'B-corrigida');
+});
+
+// Reproduz o bug relatado: corrigir início/fim (ou pausas) antes de
+// validar precisa RECALCULAR tempo_min/houve_atraso — não pode deixar o
+// valor que o dispositivo offline calculou sozinho, ANTES da correção,
+// "parado" (ver _recalcularTempoOperacao, lib/rotas/operacao-offline.js).
+// payloadValido nasce com inicio 08:00/fim 09:00/tempo_min 60 (sem
+// pausa) — a correção estica o fim pra 10:30 (08:00 -> 10:30 = 150min
+// brutos) e adiciona uma pausa de 15min, então o tempo de operação de
+// verdade devia virar 135min (150 brutos - 15 de pausa), nunca os 60min
+// antigos que vieram prontos no payload original.
+test('corrigir início/fim/pausas recalcula tempo_min/houve_atraso — não usa o valor antigo do dispositivo offline', async () => {
+  const idTemp = 'OFF-corrigir-tempo-' + Date.now();
+  await enviarOffline(payloadValido(idTemp)); // tempo_min:60, houve_atraso:'NAO', sem pausas
+
+  const respCorrigir = await fetch(`${servidor.baseUrl}/operacao-offline/corrigir`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...comAdmin() },
+    body: JSON.stringify({
+      idTemp,
+      formRecord: { fim: '2026-08-19T10:30:00.000Z' }, // era 09:00 — 90min brutos agora
+      pausas: [{ pausado_em: '2026-08-19T08:30:00.000Z', retomado_em: '2026-08-19T08:45:00.000Z', motivo: 'ajuste de máquina' }],
+    }),
+  });
+  assert.equal(respCorrigir.status, 200);
+
+  const respValidar = await validar(idTemp);
+  assert.equal(respValidar.status, 200, await respValidar.text());
+
+  const historico = await (await fetch(`${servidor.baseUrl}/db/historico.json`)).json();
+  const op = historico.find(o => o.id === 'op_off_' + idTemp.slice(4));
+  assert.ok(op, 'operação validada deveria existir no histórico');
+  // 150min brutos (08:00 -> 10:30) - 15min de pausa = 135min, nunca os
+  // 60min que vieram prontos no formRecord original (payloadValido).
+  assert.equal(op.tempo_min, 135);
+  assert.equal(op.houve_atraso, 'SIM'); // 135min > LIMITE_INJECAO_MIN (59)
 });
 
 test('recusar remove da fila sem nunca criar uma operação', async () => {

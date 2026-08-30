@@ -1110,6 +1110,212 @@ async function _postOperacaoAndamento(dados, forcar = false) {
   }
 }
 
+// ── Aviso GARANTIDO de "essa operação em andamento acabou" ─────────────────
+// Cobre o caso em que a rede cai bem na hora de encerrar/registrar: o aviso
+// "melhor esforço" (enviarOperacaoAndamento(null)) falha porque não tem
+// conexão, mas a operação em si é registrada certinho quando a conexão
+// volta (ver enfileirarOperacaoPendente/tentarSincronizarFilaPendentes,
+// abaixo). Sem isso, o operacao_andamento.json do servidor (e quem estiver
+// olhando via WebSocket — outras telas, TV) fica travado mostrando a
+// operação como se ainda estivesse rodando, mesmo já tendo terminado.
+//
+// Diferente de enviarOperacaoAndamento (pensado pra digitação contínua,
+// com debounce e dedup pelo ÚLTIMO corpo mandado), esta função:
+//   - é sempre imediata, sem debounce;
+//   - manda o idAndamento da operação que está sendo encerrada, pra o
+//     servidor só limpar se o que estiver em andamento AGORA ainda for
+//     essa mesma operação (protege contra apagar por engano uma operação
+//     NOVA e legítima que já tenha começado no lugar — inclusive no mesmo
+//     dispositivo, ver POST /salvar-operacao-andamento);
+//   - se falhar por falta de rede, guarda o idAndamento numa filinha
+//     própria em localStorage e tenta de novo sempre que
+//     tentarSincronizarFilaPendentes() rodar (evento 'online', checagem
+//     periódica, ou ao carregar a página) — não fica esquecido pra sempre.
+const DB_KEY_ANDAMENTO_A_FINALIZAR = 'lw_operacoes_andamento_a_finalizar';
+
+function _lerAndamentosAFinalizar() {
+  try {
+    const raw = localStorage.getItem(DB_KEY_ANDAMENTO_A_FINALIZAR);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) { return []; }
+}
+
+function _salvarAndamentosAFinalizar(lista) {
+  try { localStorage.setItem(DB_KEY_ANDAMENTO_A_FINALIZAR, JSON.stringify(lista)); } catch (_) { /* localStorage indisponível */ }
+}
+
+function _marcarAndamentoParaFinalizarDepois(idAndamento) {
+  if (!idAndamento) return;
+  const lista = _lerAndamentosAFinalizar();
+  if (!lista.includes(idAndamento)) {
+    lista.push(idAndamento);
+    _salvarAndamentosAFinalizar(lista);
+  }
+}
+
+/**
+ * Tenta avisar o servidor, uma vez, que a operação `idAndamento` terminou.
+ * Devolve true se o pedido CHEGOU no servidor (independente do servidor
+ * ter limpado de verdade ou ter ignorado por já não ser mais a atual —
+ * dos dois jeitos, do lado do cliente não há mais nada pendente aqui) —
+ * false só em falha de REDE de verdade, pra saber se vale tentar de novo.
+ */
+async function _tentarFinalizarOperacaoAndamento(idAndamento) {
+  try {
+    await fetch(_comDeviceId('/salvar-operacao-andamento'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dados: null, idAndamento, clientId: OP_ANDAMENTO_CLIENT_ID }),
+    });
+    return true; // chegou no servidor — aceito ou ignorado, ambos "resolvidos"
+  } catch (_) {
+    return false; // sem conexão de novo — tenta depois
+  }
+}
+
+/**
+ * Ponto de entrada usado por operacao.js ao encerrar/registrar uma
+ * operação: tenta avisar o servidor na hora e, se falhar, guarda pra
+ * retry automático (ver _tentarFinalizarAndamentosPendentes, chamado por
+ * tentarSincronizarFilaPendentes). Sem idAndamento (clientes com cache
+ * antigo, ou nenhuma operação de verdade em andamento), cai no
+ * comportamento antigo — melhor esforço, sem retry, igual antes desta
+ * proteção existir.
+ */
+async function finalizarOperacaoAndamento(idAndamento) {
+  if (!idAndamento) {
+    _postOperacaoAndamento(null, false);
+    return;
+  }
+  const ok = await _tentarFinalizarOperacaoAndamento(idAndamento);
+  if (!ok) _marcarAndamentoParaFinalizarDepois(idAndamento);
+}
+
+async function _tentarFinalizarAndamentosPendentes() {
+  const lista = _lerAndamentosAFinalizar();
+  if (!lista.length) return;
+  const restantes = [];
+  for (const idAndamento of lista) {
+    const ok = await _tentarFinalizarOperacaoAndamento(idAndamento);
+    if (!ok) restantes.push(idAndamento);
+  }
+  _salvarAndamentosAFinalizar(restantes);
+}
+
+// ── Marcação de berço (Bateria Atual) sem rede — mesmo problema do bloco
+// acima, cenário diferente: a pessoa está LOGADA, controlando a operação
+// em andamento pela tela de Registrar Operação, e clica num indicador de
+// "Vazou"/"Não Enchido" (● / •, ver bateria-atual.js, _baCliqueDot) bem
+// na hora em que a rede está fora. Diferente do resto do formulário (que
+// só grava em localStorage até o clique em "Registrar"), essa marcação
+// SEMPRE foi pensada pra ir direto pro servidor — de propósito, porque
+// sincroniza em tempo real com outros dispositivos olhando a mesma tela
+// (ver comentário no topo de bateria-atual.js). Antes desta fila, uma
+// queda de rede nesse instante específico fazia o clique reverter sozinho
+// (a marcação "não pegava") sem cair em nenhuma fila de retry — diferente
+// de tudo mais nesta tela, que sobrevive a uma queda de conexão.
+//
+// A rota do servidor (POST /marcar-berco-andamento) sempre ALTERNA
+// (toggle) a partir do estado atual DELA MESMA — não do que o cliente
+// acha que é o estado atual (ver comentário da rota,
+// lib/rotas/operacao-andamento.js) — por isso é seguro simplesmente
+// guardar cada clique, na ordem em que aconteceu, e re-enviar exatamente
+// esses mesmos cliques depois: o resultado final bate com o que teria
+// acontecido se cada clique tivesse ido direto pro servidor na hora,
+// contanto que a ORDEM seja preservada (por isso, assim como na fila
+// principal, para no primeiro item que falhar em vez de pular à frente).
+const DB_KEY_MARCACOES_BERCO_PENDENTES = 'lw_marcacoes_berco_pendentes';
+
+function _lerMarcacoesBercoPendentes() {
+  try {
+    const raw = localStorage.getItem(DB_KEY_MARCACOES_BERCO_PENDENTES);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) { return []; }
+}
+
+function _salvarMarcacoesBercoPendentes(lista) {
+  try { localStorage.setItem(DB_KEY_MARCACOES_BERCO_PENDENTES, JSON.stringify(lista)); } catch (_) { /* localStorage indisponível */ }
+  _notificarMarcacoesBercoPendentesMudou();
+}
+
+let _onMarcacoesBercoPendentesMudou = null;
+function aoMudarMarcacoesBercoPendentes(callback) { _onMarcacoesBercoPendentesMudou = callback; }
+function _notificarMarcacoesBercoPendentesMudou() {
+  if (_onMarcacoesBercoPendentesMudou) _onMarcacoesBercoPendentesMudou(_lerMarcacoesBercoPendentes());
+}
+
+/** Cópia (não referência) da fila de marcações de berço ainda não confirmadas pelo servidor. */
+function marcacoesBercoPendentes() {
+  return _lerMarcacoesBercoPendentes();
+}
+
+async function _enviarMarcacaoBerco({ berco, lado, estado, tipo }) {
+  const res = await fetch('/marcar-berco-andamento?deviceId=' + encodeURIComponent(getDeviceId()), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ berco, lado, estado, tipo }),
+  });
+  if (!res.ok) {
+    const erro = await res.json().catch(() => null);
+    const e = new Error((erro && erro.erro) || 'Falha ao marcar berço.');
+    e.eraFalhaDeRede = false;
+    throw e;
+  }
+}
+
+/**
+ * Ponto de entrada usado por bateria-atual.js ao clicar num indicador de
+ * berço. Tenta mandar pro servidor na hora; se a falha for de REDE (sem
+ * conexão — fetch() lança TypeError, não chega a ter resposta), guarda o
+ * clique pra reenviar depois e devolve {ok:true, offline:true} — quem
+ * chamou mantém a marcação otimista na tela em vez de desfazer, já que
+ * não foi rejeitada de verdade, só ainda não confirmada. Qualquer outra
+ * falha (permissão, validação, 409 de dono da operação, etc.) propaga
+ * normalmente pra quem chamou desfazer o otimismo, igual sempre foi.
+ */
+async function marcarBercoAndamento(berco, lado, estado, tipo) {
+  const item = { berco, lado, estado, tipo: tipo || null };
+  try {
+    await _enviarMarcacaoBerco(item);
+    return { ok: true, offline: false };
+  } catch (e) {
+    if (e instanceof TypeError) {
+      // Sem conexão de verdade (nem chegou a ter resposta) — enfileira.
+      const fila = _lerMarcacoesBercoPendentes();
+      fila.push({ ...item, enfileiradoEm: new Date().toISOString() });
+      _salvarMarcacoesBercoPendentes(fila);
+      return { ok: true, offline: true };
+    }
+    throw e; // rejeição de verdade do servidor — quem chamou desfaz o clique
+  }
+}
+
+/**
+ * Tenta reenviar, em ordem, todos os cliques de marcação de berço
+ * pendentes (mesma lógica de "para no primeiro que falhar" da fila
+ * principal, pra não embaralhar a ordem dos toggles). Chamada junto do
+ * resto da sincronização (ver tentarSincronizarFilaPendentes, abaixo).
+ */
+async function _tentarMarcacoesBercoPendentes() {
+  const fila = _lerMarcacoesBercoPendentes();
+  if (!fila.length) return;
+  let processados = 0;
+  for (const item of fila) {
+    try {
+      await _enviarMarcacaoBerco(item);
+      processados++;
+    } catch (e) {
+      if (e instanceof TypeError) break; // ainda sem rede — tenta o resto depois
+      // Rejeição de verdade (não é mais o dono, operação já não existe
+      // mais, etc.) — este clique específico não faz mais sentido reenviar,
+      // descarta e segue tentando os próximos, em vez de travar a fila
+      // inteira num item que nunca vai passar.
+      processados++;
+    }
+  }
+  if (processados > 0) _salvarMarcacoesBercoPendentes(fila.slice(processados));
+}
+
 /**
  * Busca o snapshot atual da operação em andamento direto do servidor —
  * usado ao abrir a tela. Lança erro só em falha de REDE de verdade (sem
@@ -1125,6 +1331,55 @@ async function getOperacaoAndamento() {
 }
 
 // ---- Calculation helpers ----
+
+// Relação Água/Cimento (A/C) — parâmetro de dosagem do traço (água ÷
+// cimento, ambos em kg). Faixa ideal de referência: 0,35 a 0,40. Abaixo
+// disso a mistura tende a ficar seca/pouco trabalhável; acima disso, a
+// resistência mecânica do concreto tende a cair pelo excesso de água.
+// Usado em 3 telas (Registrar Operação/Receita, Análise Focada e
+// Debriefing do Dia) — centralizado aqui pra não haver 3 implementações
+// levemente diferentes da mesma conta.
+const RELACAO_AC_MIN = 0.35;
+const RELACAO_AC_MAX = 0.40;
+
+/**
+ * Calcula a relação A/C (água / cimento). Retorna null se os valores não
+ * permitirem um cálculo confiável (cimento ausente/zero/negativo, água
+ * ausente/negativa) — nunca retorna NaN/Infinity pra tela.
+ */
+function calcularRelacaoAC(cimento, agua) {
+  const c = parseFloat(cimento);
+  const a = parseFloat(agua);
+  if (isNaN(c) || c <= 0 || isNaN(a) || a < 0) return null;
+  return a / c;
+}
+
+/**
+ * Classifica um valor de relação A/C já calculado (ver calcularRelacaoAC)
+ * quanto à faixa ideal (0,35–0,40): 'baixa' (abaixo), 'ok' (dentro) ou
+ * 'alta' (acima). Retorna null se não houver valor calculável.
+ */
+function classificarRelacaoAC(valor) {
+  if (valor === null || valor === undefined || isNaN(valor)) return null;
+  if (valor < RELACAO_AC_MIN) return 'baixa';
+  if (valor > RELACAO_AC_MAX) return 'alta';
+  return 'ok';
+}
+
+/**
+ * Calcula a relação A/C e cimento, retorna a relação, e já retorna
+ * formatada (2 casas, vírgula) + status, prontos pra exibir. Conveniência
+ * pra quem só quer o texto final (ex: "0,38") sem lidar com null/NaN.
+ */
+function formatarRelacaoAC(cimento, agua, casas = 2) {
+  const valor = calcularRelacaoAC(cimento, agua);
+  if (valor === null) return { valor: null, texto: '—', status: null };
+  return {
+    valor,
+    texto: valor.toFixed(casas).replace('.', ','),
+    status: classificarRelacaoAC(valor)
+  };
+}
 
 /**
  * Calcula painéis e m² para um tipo de montagem e quantidade de berços.
@@ -1782,11 +2037,15 @@ function tamanhoFilaPendentes() {
  * voltar. `historyRecord`/`fullRecord`/`qtdTracosNovos` são exatamente os
  * mesmos parâmetros que iriam pra registrarOperacao/registrarRelatorioInjecao
  * /confirmarTracosHoje numa tentativa normal — só ficam guardados pra tentar
- * de novo depois.
+ * de novo depois. `idAndamento` (opcional) é o id da operação em andamento
+ * correspondente (ver iniciarInjecao(), operacao.js) — guardado aqui só
+ * como registro histórico do item; quem efetivamente USA esse id pra
+ * avisar o servidor é LW.finalizarOperacaoAndamento, chamado à parte (ver
+ * _enfileirarEContinuar, operacao.js) com sua própria fila de retry.
  */
-function enfileirarOperacaoPendente(historyRecord, fullRecord, qtdTracosNovos) {
+function enfileirarOperacaoPendente(historyRecord, fullRecord, qtdTracosNovos, idAndamento) {
   const fila = _lerFilaPendentes();
-  fila.push({ historyRecord, fullRecord, qtdTracosNovos, enfileiradoEm: new Date().toISOString() });
+  fila.push({ historyRecord, fullRecord, qtdTracosNovos, idAndamento: idAndamento || null, enfileiradoEm: new Date().toISOString() });
   _salvarFilaPendentes(fila);
   _notificarFilaMudou();
 }
@@ -1817,7 +2076,16 @@ let _sincronizandoFilaPendentes = false;
 async function tentarSincronizarFilaPendentes() {
   if (_sincronizandoFilaPendentes) return;
   const fila = _lerFilaPendentes();
-  if (!fila.length) return;
+  // Mesmo sem nada na fila principal, ainda pode haver avisos de "operação
+  // terminou" pendentes de confirmação (ver finalizarOperacaoAndamento) —
+  // por exemplo, se a operação já tinha sido registrada com sucesso, mas
+  // só o aviso de encerramento falhou por uma queda de rede bem naquele
+  // instante. Tenta esses também, sempre que esta função rodar.
+  if (!fila.length) {
+    await _tentarFinalizarAndamentosPendentes();
+    await _tentarMarcacoesBercoPendentes();
+    return;
+  }
 
   _sincronizandoFilaPendentes = true;
   try {
@@ -1837,6 +2105,8 @@ async function tentarSincronizarFilaPendentes() {
       _notificarFilaMudou();
       if (_onOperacoesPendentesSincronizadas) _onOperacoesPendentesSincronizadas(processados);
     }
+    await _tentarFinalizarAndamentosPendentes();
+    await _tentarMarcacoesBercoPendentes();
   } finally {
     _sincronizandoFilaPendentes = false;
   }
@@ -1984,6 +2254,30 @@ async function desativarSobra(motivo, modoTeste = false) {
   const atual = await getSobra(modoTeste);
   if (!atual) return; // já não existe sobra ativa
   await salvarSobra({ ...atual, ativa: false, status: motivo, dataEncerramento: new Date().toISOString() }, modoTeste);
+}
+
+/**
+ * Registro de Traço Descartado (Perda) — ver README, "Registro de Traço
+ * Descartado (Perda) — plano". Grava um traço que deu errado no meio da
+ * batelada (insumos já consumidos de verdade) como perda isolada — nunca
+ * vira produção, nunca entra no Relatório de Injeção. Sem `modoTeste`
+ * (diferente de salvarSobra): a rota do servidor sempre grava na tabela
+ * real `tracos_descartados` (ver lib/rotas/tracos-descartados.js), então
+ * o link que chama esta função fica indisponível em Modo de Teste (ver
+ * abrirDescarteTraco, operacao.js).
+ * @param {object} traco - {data, turno, cimento, agua, eps, superplast,
+ *   incorporador, tempo_batida, motivo, operador_nome}. `id` e
+ *   `registrado_em` são sempre gerados no servidor, mesmo que venham
+ *   preenchidos aqui.
+ */
+async function registrarTracoDescartado(traco) {
+  const res = await fetch('/registrar-traco-descartado', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(traco),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.erro || 'Erro ao registrar traço descartado');
 }
 
 // ---- Export ----
@@ -2732,9 +3026,11 @@ window.LW = {
   getOperacaoAtual, saveOperacaoAtual, clearOperacaoAtual,
   enfileirarOperacaoPendente, tamanhoFilaPendentes,
   tentarSincronizarFilaPendentes, aoMudarFilaPendentes, aoSincronizarPendentes,
+  marcarBercoAndamento, marcacoesBercoPendentes, aoMudarMarcacoesBercoPendentes,
 
   // Operação em Andamento (sincronização ao vivo via WebSocket)
   conectarOperacaoAndamento, enviarOperacaoAndamento, getOperacaoAndamento,
+  finalizarOperacaoAndamento,
   aoReceberDadosSqlExcluidos,
   get OP_ANDAMENTO_CLIENT_ID() { return OP_ANDAMENTO_CLIENT_ID; },
 
@@ -2755,6 +3051,12 @@ window.LW = {
   // Cálculos
   calcPaineis,
   calcPaineisPersonalizado,
+  // Relação Água/Cimento (A/C) — ver comentário acima da implementação.
+  calcularRelacaoAC,
+  classificarRelacaoAC,
+  formatarRelacaoAC,
+  RELACAO_AC_MIN,
+  RELACAO_AC_MAX,
   aplicarNaoEnchidosNoCalc,
   // Resolve o tipo de placa ('2p'/'sp'/...) de UM LADO de UM berço, dada a
   // montagem atual — usado por aplicarNaoEnchidosNoCalc (acima) e agora
@@ -2797,6 +3099,9 @@ window.LW = {
 
   // Sobra de traço
   getSobra, salvarSobra, desativarSobra,
+
+  // Traço Descartado (Perda) — ver README, passo 3 do plano
+  registrarTracoDescartado,
 
   // Alerta customizado (substitui alert() nativo)
   mostrarAlerta,

@@ -401,6 +401,99 @@ h4 {
   pointer-events: none;
 }
 
+/* ---- Nav Group (dropdown por hover, ex: "Traços") ----
+   Agrupa páginas relacionadas embaixo de 1 só item da tabbar — em vez de
+   3 abas separadas (Relatório de Injeção / Dashboard de Traço / Traços
+   Descartados) disputando espaço na faixa horizontal, vira 1 gatilho só
+   que abre um menu com as 3 ao passar o mouse. Some espaço na tabbar sem
+   esconder nenhuma página — só muda de 1 clique direto pra 1
+   hover + 1 clique.
+
+   .nav-dropdown é MOVIDO pra fora daqui (attachado direto no <body>) via
+   JS logo no boot — ver app-core.js. Motivo: .tabbar-scroll tem
+   overflow-x:auto pra rolar a faixa de abas, e por especificação de CSS,
+   definir overflow-x sem definir overflow-y faz o navegador tratar
+   overflow-y como 'auto' também (não fica 'visible' por padrão). Ou
+   seja, qualquer dropdown com position:absolute dentro da tabbar fica
+   cortado/invisível assim que ultrapassa a borda inferior dela, mesmo
+   com display:flex aplicado certinho — dá pra confirmar o mesmo padrão,
+   já resolvido antes no projeto, em .rb-popover (relatorio-bercos.js,
+   _garantirPopover): position:fixed + anexado no <body> pra escapar do
+   overflow:auto de um ancestral. */
+.nav-group {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.nav-group-trigger {
+  /* mesmo .nav-item por baixo — só adiciona a setinha (.nav-caret) */
+}
+
+.nav-caret {
+  width: 11px;
+  height: 11px;
+  opacity: .6;
+  flex-shrink: 0;
+  transition: transform .15s;
+}
+
+/* Só .open (classe controlada 100% por JS agora — mouseenter/leave,
+   toque e teclado, ver app-core.js) — nada de :hover/:focus-within
+   puro em CSS aqui, porque o dropdown não é mais descendente de
+   .nav-group no DOM (foi movido pro <body>), então essas pseudo-classes
+   não teriam como continuar direcionando ele mesmo se quiséssemos. */
+.nav-group.open .nav-caret {
+  transform: rotate(180deg);
+}
+
+.nav-dropdown {
+  display: none;
+  position: fixed; /* não absolute: precisa ficar de pé sozinho fora de .tabbar-scroll */
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 95; /* acima da tabbar (90), abaixo de popovers/modais */
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+}
+
+/* left/top vêm inline via JS (_posicionarNavDropdown, app-core.js),
+   calculados a partir do retângulo do gatilho — sem isso o navegador
+   não saberia onde encaixar um elemento position:fixed solto no body. */
+.nav-dropdown.show {
+  display: flex;
+}
+
+.nav-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: .83rem;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nav-dropdown-item:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.nav-dropdown-item.active {
+  color: var(--accent);
+}
+
 /* ---- Main Content ---- */
 .main {
   overflow-y: auto;
@@ -2258,6 +2351,13 @@ td.mono {
     display: none;
   }
 
+  /* Mesma lógica do texto acima: em tela estreita, o grupo "Traços"
+     também fica só com o ícone — a setinha sozinha, sem o texto do
+     lado, ficaria com uma leitura estranha. */
+  .nav-caret {
+    display: none;
+  }
+
   .grid-2,
   .grid-3 {
     grid-template-columns: 1fr;
@@ -3475,6 +3575,23 @@ td.mono {
 .ba-dot.ba-dot-marcado.ba-dot-nao-enchido {
   color: var(--sq-cor-azul, var(--blue));
   text-shadow: 0 0 6px var(--sq-cor-azul, var(--blue));
+}
+
+/* Marcação feita SEM conexão, ainda não confirmada pelo servidor (ver
+   _pendentesLocais/LW.marcacoesBercoPendentes, bateria-atual.js/data.js)
+   — reenviada sozinha assim que a internet voltar. Contorno tracejado por
+   cima da cor normal (vermelho/azul de .ba-dot-marcado), só pra deixar
+   claro que ainda não sincronizou com outros dispositivos olhando esta
+   mesma tela — some sozinho assim que a confirmação chegar. */
+.ba-dot.ba-dot-pendente {
+  outline: 2px dashed currentColor;
+  outline-offset: 2px;
+  animation: ba-dot-pendente-pulso 1.4s ease-in-out infinite;
+}
+
+@keyframes ba-dot-pendente-pulso {
+  0%, 100% { outline-color: currentColor; }
+  50% { outline-color: transparent; }
 }
 
 .ba-vazio {

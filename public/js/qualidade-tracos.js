@@ -27,7 +27,21 @@
 
   // ── NORMALIZA CAMPO INSUMO ───────────────────────────────
   // Suporta: número puro, string, ou { original, ajustes[], total }
-  function normalizarInsumo(val) {
+  //
+  // isResultado (default false) distingue os dois tipos de campo:
+  // - Insumos de receita (cimento, água, EPS, superplast, incorporador):
+  //   cada ajuste é um ACRÉSCIMO na batelada — o total é original + soma
+  //   de todos os ajustes.
+  // - "Resultados" de processo (densidade, flow): cada ajuste é uma
+  //   REMEDIÇÃO — o operador leu de novo e registrou o valor novo, não
+  //   um acréscimo. O valor válido é a leitura mais recente (último
+  //   ajuste), nunca a soma. Mesma distinção já feita em dashboard.js
+  //   (_valRel/isResultado) para a coluna da tabela do Relatório de
+  //   Injeção — esta função ficou sem ela, fazendo "Densidade Média" e
+  //   "Flow Médio" somarem remedições em vez de usar a última (ver
+  //   comentário do usuário: densidade/flow médios batendo muito acima
+  //   do esperado).
+  function normalizarInsumo(val, isResultado = false) {
     if (val === null || val === undefined || val === '') {
       return { original: NaN, ajustes: [], total: NaN };
     }
@@ -35,7 +49,14 @@
       const ajustes  = Array.isArray(val.ajustes) ? val.ajustes : [];
       const original = parseFloat(val.original);
       let total;
-      if (val.total !== undefined && val.total !== '') {
+      if (isResultado) {
+        // Última remedição sobrescreve o valor — nunca soma.
+        if (ajustes.length > 0) {
+          total = parseFloat(ajustes[ajustes.length - 1]);
+        } else {
+          total = original;
+        }
+      } else if (val.total !== undefined && val.total !== '') {
         total = parseFloat(val.total);
       } else if (ajustes.length > 0) {
         total = ajustes.reduce((s, v) => s + (parseFloat(v) || 0), isNaN(original) ? 0 : original);
@@ -206,11 +227,19 @@
     // traço (não por uso — ver _bercosDoTraco).
     const valoresProcessoPorCampo = { densidade: [], flow: [] };
     const valoresBercosPorTraco = [];
+    // Relação Água/Cimento (A/C) — 1 valor por traço (água total ÷ cimento
+    // total, mesmos totais já usados pros insumos acima), agregado no fim
+    // com a MESMA estatística (estatisticas()) que Densidade/Flow/Berços
+    // já usam. É um indicador de PROCESSO geral do período filtrado, não
+    // um campo por receita individual (essa exibição já existe em Receita/
+    // Análise Focada/Debriefing) — aqui só entra a média/estatística.
+    const valoresRelacaoACPorTraco = [];
 
     for (const t of tracos) {
       let tracoTemAjuste = false;
 
       const camposInsumo = Object.keys(INSUMOS_LABELS);
+      let totalCimentoTraco = NaN, totalAguaTraco = NaN;
 
       for (const campo of camposInsumo) {
         const raw = t[campo];
@@ -219,6 +248,9 @@
         const insumo = normalizarInsumo(raw);
         const label  = INSUMOS_LABELS[campo];
         const nAj    = insumo.ajustes.length;
+
+        if (campo === 'cimento_real') totalCimentoTraco = insumo.total;
+        if (campo === 'agua_real') totalAguaTraco = insumo.total;
 
         // Contabiliza ajustes
         if (nAj > 0) {
@@ -238,6 +270,9 @@
         }
       }
 
+      const relacaoACTraco = LW.calcularRelacaoAC(totalCimentoTraco, totalAguaTraco);
+      if (relacaoACTraco !== null) valoresRelacaoACPorTraco.push(relacaoACTraco);
+
       if (tracoTemAjuste) tracosComAjuste++;
 
       // Densidade / Flow — mesmo formato de normalização dos insumos
@@ -247,7 +282,7 @@
       ['densidade', 'flow'].forEach(campo => {
         const raw = t[campo];
         if (raw === undefined) return;
-        const val = normalizarInsumo(raw);
+        const val = normalizarInsumo(raw, /* isResultado */ true);
         if (!isNaN(val.total)) valoresProcessoPorCampo[campo].push(val.total);
       });
 
@@ -338,6 +373,10 @@
     // reaproveitamentos já colapsados num único traço (ver _bercosDoTraco).
     const statsBercosPorTraco = estatisticas(valoresBercosPorTraco);
 
+    // Relação Água/Cimento (A/C) — estatística geral do período filtrado
+    // (média/mediana/desvio/CV entre os traços com cimento+água válidos).
+    const statsRelacaoAC = estatisticas(valoresRelacaoACPorTraco);
+
     // Tendência da taxa de acerto (evolução mensal)
     const mesesOrdenados = Object.keys(evolucao).sort();
     const taxasMensais   = mesesOrdenados.map(m => {
@@ -370,6 +409,7 @@
       maiorDesvioLabel, maiorDesvioPct,
       consumoPorInsumo, cepPorInsumo,
       statsBercosPorTraco,
+      statsRelacaoAC,
       evolucao, mesesOrdenados, taxasMensais, slopeTaxa,
       ajustesPorInsumoMes,
       porTipo,
@@ -469,6 +509,7 @@
     <div class="kpi-card" id="qt-card-media-densidade"><div class="kpi-label">Densidade Média</div><div class="kpi-value" id="qt-media-densidade">—</div><div style="font-size:.72rem;margin-top:4px" id="qt-media-densidade-sub">—</div></div>
     <div class="kpi-card" id="qt-card-media-flow"><div class="kpi-label">Flow Médio</div><div class="kpi-value" id="qt-media-flow">—</div><div style="font-size:.72rem;margin-top:4px" id="qt-media-flow-sub">—</div></div>
     <div class="kpi-card" id="qt-card-media-bercos-traco"><div class="kpi-label">Berços Enchidos / Traço</div><div class="kpi-value" id="qt-media-bercos-traco">—</div><div style="font-size:.72rem;margin-top:4px" id="qt-media-bercos-traco-sub">—</div></div>
+    <div class="kpi-card" id="qt-card-media-ac"><div class="kpi-label">Relação A/C Média</div><div class="kpi-value" id="qt-media-ac">—</div><div style="font-size:.72rem;margin-top:4px" id="qt-media-ac-sub">—</div></div>
   </div>
 
   <div class="grid2" style="margin-bottom:14px">
@@ -508,9 +549,25 @@
   const INSUMOS_LABELS = ${JSON.stringify(INSUMOS_LABELS)};
   const LIMITE_DESVIO_PCT = ${LIMITE_DESVIO_PCT};
   const LIMITE_TAXA_ACERTO = ${LIMITE_TAXA_ACERTO};
+  const RELACAO_AC_MIN = 0.35;
+  const RELACAO_AC_MAX = 0.40;
   const LW = {
     escaparHtml: s => { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; },
     tooltip: window.LW.tooltip,
+    // Relação Água/Cimento (A/C) — mesma lógica de LW.calcularRelacaoAC/
+    // classificarRelacaoAC (data.js), copiada aqui porque este bloco roda
+    // isolado, embutido no HTML exportado (sem acesso ao app principal).
+    calcularRelacaoAC(cimento, agua) {
+      const c = parseFloat(cimento), a = parseFloat(agua);
+      if (isNaN(c) || c <= 0 || isNaN(a) || a < 0) return null;
+      return a / c;
+    },
+    classificarRelacaoAC(valor) {
+      if (valor === null || valor === undefined || isNaN(valor)) return null;
+      if (valor < RELACAO_AC_MIN) return 'baixa';
+      if (valor > RELACAO_AC_MAX) return 'alta';
+      return 'ok';
+    },
   };
   const _ligarHoverCanvas = LW.tooltip.ligarHoverCanvas;
 
@@ -727,6 +784,30 @@
       cardBercos.setAttribute('data-tooltip',
         `Reaproveitamentos contam como 1 único traço (soma dos berços de todos os usos)\n`
         + `Mediana: ${fmtN(sBercos.mediana)} · Desvio Padrão: ${fmtN(sBercos.dp)}\nMín: ${fmtN(sBercos.min)} · Máx: ${fmtN(sBercos.max)}`);
+    }
+
+    // Relação Água/Cimento (A/C) — média geral do período (não por
+    // receita individual — ver LW.formatarRelacaoAC/data.js pros mesmos
+    // 0,35–0,40 usados na Receita/Análise Focada/Debriefing).
+    const sAC = ind.statsRelacaoAC;
+    const acEl = document.getElementById('qt-media-ac');
+    if (acEl) {
+      if (sAC && sAC.n > 0) {
+        const fmt = v => v.toFixed(2).replace('.', ',');
+        const statusMedia = LW.classificarRelacaoAC(sAC.media);
+        acEl.textContent = fmt(sAC.media);
+        acEl.style.color = statusMedia === 'ok' ? '#10b981' : (statusMedia ? '#ef4444' : 'var(--accent)');
+        setText('qt-media-ac-sub', `${sAC.n} traço${sAC.n !== 1 ? 's' : ''} · ideal: 0,35 a 0,40`);
+        const cardAC = document.getElementById('qt-card-media-ac');
+        if (cardAC) {
+          cardAC.setAttribute('data-tooltip',
+            `Mediana: ${fmt(sAC.mediana)} · Desvio Padrão: ${fmt(sAC.dp)}\nMín: ${fmt(sAC.min)} · Máx: ${fmt(sAC.max)}`);
+        }
+      } else {
+        acEl.textContent = '—';
+        acEl.style.color = 'var(--accent)';
+        setText('qt-media-ac-sub', 'Sem cimento/água registrados no período');
+      }
     }
   }
 

@@ -264,6 +264,8 @@ const rotasSqlAdmin = require('./lib/rotas/sql-admin.js')({ db, sessao: sessaoOu
 const rotasConsultas = require('./lib/rotas/consultas.js')({ db });
 const rotasExportarPdf = require('./lib/rotas/exportar-pdf.js')({ db, PRIVATE_DIR, sessaoUsuario, sessao, notificarPdfPronto: notificacoesPush.notificarPdfPronto });
 const rotasSobra = require('./lib/rotas/sobra.js')({ db, fs, path, dirParaModoTeste, podeEditarArea, negarEdicao });
+// Registro de Traço Descartado (Perda) — passo 2 do plano, ver README.
+const rotasTracosDescartados = require('./lib/rotas/tracos-descartados.js')({ db, podeEditarArea, negarEdicao });
 const rotasContadorTracos = require('./lib/rotas/contador-tracos.js')({ lerContadorTracosHoje, incrementarContadorTracosHoje, podeControlarOperacao, negarControleDeOperacao });
 const rotasLogAcesso = require('./lib/rotas/log-acesso.js')({ fs, path, ROOT_DIR });
 const rotasOperacaoAndamento = require('./lib/rotas/operacao-andamento.js')({
@@ -281,12 +283,26 @@ const rotasRegistroOperacao = require('./lib/rotas/registro-operacao.js')({
   lerBercosAndamento, salvarBercosAndamentoNoDisco,
   adicionarNaFilaNaoAvaliadas, broadcastOperacaoFinalizada,
 });
+// Backup Automático no Google Drive (ver README, "Backup Automático no
+// Google Drive") — googleDrive (lib/google-drive.js) fala com o Google via
+// fetch nativo (sem dependência nova); backupDriveJson (lib/backup-drive-
+// json.js) guarda a credencial da conta conectada em
+// private/backup-drive.json (mesmo raciocínio de segurança de
+// SECURITY_PATH/USUARIOS_PATH: nunca dentro de public/db/). BACKUP_DRIVE_PATH
+// entra na lista de exclusões do Backup Geral (ver VALIDADORES_BACKUP_GERAL,
+// lib/rotas/backup.js) — o refreshToken guardado ali é reversível (ao
+// contrário dos hashes de senha), então um backup não deve incluí-lo.
+const googleDrive = require('./lib/google-drive.js')();
+const backupDriveJson = require('./lib/backup-drive-json.js')({ fs, path, PRIVATE_DIR });
+const rotasBackupDrive = require('./lib/rotas/backup-drive.js')({ sessao: sessaoOuAdmin, auth, googleDrive, backupDriveJson });
+
 const rotasBackup = require('./lib/rotas/backup.js')({
   db, fs, path, JSZip,
   ROOT_DIR, DB_DIR, SECURITY_PATH, USUARIOS_PATH, PERFIS_CUSTOMIZADOS_PATH,
   auth, sessao: sessaoOuAdmin,
   todayBrasiliaServer, horaMinutoBrasiliaServer,
   lerContadorTracosHoje, recalcularFilaNaoAvaliadasApartirDoSql,
+  googleDrive, backupDriveJson,
 });
 // Registro de Operação Offline (PWA) — itens 5, 6 e 7 do plano, ver README.
 // POST /operacao-offline/enviar é sem sessão (não tem como exigir login
@@ -297,7 +313,7 @@ const rotasOperacaoOffline = require('./lib/rotas/operacao-offline.js')({
   rateLimitOffline, logger, sessao: sessaoOuAdmin, db,
   adicionarNaFilaNaoAvaliadas, incrementarContadorTracosHoje,
 });
-const ROTAS_EXTRAIDAS = [rotasUsuarios, rotasPerfisCustomizados, rotasParadas, rotasManutencao, rotasNotificacoes, rotasQualidade, rotasSqlAdmin, rotasConsultas, rotasExportarPdf, rotasSobra, rotasContadorTracos, rotasLogAcesso, rotasOperacaoAndamento, rotasAutenticacao, rotasDispositivosAutorizados, rotasImportacao, rotasLeituraEAjustes, rotasEdicao, rotasRegistroOperacao, rotasBackup.tentar, rotasOperacaoOffline];
+const ROTAS_EXTRAIDAS = [rotasUsuarios, rotasPerfisCustomizados, rotasParadas, rotasManutencao, rotasNotificacoes, rotasQualidade, rotasSqlAdmin, rotasConsultas, rotasExportarPdf, rotasSobra, rotasTracosDescartados, rotasContadorTracos, rotasLogAcesso, rotasOperacaoAndamento, rotasAutenticacao, rotasDispositivosAutorizados, rotasImportacao, rotasLeituraEAjustes, rotasEdicao, rotasRegistroOperacao, rotasBackup.tentar, rotasBackupDrive.tentar, rotasOperacaoOffline];
 
 // Migração automática Fase 2 (ver db.js) — só faz algo na primeira vez
 // que sobe com a tabela "operacoes" vazia E historico.json ainda existir

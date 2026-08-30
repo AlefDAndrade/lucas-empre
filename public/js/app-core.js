@@ -136,6 +136,21 @@
     // Extrai só o id — usada tanto no boot (location.href) quanto na
     // mensagem que o service worker manda pra uma aba já aberta (ver
     // listener 'message' logo abaixo).
+    // Mesma ideia de _extrairChamadoIdDaUrl, acima, só que pro retorno do
+    // fluxo OAuth do Google (ver GET /backup-drive/callback,
+    // lib/rotas/backup-drive.js) — a URL vem como
+    // "/?config=backup-drive&ok=1|0&msg=...". Devolve null se o parâmetro
+    // não estiver presente, ou { ok, msg } se estiver.
+    function _extrairRetornoBackupDriveDaUrl(urlStr) {
+      try {
+        const params = new URL(urlStr, window.location.origin).searchParams;
+        if (params.get('config') !== 'backup-drive') return null;
+        return { ok: params.get('ok') === '1', msg: params.get('msg') || '' };
+      } catch (e) {
+        return null;
+      }
+    }
+
     function _extrairChamadoIdDaUrl(urlStr) {
       try {
         return new URL(urlStr, window.location.origin).searchParams.get('chamado');
@@ -256,6 +271,129 @@
       }, 8000);
     }
 
+    // ---- Grupo de navegação com dropdown (ex: "Traços" — ver .nav-group,
+    // styles.css, e nav-tabbar.html) ----
+    // O .nav-dropdown de cada grupo é MOVIDO pro <body> logo abaixo
+    // (_prepararNavGroups) e vira position:fixed — ele não pode mais
+    // morar dentro de .nav-group porque .tabbar-scroll tem
+    // overflow-x:auto, e por especificação de CSS isso faz o navegador
+    // tratar overflow-y como 'auto' também (não some 'visible' de graça).
+    // Ou seja, um dropdown position:absolute ali dentro fica cortado
+    // assim que passa da borda inferior da tabbar, mesmo com
+    // display:flex certinho — o mesmo problema já resolvido antes neste
+    // projeto em .rb-popover (relatorio-bercos.js, _garantirPopover).
+    // Por isso abrir/fechar aqui é 100% via JS (mouseenter/mouseleave
+    // pro mouse, toggleNavGroup pro toque, focus/focusout pro teclado) —
+    // não dá mais pra confiar em :hover/:focus-within puro em CSS, já
+    // que o dropdown deixou de ser descendente do .nav-group no DOM.
+    const NAV_GROUP_FECHAR_DELAY_MS = 200; // tolerância pro mouse "atravessar" do gatilho até o dropdown sem fechar no meio do caminho
+    let _navGroupFecharTimer = null;
+
+    function _posicionarNavDropdown(grupo) {
+      const trigger = grupo.querySelector('.nav-group-trigger');
+      const dropdown = grupo.querySelector('.nav-dropdown') || document.getElementById(grupo.dataset.dropdownId || '');
+      if (!trigger || !dropdown) return;
+      const rect = trigger.getBoundingClientRect();
+      dropdown.style.left = Math.round(rect.left) + 'px';
+      dropdown.style.top = Math.round(rect.bottom) + 'px';
+    }
+
+    function abrirNavGroup(grupo) {
+      if (!grupo) return;
+      clearTimeout(_navGroupFecharTimer);
+      fecharNavGroups(grupo); // fecha qualquer outro grupo aberto antes de abrir este
+      grupo.classList.add('open');
+      const trigger = grupo.querySelector('.nav-group-trigger');
+      const dropdown = document.getElementById(grupo.dataset.dropdownId || '');
+      if (trigger) trigger.setAttribute('aria-expanded', 'true');
+      if (dropdown) {
+        dropdown.classList.add('show');
+        _posicionarNavDropdown(grupo);
+      }
+    }
+
+    function agendarFecharNavGroup() {
+      clearTimeout(_navGroupFecharTimer);
+      _navGroupFecharTimer = setTimeout(() => fecharNavGroups(), NAV_GROUP_FECHAR_DELAY_MS);
+    }
+
+    // toggleNavGroup = fallback de toque (tablets/celular não têm hover
+    // de verdade; um toque vira só um "tap" que não fica "pairando").
+    function toggleNavGroup(triggerEl) {
+      const grupo = triggerEl.closest('.nav-group');
+      if (!grupo) return;
+      if (grupo.classList.contains('open')) fecharNavGroups();
+      else abrirNavGroup(grupo);
+    }
+
+    // 'exceto': grupo que NÃO deve ser fechado (usado por abrirNavGroup
+    // pra trocar de um grupo aberto pro outro sem um flash de "fechou
+    // tudo, depois abriu de novo").
+    function fecharNavGroups(exceto) {
+      clearTimeout(_navGroupFecharTimer);
+      document.querySelectorAll('.nav-group.open').forEach(g => {
+        if (g === exceto) return;
+        g.classList.remove('open');
+        const trigger = g.querySelector('.nav-group-trigger');
+        const dropdown = document.getElementById(g.dataset.dropdownId || '');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        if (dropdown) dropdown.classList.remove('show');
+      });
+    }
+    // Expostas em window (chamadas direto do onclick inline no HTML, mesmo
+    // padrão de showPage/LWFocada.abrirBusca etc. em nav-tabbar.html).
+    window.toggleNavGroup = toggleNavGroup;
+    window.fecharNavGroups = fecharNavGroups;
+
+    // Move cada .nav-dropdown pro <body> (ver comentário acima) e liga
+    // hover/teclado. Guarda o vínculo grupo↔dropdown em
+    // grupo.dataset.dropdownId porque, depois da mudança de pai, o
+    // dropdown deixa de ser descendente do .nav-group — um simples
+    // grupo.querySelector('.nav-dropdown') não encontraria ele mais.
+    function _prepararNavGroups() {
+      document.querySelectorAll('.nav-group').forEach((grupo, i) => {
+        const trigger = grupo.querySelector('.nav-group-trigger');
+        const dropdown = grupo.querySelector('.nav-dropdown');
+        if (!trigger || !dropdown) return;
+
+        if (!dropdown.id) dropdown.id = `nav-dropdown-auto-${i}`;
+        grupo.dataset.dropdownId = dropdown.id;
+        dropdown.dataset.grupoId = grupo.id || (grupo.id = `nav-group-auto-${i}`);
+
+        document.body.appendChild(dropdown);
+
+        [trigger, dropdown].forEach(el => {
+          el.addEventListener('mouseenter', () => abrirNavGroup(grupo));
+          el.addEventListener('mouseleave', agendarFecharNavGroup);
+        });
+        trigger.addEventListener('focus', () => abrirNavGroup(grupo));
+        dropdown.addEventListener('focusout', (e) => {
+          if (e.relatedTarget !== trigger && !dropdown.contains(e.relatedTarget)) fecharNavGroups();
+        });
+      });
+    }
+    _prepararNavGroups();
+
+    // Reposiciona o dropdown aberto se a janela mudar de tamanho — ele é
+    // position:fixed agora, não acompanha sozinho um resize. Rolar a
+    // faixa de abas (.tabbar-scroll) fecha, pra não deixar o dropdown
+    // "flutuando" longe do gatilho que o abriu.
+    window.addEventListener('resize', () => {
+      const aberto = document.querySelector('.nav-group.open');
+      if (aberto) _posicionarNavDropdown(aberto);
+    });
+    document.querySelector('.tabbar-scroll')?.addEventListener('scroll', () => fecharNavGroups());
+
+    // Clique fora de qualquer .nav-group aberto fecha — sem isso, o
+    // fallback de toque (toggleNavGroup) ficaria aberto pra sempre até a
+    // pessoa tocar de novo no mesmo botão. O dropdown foi movido pro
+    // <body> (não é mais descendente de .nav-group), por isso o clique
+    // também precisa ser liberado quando cai dentro de .nav-dropdown.
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.nav-group') || e.target.closest('.nav-dropdown')) return;
+      fecharNavGroups();
+    });
+
     // Garante que a aba clicada/ativada fique visível dentro da faixa de
     // navegação horizontal (.tabbar-scroll) — necessário porque a barra
     // rola lateralmente em telas estreitas ou quando há mais abas do que
@@ -266,6 +404,32 @@
     function _rolarAbaAtivaParaVisivel(navEl) {
       if (!navEl || typeof navEl.scrollIntoView !== 'function') return;
       navEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    // Acha o .nav-group "dono" de um item de nav — seja o próprio
+    // gatilho (.nav-group-trigger, ainda dentro do .nav-group no DOM) ou
+    // um item de dentro do dropdown (.nav-dropdown-item). Esse segundo
+    // caso não dá mais pra resolver com closest('.nav-group') puro: o
+    // dropdown foi movido pro <body> em _prepararNavGroups() (ver
+    // comentário lá em cima), então um item dele NÃO é mais descendente
+    // do .nav-group no DOM — o vínculo agora vive em
+    // dropdown.dataset.grupoId.
+    function _grupoDoNavItem(navEl) {
+      const dropdown = navEl.closest('.nav-dropdown');
+      if (dropdown && dropdown.dataset.grupoId) return document.getElementById(dropdown.dataset.grupoId);
+      return navEl.closest('.nav-group');
+    }
+
+    // Quando a página ativa é uma das que mora DENTRO do dropdown "Traços"
+    // (ver .nav-group, nav-tabbar.html), o próprio botão-gatilho "Traços"
+    // também deveria acender — sem isso, abrir "Dashboard de Traço" ou
+    // "Traços Descartados" deixaria a tabbar inteira sem nenhuma aba
+    // marcada como ativa, o que pareceria um bug de navegação.
+    function _marcarGrupoComoAtivoSeAplicavel(navEl) {
+      const grupo = _grupoDoNavItem(navEl);
+      if (!grupo) return;
+      const trigger = grupo.querySelector('.nav-group-trigger');
+      if (trigger) trigger.classList.add('active');
     }
 
     function showPage(pageId, navEl) {
@@ -289,18 +453,30 @@
       }
 
       document.querySelectorAll('.main').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      // '.nav-dropdown-item' (ver .nav-group, styles.css) não tem a
+      // classe '.nav-item' — precisa entrar aqui separado, senão um item
+      // de dropdown marcado ativo uma vez nunca mais perderia o
+      // destaque, mesmo depois de navegar pra outra página.
+      document.querySelectorAll('.nav-item, .nav-dropdown-item').forEach(n => n.classList.remove('active'));
 
       document.getElementById('page-' + pageId).classList.add('active');
 
       if (navEl) {
         navEl.classList.add('active');
-        _rolarAbaAtivaParaVisivel(navEl);
+        _marcarGrupoComoAtivoSeAplicavel(navEl);
+        // Se o item pertence a um .nav-group (ver "Traços", nav-tabbar.html),
+        // o dropdown some assim que o mouse sai dali — não faz sentido
+        // rolar até um item que não vai continuar visível; rola até o
+        // botão-gatilho (esse sim sempre visível na faixa) no lugar dele.
+        const grupoDoItem = _grupoDoNavItem(navEl);
+        _rolarAbaAtivaParaVisivel(grupoDoItem ? grupoDoItem.querySelector('.nav-group-trigger') : navEl);
       } else {
         const btn = document.querySelector(`[data-page="${pageId}"]`);
         if (btn) {
           btn.classList.add('active');
-          _rolarAbaAtivaParaVisivel(btn);
+          _marcarGrupoComoAtivoSeAplicavel(btn);
+          const grupoDoItem = _grupoDoNavItem(btn);
+          _rolarAbaAtivaParaVisivel(grupoDoItem ? grupoDoItem.querySelector('.nav-group-trigger') : btn);
         }
       }
 
@@ -356,6 +532,14 @@
         setTimeout(() => {
           LWParadas.aplicarFiltros();
         }, 50);
+      }
+      // Traços Descartados (Perda) — só leitura (ver README, "Registro de
+      // Traço Descartado (Perda) — plano"), por isso sempre re-renderiza
+      // com dados frescos ao reabrir a aba, sem precisar de "init 1x só"
+      // como paradas (não tem formulário/filtro persistido pra reaplicar
+      // — LWTracosDescartados.render() já refaz o fetch e a tabela toda).
+      if (pageId === 'tracos-descartados') {
+        LWTracosDescartados.render();
       }
       if (pageId === 'relatorio' && !window._relatorioInit) {
         window._relatorioInit = true;
@@ -652,7 +836,14 @@
       // motivo: um F5 nesta aba não pode reabrir o mesmo registro de
       // novo pra sempre.
       const _programadaIdDaNotificacao = _extrairProgramadaIdDaUrl(window.location.href);
+      // Retorno do fluxo OAuth do Google (ver GET /backup-drive/callback) —
+      // mesmo raciocínio dos dois de cima: captura ANTES de limpar a URL,
+      // senão um F5 nesta aba reabriria a mensagem de novo.
+      const _retornoBackupDrive = _extrairRetornoBackupDriveDaUrl(window.location.href);
       if (_chamadoIdDaNotificacao || _programadaIdDaNotificacao) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      if (_retornoBackupDrive) {
         window.history.replaceState(null, '', window.location.pathname);
       }
 
@@ -763,6 +954,13 @@
         if (!(_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao))
             && !(_programadaIdDaNotificacao && await _abrirProgramadaDeNotificacao(_programadaIdDaNotificacao))) {
           _restaurarUltimaPagina();
+        }
+        // Sempre por cima da restauração de página normal — a pessoa
+        // acabou de voltar da tela de consentimento do Google, precisa
+        // ver o resultado independente de qual página estava aberta antes.
+        if (_retornoBackupDrive) {
+          abrirBackupHub();
+          _statusBackupHub(_retornoBackupDrive.msg, _retornoBackupDrive.ok ? 'ok' : 'erro');
         }
 
       } else {
@@ -942,16 +1140,21 @@
       if (status) status.style.display = 'none';
       document.getElementById('backup-hub-modal').style.display = 'flex';
       _carregarBackupsAutomaticos();
+      _carregarBackupDriveStatus();
     }
 
     function fecharBackupHub() {
       document.getElementById('backup-hub-modal').style.display = 'none';
     }
 
-    function _statusBackupHub(msg) {
+    function _statusBackupHub(msg, tipo) {
       const status = document.getElementById('backup-hub-status');
       if (!status) return;
-      if (msg) { status.textContent = msg; status.style.display = 'block'; }
+      if (msg) {
+        status.textContent = msg;
+        status.style.display = 'block';
+        status.style.color = tipo === 'erro' ? 'var(--red)' : (tipo === 'ok' ? 'var(--accent)' : 'var(--text-2)');
+      }
       else { status.style.display = 'none'; }
     }
 
@@ -999,7 +1202,165 @@
       })();
     }
 
-    // ---- Backup de Dados (admin) ----
+    // ---- Backup na Nuvem (Google Drive) — Passo 6 do plano, ver README ----
+    // GET /backup-drive/status devolve { conectado, email, ativo,
+    // credenciaisConfiguradas } — nunca refreshToken (ver
+    // lib/rotas/backup-drive.js). Três estados possíveis pra renderizar:
+    //   1. credenciaisConfiguradas=false → Passo 1 do plano ainda não foi
+    //      feito neste servidor (falta GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI)
+    //      — mostra aviso em vez de botão, nada clicável.
+    //   2. conectado=false (mas credenciais ok) → botão "Conectar".
+    //   3. conectado=true → e-mail + toggle ativo/pausado + "Desconectar".
+    function _carregarBackupDriveStatus() {
+      const el = document.getElementById('backup-hub-drive');
+      if (!el) return;
+      el.innerHTML = '<span style="color:var(--text-3);font-size:.82rem">Carregando...</span>';
+
+      (async () => {
+        try {
+          const res = await fetch('/backup-drive/status');
+          if (res.status === 403) {
+            el.innerHTML = '<span style="color:var(--red);font-size:.82rem">Sua sessão de administrador expirou — saia e entre novamente como Administrador.</span>';
+            return;
+          }
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.erro || 'Erro ao consultar status do Google Drive.');
+
+          if (!json.credenciaisConfiguradas) {
+            el.innerHTML = `
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:9px 14px">
+                <span style="font-size:.82rem;color:var(--text-3)">☁️ Integração com Google Drive ainda não configurada neste servidor.</span>
+              </div>`;
+            return;
+          }
+
+          if (!json.conectado) {
+            el.innerHTML = `
+              <div class="menu-card" id="backup-hub-card-drive-conectar" onclick="abrirBackupDriveSenha('conectar')">
+                <div class="menu-card-icon">☁️</div>
+                <div class="menu-card-title">Conectar Google Drive</div>
+                <div class="menu-card-desc">Envia os backups automáticos diários também pra uma conta do Google Drive.</div>
+              </div>`;
+            return;
+          }
+
+          el.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;flex-wrap:wrap">
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:.85rem;color:var(--text);font-weight:600">☁️ Conectado como ${json.email || '(e-mail não obtido)'}</span>
+                <span style="font-size:.76rem;color:var(--text-3)">Os 3 backups automáticos mais recentes são enviados pra lá também.</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.8rem;color:var(--text-2);user-select:none">
+                  ${json.ativo ? 'Ativo' : 'Pausado'}
+                  <span class="switch">
+                    <input type="checkbox" id="backup-drive-toggle-ativo" ${json.ativo ? 'checked' : ''} onchange="toggleBackupDriveAtivo(this)">
+                    <span class="switch-slider"></span>
+                  </span>
+                </label>
+                <button class="btn btn-ghost btn-sm" onclick="abrirBackupDriveSenha('desconectar')">Desconectar</button>
+              </div>
+            </div>`;
+        } catch (e) {
+          el.innerHTML = `<span style="color:var(--red);font-size:.82rem">Erro ao carregar: ${e.message}</span>`;
+        }
+      })();
+    }
+
+    // Liga/desliga o envio automático sem desconectar a conta — não pede
+    // senha (diferente de conectar/desconectar), é reversível e de baixo
+    // risco (ver POST /backup-drive/toggle, lib/rotas/backup-drive.js).
+    function toggleBackupDriveAtivo(checkbox) {
+      const ativoDesejado = checkbox.checked;
+      checkbox.disabled = true;
+      (async () => {
+        try {
+          const res = await fetch('/backup-drive/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ativo: ativoDesejado }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.erro || 'Erro ao atualizar.');
+          // Recarrega pra manter o label "Ativo"/"Pausado" e o restante
+          // do card sempre consistentes com o que está de fato salvo.
+          _carregarBackupDriveStatus();
+        } catch (e) {
+          LW.mostrarAlerta('Erro ao atualizar Backup na Nuvem: ' + e.message, { tipo: 'erro' });
+          checkbox.checked = !ativoDesejado;
+          checkbox.disabled = false;
+        }
+      })();
+    }
+
+    // ---- Modal de senha — reaproveitado por "Conectar" e "Desconectar" ----
+    // Ambas as ações são sensíveis o bastante (conectar uma conta externa
+    // que vai RECEBER dados da fábrica / desconectar uma já em uso) pra
+    // justificar reverificar a senha de administrador, mesmo já com sessão
+    // aberta — mesmo padrão de /mesclar-backup-dados.
+    let _backupDriveAcaoPendente = null; // 'conectar' | 'desconectar'
+
+    function abrirBackupDriveSenha(acao) {
+      _backupDriveAcaoPendente = acao;
+      const titulo = document.getElementById('backup-drive-senha-titulo');
+      const desc = document.getElementById('backup-drive-senha-desc');
+      if (acao === 'conectar') {
+        titulo.textContent = '☁️ Conectar Google Drive';
+        desc.textContent = 'Confirme sua senha de administrador — você vai ser levado(a) pra tela de autorização do Google.';
+      } else {
+        titulo.textContent = '☁️ Desconectar Google Drive';
+        desc.textContent = 'Confirme sua senha de administrador — o envio automático dos backups pra essa conta vai parar.';
+      }
+      document.getElementById('backup-drive-senha-erro').style.display = 'none';
+      document.getElementById('backup-drive-senha-input').value = '';
+      document.getElementById('backup-drive-senha-modal').style.display = 'flex';
+    }
+
+    function fecharBackupDriveSenha() {
+      document.getElementById('backup-drive-senha-modal').style.display = 'none';
+      _backupDriveAcaoPendente = null;
+    }
+
+    function confirmarBackupDriveSenha() {
+      const senha = document.getElementById('backup-drive-senha-input').value;
+      const erroEl = document.getElementById('backup-drive-senha-erro');
+      const btn = document.getElementById('backup-drive-senha-btn-confirmar');
+      const acao = _backupDriveAcaoPendente;
+      const rota = acao === 'conectar' ? '/backup-drive/autorizar' : '/backup-drive/desconectar';
+
+      erroEl.style.display = 'none';
+      btn.disabled = true;
+
+      (async () => {
+        try {
+          const res = await fetch(rota, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ senha }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.erro || 'Erro.');
+
+          if (acao === 'conectar') {
+            // Sai do sistema agora — a volta é pelo GET /backup-drive/callback
+            // (ver lib/rotas/backup-drive.js), que redireciona de novo pra
+            // "/" já com o resultado (ver _retornoBackupDrive, acima).
+            window.location.href = json.url;
+            return;
+          }
+
+          fecharBackupDriveSenha();
+          _carregarBackupDriveStatus();
+        } catch (e) {
+          erroEl.textContent = e.message;
+          erroEl.style.display = 'block';
+        } finally {
+          btn.disabled = false;
+        }
+      })();
+    }
+
+
     // Gerado no SERVIDOR (rota GET /backup-dados — ver
     // gerarZipDadosServidor, lib/rotas/backup.js), diferente de antes
     // (montado no navegador via fetch de cada GET /db/*.json — ver
@@ -3525,12 +3886,14 @@
     async function cfgRenderOperacoesOffline() {
       const container = document.getElementById('cfg-operacoes-offline-lista');
       if (!container) return;
-      container.innerHTML = '<p style="color:var(--text-3);font-size:.8rem">Carregando…</p>';
+      _cfgAtualizarContadorOffline(null); // esconde o contador enquanto carrega
+      container.innerHTML = _cfgStatusOffline('⏳', 'Carregando…');
       try {
         const lista = await LW.listarOperacoesOfflinePendentes();
         _cfgOperacoesOfflineCache = lista;
+        _cfgAtualizarContadorOffline(lista.length);
         if (!lista.length) {
-          container.innerHTML = '<p style="color:var(--text-3);font-size:.8rem">Nenhuma operação offline pendente no momento. ✅</p>';
+          container.innerHTML = _cfgStatusOffline('✅', 'Nenhuma operação offline pendente no momento.');
           return;
         }
         // Mais recente primeiro — quem revisa normalmente quer ver o que
@@ -3538,41 +3901,266 @@
         const ordenada = [...lista].sort((a, b) => (b.recebidoEm || '').localeCompare(a.recebidoEm || ''));
         container.innerHTML = ordenada.map(item => _cfgCardOperacaoOffline(item)).join('');
       } catch (e) {
-        container.innerHTML = '<p style="color:var(--danger)">' + e.message + '</p>';
+        _cfgAtualizarContadorOffline(null);
+        container.innerHTML = _cfgStatusOffline('⚠️', _escaparHtmlLocal(e.message), { erro: true });
       }
+    }
+
+    // Bolinha "N pendentes" ao lado do título da seção — null esconde
+    // (usado enquanto carrega ou se deu erro, pra não mostrar um número
+    // desatualizado/errado).
+    function _cfgAtualizarContadorOffline(qtd) {
+      const el = document.getElementById('cfg-offline-contador');
+      if (!el) return;
+      if (qtd === null || qtd === undefined) { el.style.display = 'none'; return; }
+      el.style.display = 'inline-flex';
+      el.classList.toggle('oov-contador--zero', qtd === 0);
+      el.textContent = qtd === 0 ? '✅ Em dia' : `⏳ ${qtd} pendente${qtd === 1 ? '' : 's'}`;
+    }
+
+    function _cfgStatusOffline(icone, texto, opts) {
+      opts = opts || {};
+      return `
+        <div class="oov-status${opts.erro ? ' oov-status--erro' : ''}">
+          <div class="oov-status-icone">${icone}</div>
+          <div>${texto}</div>
+        </div>`;
     }
 
     function _cfgCardOperacaoOffline(item) {
       const f = item.formRecord || {};
       const qtdTracos = Array.isArray(item.tracos) ? item.tracos.length : 0;
       const recebido = item.recebidoEm ? new Date(item.recebidoEm).toLocaleString('pt-BR') : '—';
-      const inicio = f.inicio ? new Date(f.inicio).toLocaleString('pt-BR') : '—';
-      const fim = f.fim ? new Date(f.fim).toLocaleString('pt-BR') : '—';
+      // f.inicio/f.fim seguem a convenção "UTC falso = hora de Brasília"
+      // (mesmo raciocínio de _offcParaInputDatetime/dashboard.js, coluna
+      // Hora Início/Fim do Registro de Baterias) — LW.formatDateTime já lê
+      // os dígitos do ISO direto, sem aplicar o fuso REAL do navegador
+      // (timeZone: 'UTC' internamente). Usar toLocaleString('pt-BR') aqui
+      // (sem forçar UTC) aplicava o fuso de verdade do navegador em cima
+      // de um valor que já É a hora local — fazia este card mostrar um
+      // horário diferente do que a mesma operação mostra no Registro de
+      // Baterias depois de validada. recebidoEm/corrigidoEm (abaixo),
+      // diferente de inicio/fim, são timestamps REAIS do servidor
+      // (new Date().toISOString() em lib/fila-offline.js) — esses sim
+      // devem converter para o fuso do navegador, então continuam com
+      // toLocaleString('pt-BR') normal.
+      const inicio = f.inicio ? LW.formatDateTime(f.inicio) : '—';
+      const fim = f.fim ? LW.formatDateTime(f.fim) : '—';
       const corrigidoTag = item.corrigidoEm
-        ? '<span style="font-size:.7rem;color:var(--accent);margin-left:8px">✏️ corrigido ' + new Date(item.corrigidoEm).toLocaleString('pt-BR') + '</span>'
+        ? '<span class="oov-tag-corrigido">✏️ corrigido ' + new Date(item.corrigidoEm).toLocaleString('pt-BR') + '</span>'
         : '';
       const idSeguro = item.idTemp.replace(/[^a-zA-Z0-9_-]/g, '');
       return `
-        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;background:var(--bg-2)">
-          <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
+        <div class="oov-card${item.corrigidoEm ? ' oov-card--corrigido' : ''}">
+          <div class="oov-card-top">
             <div>
-              <div style="font-weight:600;font-size:.9rem">🔋 ${f.id_bateria || '(sem bateria)'} — ${f.turno || '—'}${corrigidoTag}</div>
-              <div style="font-size:.75rem;color:var(--text-3);margin-top:2px">Recebido em ${recebido} · IP ${item.ip || '—'}</div>
+              <div class="oov-card-titulo">
+                🔋 ${f.id_bateria || '(sem bateria)'}
+                <span class="oov-turno">${f.turno || '—'}</span>
+                ${corrigidoTag}
+              </div>
+              <div class="oov-meta">
+                <span>📥 Recebido em ${recebido}</span>
+                <span>🌐 IP ${item.ip || '—'}</span>
+              </div>
             </div>
-            <div style="font-size:.75rem;color:var(--text-2);text-align:right">
-              <div>Início: ${inicio}</div>
-              <div>Fim: ${fim}</div>
-              <div>${qtdTracos} traço(s)</div>
+            <div class="oov-stats">
+              <div class="oov-stat">
+                <span class="oov-stat-label">Início</span>
+                <span class="oov-stat-valor">${inicio}</span>
+              </div>
+              <div class="oov-stat">
+                <span class="oov-stat-label">Fim</span>
+                <span class="oov-stat-valor">${fim}</span>
+              </div>
+              <div class="oov-stat">
+                <span class="oov-stat-label">Traços</span>
+                <span class="oov-stat-valor">${qtdTracos}</span>
+              </div>
             </div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-            <button type="button" class="btn-primary" style="padding:6px 14px;font-size:.8rem" onclick="cfgAbrirRenumeracaoOperacaoOffline('${idSeguro}')">✅ Validar</button>
-            <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:.8rem" onclick="cfgAbrirCorrecaoOperacaoOffline('${idSeguro}')">✏️ Corrigir</button>
-            <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:.8rem;color:var(--danger)" onclick="cfgRecusarOperacaoOffline('${idSeguro}')">❌ Recusar</button>
+          ${_cfgSobraSectionOperacaoOffline(item, idSeguro)}
+          <div class="oov-card-footer">
+            <div class="oov-actions">
+              <button type="button" class="btn btn-primary btn-sm" onclick="cfgAbrirRenumeracaoOperacaoOffline('${idSeguro}')">✅ Validar</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="cfgAbrirCorrecaoOperacaoOffline('${idSeguro}')">✏️ Corrigir</button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="cfgRecusarOperacaoOffline('${idSeguro}')">❌ Recusar</button>
+            </div>
           </div>
-          <div id="cfg-corrigir-${idSeguro}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)"></div>
-          <div id="cfg-renumerar-${idSeguro}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)"></div>
+          <div id="cfg-renumerar-${idSeguro}" class="oov-renum-painel" style="display:none"></div>
         </div>`;
+    }
+
+    // ─── Traços marcados como sobra pelo operador (offline-operacao.js) —
+    // mostra a nota que ele deixou pra si mesmo e um campo pra o
+    // Administrador apontar qual é o traço/operação ORIGINAL de que este
+    // é sobra. "Salvar vínculo" reaproveita POST /operacao-offline/
+    // corrigir (já existe, já aceita substituir o array `tracos` inteiro
+    // — não precisou de rota nova nenhuma). O vínculo só vira permanente
+    // de fato quando esta operação for Validada — lib/rotas/operacao-
+    // offline.js dobra eh_sobra/nota_sobra/link_sobra_original dentro do
+    // campo `obs` do traço final nesse momento (ver _montarObsComSobra,
+    // lá), já que a tabela `tracos` não tem colunas próprias pra isso.
+    function _cfgSobraSectionOperacaoOffline(item, idSeguro) {
+      const tracos = Array.isArray(item.tracos) ? item.tracos : [];
+      const marcados = tracos
+        .map((t, indice) => ({ t, indice }))
+        .filter(({ t }) => t && t.eh_sobra);
+      if (!marcados.length) return '';
+
+      return `
+        <div class="oov-sobra-section">
+          <div class="oov-sobra-titulo">♻️ Traços marcados como sobra pelo operador</div>
+          ${marcados.map(({ t, indice }) => `
+            <div class="oov-sobra-item">
+              <div class="oov-sobra-num">Traço ${t.num ?? (indice + 1)}</div>
+              ${t.nota_sobra
+                ? `<div class="oov-sobra-nota">📝 "${_escaparHtmlLocal(t.nota_sobra)}"</div>`
+                : '<div class="oov-sobra-nota oov-sobra-nota--vazia">(operador não deixou nota)</div>'}
+              ${renderVinculoSobraAtual(t)}
+              <div class="oov-sobra-link-row">
+                <button type="button" class="btn btn-outline-accent btn-sm"
+                  onclick="cfgAbrirVincularSobra('${idSeguro}', ${indice})">🔗 ${t.link_sobra_original ? 'Trocar vínculo' : 'Vincular ao traço original'}</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+    }
+
+    // Mostra o vínculo já salvo, se houver. Aceita 2 formatos: o objeto
+    // estruturado novo ({ id_traco, data, num_traco, ... }, ver
+    // cfgLinkarSobra) e a string livre digitada à mão pelo formato antigo
+    // (antes desta tela ter o calendário) — sem quebrar vínculos já salvos.
+    function renderVinculoSobraAtual(t) {
+      const link = t.link_sobra_original;
+      if (!link) return '';
+      if (typeof link === 'string') {
+        return `<div class="oov-sobra-vinculado">✅ Vinculado a: ${_escaparHtmlLocal(link)}</div>`;
+      }
+      const dataFmt = link.data ? new Date(link.data + 'T00:00:00').toLocaleDateString('pt-BR') : '—';
+      const bateria = link.id_bateria ? ` · Bateria ${_escaparHtmlLocal(link.id_bateria)}` : '';
+      const bercos = (link.berco_inicio || link.berco_finalizacao)
+        ? ` · Berços ${_escaparHtmlLocal(link.berco_inicio ?? '—')}–${_escaparHtmlLocal(link.berco_finalizacao ?? '—')}`
+        : '';
+      return `<div class="oov-sobra-vinculado">✅ Vinculado a: Traço ${_escaparHtmlLocal(link.num_traco ?? '—')} · ${dataFmt}${bateria}${bercos}</div>`;
+    }
+
+    // ─── Modal "Vincular Sobra" — calendário + lista de traços do dia ────
+
+    let _mvsIdSeguro = null;
+    let _mvsIndiceTraco = null;
+
+    function cfgAbrirVincularSobra(idSeguro, indiceTraco) {
+      const item = _cfgOperacoesOfflineCache.find(it => it.idTemp.replace(/[^a-zA-Z0-9_-]/g, '') === idSeguro);
+      if (!item) {
+        LW.mostrarAlerta('Registro não encontrado — a lista pode ter sido atualizada, recarregue e tente de novo.', { tipo: 'erro' });
+        return;
+      }
+      _mvsIdSeguro = idSeguro;
+      _mvsIndiceTraco = indiceTraco;
+      const t = (item.tracos || [])[indiceTraco] || {};
+      const contexto = document.getElementById('mvs-contexto');
+      if (contexto) {
+        contexto.textContent = `Traço ${t.num ?? (indiceTraco + 1)} desta operação offline`
+          + (t.nota_sobra ? ` — nota do operador: "${t.nota_sobra}"` : '');
+      }
+      const dataInput = document.getElementById('mvs-data');
+      if (dataInput) dataInput.value = item.data || '';
+      document.getElementById('mvs-resultado').innerHTML = '';
+      const modal = document.getElementById('modal-vincular-sobra');
+      if (modal) modal.style.display = 'flex';
+      if (dataInput && dataInput.value) cfgBuscarTracosParaVinculo();
+    }
+
+    function cfgFecharVincularSobra() {
+      const modal = document.getElementById('modal-vincular-sobra');
+      if (modal) modal.style.display = 'none';
+      _mvsIdSeguro = null;
+      _mvsIndiceTraco = null;
+    }
+
+    // Busca todos os traços (LW.getRelatorioInjecao — mesma fonte do
+    // Relatório de Injeção) e filtra pela data escolhida no calendário.
+    // Cada traço aparece com o suficiente pra reconhecer qual é (número,
+    // turno, bateria, berços, densidade/flow) e um botão "Linkar".
+    async function cfgBuscarTracosParaVinculo() {
+      const dataInput = document.getElementById('mvs-data');
+      const resultado = document.getElementById('mvs-resultado');
+      if (!dataInput || !resultado) return;
+      const dataEscolhida = dataInput.value;
+      if (!dataEscolhida) { resultado.innerHTML = ''; return; }
+
+      resultado.innerHTML = '<p style="color:var(--text-3);font-size:.84rem">Carregando traços do dia...</p>';
+      let todos = [];
+      try {
+        todos = await LW.getRelatorioInjecao();
+      } catch (e) {
+        resultado.innerHTML = `<p style="color:var(--red);font-size:.84rem">Erro ao carregar traços: ${_escaparHtmlLocal(e.message)}</p>`;
+        return;
+      }
+
+      const doDia = (todos || [])
+        .filter(t => t.data === dataEscolhida)
+        .sort((a, b) => (a.num_traco || 0) - (b.num_traco || 0));
+
+      if (!doDia.length) {
+        resultado.innerHTML = '<p style="color:var(--text-3);font-size:.84rem">Nenhum traço registrado nesta data.</p>';
+        return;
+      }
+
+      resultado.innerHTML = `
+        <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:10px">
+          ${doDia.length} traço${doDia.length !== 1 ? 's' : ''} nesta data</div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto">
+          ${doDia.map(t => {
+            const usos = t.ultilizado?.operacao || [];
+            const uso = usos[0] || {};
+            const bateria = uso.id_bateria ? `Bateria ${_escaparHtmlLocal(uso.id_bateria)}` : 'Bateria —';
+            const bercos = (uso.berco_inicio || uso.berco_finalizacao)
+              ? ` · Berços ${_escaparHtmlLocal(uso.berco_inicio ?? '—')}–${_escaparHtmlLocal(uso.berco_finalizacao ?? '—')}`
+              : '';
+            const densidade = t.densidade?.original != null || t.densidade?.total != null
+              ? ` · Densid. ${_escaparHtmlLocal(t.densidade.total ?? t.densidade.original)}` : '';
+            const flow = t.flow?.original != null || t.flow?.total != null
+              ? ` · Flow ${_escaparHtmlLocal(t.flow.total ?? t.flow.original)}` : '';
+            return `
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius)">
+                <div style="font-size:.84rem;color:var(--text-2)">
+                  <strong style="color:var(--text)">Traço ${_escaparHtmlLocal(t.num_traco ?? '—')}</strong>
+                  ${t.turno ? ` · ${_escaparHtmlLocal(t.turno)}` : ''} · ${bateria}${bercos}${densidade}${flow}
+                </div>
+                <button type="button" class="btn btn-primary btn-sm"
+                  onclick='cfgLinkarSobra(${JSON.stringify(JSON.stringify({
+                    id_traco: t.id_traco, data: t.data, num_traco: t.num_traco,
+                    id_bateria: uso.id_bateria ?? null, berco_inicio: uso.berco_inicio ?? null,
+                    berco_finalizacao: uso.berco_finalizacao ?? null,
+                  }))})'>🔗 Linkar</button>
+              </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    // Salva o vínculo escolhido no modal — PATCH via /operacao-offline/corrigir
+    // (mesmo caminho de antes, cfgSalvarLinkSobra), mandando o array
+    // `tracos` completo com só aquele índice alterado (a rota substitui o
+    // array inteiro — ver atualizarNaFilaOffline, lib/fila-offline.js).
+    async function cfgLinkarSobra(linkJson) {
+      if (_mvsIdSeguro === null || _mvsIndiceTraco === null) return;
+      const item = _cfgOperacoesOfflineCache.find(it => it.idTemp.replace(/[^a-zA-Z0-9_-]/g, '') === _mvsIdSeguro);
+      if (!item) {
+        LW.mostrarAlerta('Registro não encontrado — a lista pode ter sido atualizada, recarregue e tente de novo.', { tipo: 'erro' });
+        return;
+      }
+      const link = JSON.parse(linkJson);
+      try {
+        const tracosAtualizados = (item.tracos || []).map((t, idx) => idx === _mvsIndiceTraco ? { ...t, link_sobra_original: link } : t);
+        await LW.corrigirOperacaoOfflinePendente(item.idTemp, { tracos: tracosAtualizados });
+        LW.mostrarAlerta('Vínculo salvo.', { tipo: 'sucesso' });
+        cfgFecharVincularSobra();
+        await cfgRenderOperacoesOffline();
+      } catch (e) {
+        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+      }
     }
 
     // ─── Renumeração manual do dia, antes de validar ─────────────────────
@@ -3600,41 +4188,48 @@
     }
 
     function _cfgRenumeracaoHtml(idSeguro, idTemp, data, existentes, pendentes) {
-      // Ordem inicial: pela sugestão de número (existentes já têm o seu;
-      // pendentes usam o que o dispositivo offline mandou) — só um ponto
-      // de partida, o Master pode digitar qualquer número em qualquer campo.
-      const linhas = [...existentes, ...pendentes]
-        .sort((a, b) => (a.num_traco ?? 9999) - (b.num_traco ?? 9999));
+      // Duas colunas lado a lado — "Já no sistema" (traços de outras
+      // operações do mesmo dia, já existentes) e "Desta operação"
+      // (os que vieram do envio offline, ainda pendentes) — em vez de
+      // uma lista só misturada. Cada grupo mantém sua própria ordenação
+      // por sugestão de número, só como ponto de partida.
+      const porNumero = (a, b) => (a.num_traco ?? 9999) - (b.num_traco ?? 9999);
+      const existentesOrdenados = [...existentes].sort(porNumero);
+      const pendentesOrdenados = [...pendentes].sort(porNumero);
 
-      const linhasHtml = linhas.map((t, i) => {
-        const idAttr = 'cfg-renum-' + idSeguro + '-' + i;
-        const origemBadge = t.origem === 'pendente'
-          ? '<span style="font-size:.68rem;color:var(--accent)">🆕 desta operação</span>'
-          : '<span style="font-size:.68rem;color:var(--text-3)">já no dia</span>';
+      const linhaHtml = (t, i, prefixo) => {
+        const idAttr = 'cfg-renum-' + idSeguro + '-' + prefixo + '-' + i;
         const refBateria = t.id_bateria ? _escaparHtmlLocal(t.id_bateria) : '—';
         return `
-          <div class="cfg-renum-linha" data-id-traco="${_escaparHtmlLocal(t.id_traco)}"
-            style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <div class="oov-renum-linha" data-id-traco="${_escaparHtmlLocal(t.id_traco)}">
             <input type="number" min="1" step="1" value="${t.num_traco ?? ''}" data-renum-input
-              id="${idAttr}" oninput="_cfgAtualizarValidacaoRenumeracao('${idSeguro}')"
-              style="width:64px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:4px 6px;font-size:.85rem;text-align:center">
-            <div style="flex:1;font-size:.78rem;color:var(--text-2)">
-              🔋 ${refBateria} ${origemBadge}
-            </div>
+              id="${idAttr}" class="oov-renum-input" oninput="_cfgAtualizarValidacaoRenumeracao('${idSeguro}')">
+            <div class="oov-renum-info">🔋 ${refBateria}</div>
           </div>`;
-      }).join('');
+      };
+
+      const colunaHtml = (titulo, lista, prefixo, vazioTexto) => `
+        <div class="oov-renum-coluna">
+          <div class="oov-renum-coluna-titulo">${titulo} <span class="oov-renum-coluna-contagem">${lista.length}</span></div>
+          <div class="oov-renum-lista">
+            ${lista.length ? lista.map((t, i) => linhaHtml(t, i, prefixo)).join('') : `<p class="oov-renum-vazio">${vazioTexto}</p>`}
+          </div>
+        </div>`;
 
       return `
-        <p style="font-size:.78rem;color:var(--text-3);margin-bottom:10px;line-height:1.5">
+        <p class="oov-renum-intro">
           Confira e ajuste o número de <strong>cada traço do dia ${data}</strong> (os que já existem + os desta
           operação) antes de validar — sem número repetido e sem faltar nenhum.
         </p>
-        <div id="cfg-renum-lista-${idSeguro}">${linhasHtml}</div>
-        <p id="cfg-renum-erro-${idSeguro}" style="font-size:.75rem;color:var(--danger);margin-top:8px;display:none"></p>
-        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-          <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:.8rem"
+        <div id="cfg-renum-lista-${idSeguro}" class="oov-renum-colunas">
+          ${colunaHtml('📋 Já no sistema', existentesOrdenados, 'ex', 'Nenhum traço deste dia ainda no sistema.')}
+          ${colunaHtml('🆕 Desta operação', pendentesOrdenados, 'pd', 'Nenhum traço pendente nesta operação.')}
+        </div>
+        <p id="cfg-renum-erro-${idSeguro}" class="oov-renum-erro"></p>
+        <div class="oov-renum-acoes">
+          <button type="button" class="btn btn-ghost btn-sm"
             onclick="_cfgPreencherSequenciaRenumeracao('${idSeguro}')">🔢 Preencher 1, 2, 3…</button>
-          <button type="button" class="btn-primary" style="padding:6px 14px;font-size:.8rem" id="cfg-renum-confirmar-${idSeguro}"
+          <button type="button" class="btn btn-primary btn-sm" id="cfg-renum-confirmar-${idSeguro}"
             onclick="cfgConfirmarRenumeracaoEValidar('${idSeguro}', '${idTemp.replace(/'/g, "\\'")}')">✅ Confirmar numeração e validar</button>
         </div>`;
     }
@@ -3660,8 +4255,8 @@
       const numeros = [];
       let faltaNumero = false;
       inputs.forEach(input => {
-        const linha = input.closest('.cfg-renum-linha');
-        linha.style.background = '';
+        const linha = input.closest('.oov-renum-linha');
+        linha.classList.remove('oov-renum-linha--erro');
         const valor = input.value.trim();
         if (!valor || Number(valor) <= 0 || !Number.isInteger(Number(valor))) { faltaNumero = true; return; }
         numeros.push({ input, linha, num: Number(valor) });
@@ -3677,7 +4272,7 @@
         if (duplicados.length) {
           mensagem = 'Número(s) repetido(s): #' + duplicados.join(', #') + '. Cada traço do dia precisa de um número único.';
           numeros.forEach(({ num, linha }) => {
-            if (duplicados.includes(num)) linha.style.background = 'rgba(220,53,69,.12)';
+            if (duplicados.includes(num)) linha.classList.add('oov-renum-linha--erro');
           });
         }
       }
@@ -3734,62 +4329,279 @@
       }
     }
 
-    // Correção rápida inline — só os campos mais prováveis de terem vindo
-    // errado do relógio do dispositivo offline (ver README, item 8):
-    // início/fim/ID da bateria. Não é a tela completa de Edições
-    // Avançadas (que trabalha em cima de uma operação já existente em
-    // "operacoes", não de um registro ainda pendente) — um ajuste
-    // funcional mais simples, focado no que mais provavelmente precisa de
-    // correção antes de aprovar.
-    function cfgAbrirCorrecaoOperacaoOffline(idTemp) {
-      const idSeguro = idTemp.replace(/[^a-zA-Z0-9_-]/g, '');
-      const painel = document.getElementById('cfg-corrigir-' + idSeguro);
-      if (!painel) return;
-      if (painel.style.display === 'block') { painel.style.display = 'none'; return; }
+    // ─── Modal "papel A4" — correção completa de um registro offline
+    // pendente, antes de validar (ver README, item 8: "o relógio do
+    // dispositivo offline pode estar errado"). Substitui o antigo painel
+    // inline (só início/fim/ID de bateria) por um formulário com TODOS os
+    // campos que vieram do dispositivo — dados gerais, horários, pausas e
+    // cada traço — no estilo de uma folha impressa preenchida à mão:
+    // fundo claro, texto escuro, campos "linha em branco", sem
+    // cards/ícones decorativos. Só 1 instância do modal existe no HTML
+    // (index.html, #offline-corrigir-modal) — o CONTEÚDO é remontado do
+    // zero a cada abertura, então os ids dos campos internos não
+    // precisam do sufixo idSeguro de outros painéis desta tela (só 1
+    // registro é corrigido de cada vez).
+    let _offCorrigirIdTemp = null; // idTemp do registro atualmente aberto no modal
 
+    // Mesma convenção de fuso "UTC falso = hora de Brasília" de
+    // paraInputDatetime/_eaParaIsoBrasilia (ver comentários ali) — só
+    // lê/escreve os dígitos do ISO diretamente, sem conversão de fuso
+    // real, pros mesmos horários digitados baterem com o que a tabela
+    // exibe depois.
+    function _offcParaInputDatetime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return isNaN(d) ? '' : d.toISOString().slice(0, 16);
+    }
+    function _offcParaIsoBrasilia(valorInput) {
+      if (!valorInput) return null;
+      return valorInput.length === 16 ? valorInput + ':00.000Z' : valorInput + '.000Z';
+    }
+
+    // Um "campo de formulário" no estilo papel: rótulo pequeno em
+    // maiúsculas em cima, linha para preencher embaixo (sem caixa/borda
+    // ao redor, só a linha inferior — mesmo visual de um formulário
+    // impresso preenchido à mão).
+    function _offcCampo(label, dataAttrs, value, opts) {
+      opts = opts || {};
+      const tipo = opts.tipo || 'text';
+      const largura = opts.largura || 'auto';
+      const step = opts.tipo === 'datetime-local' ? ' step="60"' : '';
+      return `
+        <label style="display:flex;flex-direction:column;gap:3px;${largura !== 'auto' ? `flex:0 0 ${largura};` : 'flex:1 1 160px;'}min-width:120px">
+          <span style="font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:#5a5142;font-family:'JetBrains Mono',monospace">${label}</span>
+          <input type="${tipo}"${step} ${dataAttrs} value="${_escaparHtmlLocal(value ?? '')}"
+            style="border:none;border-bottom:1px solid #8a8270;background:transparent;color:#1a1a1a;font-family:Georgia,'Times New Roman',serif;font-size:.92rem;padding:3px 2px;outline:none">
+        </label>`;
+    }
+
+    function _offcSecao(titulo) {
+      return `<div style="margin:22px 0 12px;padding-bottom:4px;border-bottom:2px solid #1a1a1a;font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#1a1a1a">${titulo}</div>`;
+    }
+
+    // Cada insumo do traço é salvo como { original, ajustes: [] } (ver
+    // criarTracoVazio, offline-operacao.js) — o formulário só edita
+    // `original` (ajustes de remedição em tempo real não existem no
+    // formulário offline, sempre chegam vazios daqui).
+    function _offcCampoInsumo(label, idxTraco, campo, insumo, opts) {
+      const valor = insumo && typeof insumo === 'object' ? insumo.original : insumo;
+      return _offcCampo(label, `data-traco-idx="${idxTraco}" data-campo="${campo}" class="offc-campo-insumo"`, valor, opts);
+    }
+
+    function _offcPausaHtml(p, idx) {
+      return `
+        <div class="offc-pausa-row" data-idx="${idx}" style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;padding:10px 0;border-bottom:1px dashed #b8b0a0">
+          ${_offcCampo('Pausada em', `data-campo="pausado_em" class="offc-campo-pausa"`, _offcParaInputDatetime(p.pausado_em), { tipo: 'datetime-local', largura: '200px' })}
+          ${_offcCampo('Retomada em', `data-campo="retomado_em" class="offc-campo-pausa"`, _offcParaInputDatetime(p.retomado_em), { tipo: 'datetime-local', largura: '200px' })}
+          ${_offcCampo('Motivo', `data-campo="motivo" class="offc-campo-pausa"`, p.motivo, {})}
+          <button type="button" onclick="_offCorrigirRemoverPausa(${idx})"
+            style="background:none;border:1px solid #8b1a1a;color:#8b1a1a;border-radius:3px;padding:5px 10px;font-size:.72rem;cursor:pointer;height:29px">remover</button>
+        </div>`;
+    }
+
+    function _offcTracoHtml(t, idx) {
+      const num = t.num ?? (idx + 1);
+      return `
+        <div class="offc-traco-row" data-idx="${idx}" style="margin-bottom:16px;padding:14px 16px;border:1px solid #b8b0a0;border-radius:3px;background:rgba(255,255,255,.35)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:.75rem;font-weight:700;letter-spacing:.05em">TRAÇO Nº ${_escaparHtmlLocal(num)}</div>
+            <button type="button" onclick="_offCorrigirRemoverTraco(${idx})"
+              style="background:none;border:1px solid #8b1a1a;color:#8b1a1a;border-radius:3px;padding:3px 9px;font-size:.68rem;cursor:pointer">remover traço</button>
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+            ${_offcCampo('Nº do traço', `data-campo="num" class="offc-campo-traco"`, num, { tipo: 'number', largura: '90px' })}
+            ${_offcCampo('Berço início', `data-campo="berco_ini" class="offc-campo-traco"`, t.berco_ini, { tipo: 'number', largura: '110px' })}
+            ${_offcCampo('Berço fim', `data-campo="berco_fim" class="offc-campo-traco"`, t.berco_fim, { tipo: 'number', largura: '110px' })}
+            ${_offcCampo('Silo', `data-campo="silo" class="offc-campo-traco"`, t.silo, { largura: '110px' })}
+            ${_offcCampo('Expansão', `data-campo="expansao" class="offc-campo-traco"`, t.expansao, { largura: '110px' })}
+            ${_offcCampo('Densidade EPS (kg/m³)', `data-campo="densidadeEPS" class="offc-campo-traco"`, t.densidadeEPS, { tipo: 'number', largura: '140px' })}
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+            ${_offcCampoInsumo('Cimento (kg)', idx, 'cimento_real', t.cimento_real, { tipo: 'number', largura: '110px' })}
+            ${_offcCampoInsumo('Água (kg)', idx, 'agua_real', t.agua_real, { tipo: 'number', largura: '110px' })}
+            ${_offcCampoInsumo('EPS (kg)', idx, 'eps_real', t.eps_real, { tipo: 'number', largura: '110px' })}
+            ${_offcCampoInsumo('Superplast. (kg)', idx, 'superplast_real', t.superplast_real, { tipo: 'number', largura: '110px' })}
+            ${_offcCampoInsumo('Incorp. de Ar (kg)', idx, 'incorporador_real', t.incorporador_real, { tipo: 'number', largura: '110px' })}
+            ${_offcCampoInsumo('Tempo de batida (segundos)', idx, 'tempo_batida', t.tempo_batida, { tipo: 'number', largura: '140px' })}
+            ${_offcCampoInsumo('Densidade do traço (kg/m³)', idx, 'densidade_insumo', t.densidade_insumo, { tipo: 'number', largura: '140px' })}
+            ${_offcCampoInsumo('Flow (mm)', idx, 'flow_insumo', t.flow_insumo, { tipo: 'number', largura: '110px' })}
+          </div>
+          ${_offcCampo('Observações', `data-campo="obs" class="offc-campo-traco"`, t.obs, { largura: '100%' })}
+        </div>`;
+    }
+
+    // Estado de trabalho do formulário — cópia local de pausas/tracos que
+    // o Master pode adicionar/remover linha antes de salvar (ver
+    // _offCorrigirRemoverPausa/_offCorrigirRemoverTraco/
+    // _offCorrigirAdicionarPausa). Só existe enquanto o modal está aberto.
+    let _offCorrigirPausas = [];
+    let _offCorrigirTracos = [];
+
+    function _offCorrigirRenderPausas() {
+      const container = document.getElementById('offc-pausas-lista');
+      if (!container) return;
+      container.innerHTML = _offCorrigirPausas.length
+        ? _offCorrigirPausas.map((p, i) => _offcPausaHtml(p, i)).join('')
+        : '<div style="font-size:.82rem;color:#5a5142;font-style:italic">Nenhuma pausa registrada nesta operação.</div>';
+    }
+    function _offCorrigirRenderTracos() {
+      const container = document.getElementById('offc-tracos-lista');
+      if (!container) return;
+      container.innerHTML = _offCorrigirTracos.length
+        ? _offCorrigirTracos.map((t, i) => _offcTracoHtml(t, i)).join('')
+        : '<div style="font-size:.82rem;color:#5a5142;font-style:italic">Nenhum traço registrado nesta operação.</div>';
+    }
+
+    // Lê os valores atuais dos inputs de volta pro array de trabalho —
+    // chamado antes de adicionar/remover uma linha (senão o que o Master
+    // já tinha digitado nas outras linhas se perderia no re-render) e
+    // antes de salvar.
+    function _offCorrigirColherPausasDosInputs() {
+      document.querySelectorAll('#offc-pausas-lista .offc-pausa-row').forEach(row => {
+        const idx = Number(row.dataset.idx);
+        if (!_offCorrigirPausas[idx]) return;
+        row.querySelectorAll('[data-campo]').forEach(input => {
+          const campo = input.dataset.campo;
+          const valor = input.value;
+          _offCorrigirPausas[idx][campo] = (campo === 'pausado_em' || campo === 'retomado_em')
+            ? (valor ? _offcParaIsoBrasilia(valor) : null)
+            : valor;
+        });
+      });
+    }
+    function _offCorrigirColherTracosDosInputs() {
+      document.querySelectorAll('#offc-tracos-lista .offc-traco-row').forEach(row => {
+        const idx = Number(row.dataset.idx);
+        const t = _offCorrigirTracos[idx];
+        if (!t) return;
+        row.querySelectorAll('.offc-campo-traco[data-campo]').forEach(input => {
+          t[input.dataset.campo] = input.value;
+        });
+        row.querySelectorAll('.offc-campo-insumo[data-campo]').forEach(input => {
+          const campo = input.dataset.campo;
+          const atual = t[campo];
+          t[campo] = { original: input.value, ajustes: (atual && Array.isArray(atual.ajustes)) ? atual.ajustes : [] };
+        });
+      });
+    }
+
+    function _offCorrigirAdicionarPausa() {
+      _offCorrigirColherPausasDosInputs();
+      _offCorrigirPausas.push({ pausado_em: null, retomado_em: null, motivo: '' });
+      _offCorrigirRenderPausas();
+    }
+    function _offCorrigirRemoverPausa(idx) {
+      _offCorrigirColherPausasDosInputs();
+      _offCorrigirPausas.splice(idx, 1);
+      _offCorrigirRenderPausas();
+    }
+    function _offCorrigirRemoverTraco(idx) {
+      _offCorrigirColherTracosDosInputs();
+      _offCorrigirTracos.splice(idx, 1);
+      _offCorrigirRenderTracos();
+    }
+
+    function cfgAbrirCorrecaoOperacaoOffline(idTemp) {
       const item = _cfgOperacoesOfflineCache.find(i => i.idTemp === idTemp);
       if (!item) return;
       const f = item.formRecord || {};
-      const paraInputDatetime = iso => {
-        if (!iso) return '';
-        const d = new Date(iso);
-        if (isNaN(d)) return '';
-        const pad = n => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-      };
-      painel.innerHTML = `
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
-          <label style="font-size:.75rem;color:var(--text-3)">Início
-            <input type="datetime-local" id="cfg-off-inicio-${idSeguro}" value="${paraInputDatetime(f.inicio)}"
-              style="display:block;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:6px 8px;font-size:.8rem">
-          </label>
-          <label style="font-size:.75rem;color:var(--text-3)">Fim
-            <input type="datetime-local" id="cfg-off-fim-${idSeguro}" value="${paraInputDatetime(f.fim)}"
-              style="display:block;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:6px 8px;font-size:.8rem">
-          </label>
-          <label style="font-size:.75rem;color:var(--text-3)">ID Bateria
-            <input type="text" id="cfg-off-bateria-${idSeguro}" value="${(f.id_bateria || '').replace(/"/g, '&quot;')}"
-              style="display:block;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);padding:6px 8px;font-size:.8rem;width:120px">
-          </label>
-          <button type="button" class="btn-primary" style="padding:6px 14px;font-size:.8rem" onclick="cfgSalvarCorrecaoOperacaoOffline('${idSeguro}', '${idTemp.replace(/'/g, "\\'")}')">Salvar correção</button>
-        </div>`;
-      painel.style.display = 'block';
+      _offCorrigirIdTemp = idTemp;
+      // Cópia de trabalho — nunca edita o cache original direto, só o que
+      // vai ser mandado no PATCH ao salvar (ver _validarPayload/
+      // atualizarNaFilaOffline, lib/fila-offline.js: tracos/pausas
+      // enviados SUBSTITUEM o array inteiro, então precisam sair
+      // completos daqui).
+      _offCorrigirPausas = JSON.parse(JSON.stringify(item.pausas || []));
+      _offCorrigirTracos = JSON.parse(JSON.stringify(item.tracos || []));
+
+      const corpo = document.getElementById('offc-corpo');
+      document.getElementById('offc-erro').style.display = 'none';
+      corpo.innerHTML = `
+        <div style="text-align:center;margin-bottom:18px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.68rem;letter-spacing:.1em;color:#5a5142;text-transform:uppercase">Registro de Operação Offline — ID ${_escaparHtmlLocal(idTemp)}</div>
+        </div>
+
+        ${_offcSecao('Dados Gerais')}
+        <div style="display:flex;gap:14px;flex-wrap:wrap">
+          ${_offcCampo('ID da Bateria', 'id="offc-bateria"', f.id_bateria, { largura: '160px' })}
+          ${_offcCampo('Turno', 'id="offc-turno"', f.turno, { largura: '140px' })}
+          ${_offcCampo('Dimensão', 'id="offc-dimensao"', f.dimensao, { largura: '140px' })}
+          ${_offcCampo('Capacidade (painéis)', 'id="offc-capacidade"', f.capacidade, { tipo: 'number', largura: '160px' })}
+          ${_offcCampo('Tipo de Montagem', 'id="offc-tipo-montagem"', f.tipo_montagem, { largura: '180px' })}
+        </div>
+
+        ${_offcSecao('Horários')}
+        <div style="display:flex;gap:14px;flex-wrap:wrap">
+          ${_offcCampo('Início', 'id="offc-inicio"', _offcParaInputDatetime(f.inicio), { tipo: 'datetime-local', largura: '220px' })}
+          ${_offcCampo('Fim', 'id="offc-fim"', _offcParaInputDatetime(f.fim), { tipo: 'datetime-local', largura: '220px' })}
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:22px 0 12px;padding-bottom:4px;border-bottom:2px solid #1a1a1a">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#1a1a1a">Pausas</span>
+          <button type="button" onclick="_offCorrigirAdicionarPausa()"
+            style="background:none;border:1px solid #1a1a1a;border-radius:3px;padding:4px 10px;font-size:.7rem;cursor:pointer;color:#1a1a1a">+ adicionar pausa</button>
+        </div>
+        <div id="offc-pausas-lista"></div>
+
+        ${_offcSecao('Traços')}
+        <div id="offc-tracos-lista"></div>
+      `;
+      _offCorrigirRenderPausas();
+      _offCorrigirRenderTracos();
+
+      document.getElementById('offline-corrigir-modal').style.display = 'flex';
     }
 
-    async function cfgSalvarCorrecaoOperacaoOffline(idSeguro, idTemp) {
-      const inicioEl = document.getElementById('cfg-off-inicio-' + idSeguro);
-      const fimEl = document.getElementById('cfg-off-fim-' + idSeguro);
-      const bateriaEl = document.getElementById('cfg-off-bateria-' + idSeguro);
-      const patch = { formRecord: {} };
-      if (inicioEl && inicioEl.value) patch.formRecord.inicio = new Date(inicioEl.value).toISOString();
-      if (fimEl && fimEl.value) patch.formRecord.fim = new Date(fimEl.value).toISOString();
-      if (bateriaEl && bateriaEl.value) patch.formRecord.id_bateria = bateriaEl.value.trim();
+    function _offCorrigirFecharModal() {
+      document.getElementById('offline-corrigir-modal').style.display = 'none';
+      _offCorrigirIdTemp = null;
+    }
+
+    async function cfgSalvarCorrecaoOperacaoOffline() {
+      const idTemp = _offCorrigirIdTemp;
+      if (!idTemp) return;
+      _offCorrigirColherPausasDosInputs();
+      _offCorrigirColherTracosDosInputs();
+
+      const erroEl = document.getElementById('offc-erro');
+      erroEl.style.display = 'none';
+
+      const inicioEl = document.getElementById('offc-inicio');
+      const fimEl = document.getElementById('offc-fim');
+      const bateriaEl = document.getElementById('offc-bateria');
+      const turnoEl = document.getElementById('offc-turno');
+      const dimensaoEl = document.getElementById('offc-dimensao');
+      const capacidadeEl = document.getElementById('offc-capacidade');
+      const tipoMontagemEl = document.getElementById('offc-tipo-montagem');
+
+      // NÃO usar `new Date(valor).toISOString()` aqui — isso interpretaria
+      // o valor do <input type="datetime-local"> como hora LOCAL do
+      // navegador e faria uma conversão de fuso de verdade (ex.: 6h vira
+      // 9h pra quem está em horário de Brasília), quebrando a convenção
+      // "UTC falso = hora de Brasília" que o resto do app usa pra salvar/
+      // exibir inicio/fim (ver _offcParaIsoBrasilia/_eaParaIsoBrasilia).
+      const patch = {
+        formRecord: {
+          id_bateria: bateriaEl.value.trim(),
+          turno: turnoEl.value.trim(),
+          dimensao: dimensaoEl.value.trim(),
+          tipo_montagem: tipoMontagemEl.value.trim(),
+        },
+        pausas: _offCorrigirPausas,
+        tracos: _offCorrigirTracos,
+      };
+      if (capacidadeEl.value !== '') patch.formRecord.capacidade = Number(capacidadeEl.value);
+      if (inicioEl.value) patch.formRecord.inicio = _offcParaIsoBrasilia(inicioEl.value);
+      if (fimEl.value) patch.formRecord.fim = _offcParaIsoBrasilia(fimEl.value);
+
       try {
         await LW.corrigirOperacaoOfflinePendente(idTemp, patch);
         LW.mostrarAlerta('Correção salva.', { tipo: 'sucesso' });
+        _offCorrigirFecharModal();
         cfgRenderOperacoesOffline();
       } catch (e) {
-        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+        erroEl.textContent = e.message;
+        erroEl.style.display = 'block';
       }
     }
 

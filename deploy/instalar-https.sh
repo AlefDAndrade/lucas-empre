@@ -26,7 +26,7 @@
 # Depois de rodar, o sistema passa a ser acessado em:
 #   https://SEU-IP-COM-HIFENS.nip.io
 # em vez de:
-#   http://SEU-IP:3000
+#   http://SEU-IP:5000
 
 set -euo pipefail
 
@@ -35,7 +35,7 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-PORTA_NODE="${1:-3000}"
+PORTA_NODE="${1:-5000}"
 
 echo "→ Descobrindo o IP externo desta VM (metadata do Google Cloud)..."
 IP_EXTERNO="$(curl -s -H 'Metadata-Flavor: Google' \

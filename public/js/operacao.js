@@ -613,6 +613,16 @@
     if (_bloqueadoPorAutorizacao()) return;
     state.inicio = nowBrasilia().toISOString();
     state.status = 'running';
+    // Identificador PRÓPRIO desta operação em andamento (diferente do
+    // opId final, gerado só no registro — ver _registrarOperacaoInterna),
+    // vai junto em todo persist() daqui em diante. Existe só pra permitir
+    // uma limpeza CONDICIONAL de operacao_andamento.json quando a conexão
+    // cai bem na hora de encerrar (ver LW.finalizarOperacaoAndamento,
+    // data.js, e POST /salvar-operacao-andamento, lib/rotas/operacao-
+    // andamento.js) — sem isso, o aviso tardio de "essa operação acabou"
+    // não teria como saber se o que está em andamento agora ainda é ELA
+    // mesma, ou se já é uma operação nova e legítima no lugar.
+    state.idAndamento = 'and_' + Date.now() + '_' + Math.random().toString(36).slice(2);
     $('op-inicio').value = LW.formatTime(state.inicio);
     $('btn-iniciar').disabled = true;
     $('btn-finalizar').disabled = false;
@@ -1280,6 +1290,170 @@
     document.getElementById('btn-cancelar-descarte').addEventListener('click', () => {
       modal.remove();
       // Não faz nada — usuário cancelou
+    });
+  }
+
+  /**
+   * Registro de Traço Descartado (Perda) — ver README, "Registro de Traço
+   * Descartado (Perda) — plano", passo 3 (frontend). Abre um formulário
+   * simples dedicado (modal, não a tela cheia de Registrar Operação) com
+   * os insumos já pesados pra este traço pré-carregados (evita digitar
+   * tudo de novo), turno/data preenchidos automaticamente, e motivo em
+   * texto livre obrigatório. Ao salvar, o traço só desaparece da lista de
+   * traços pendentes desta operação — nunca vira uma linha "pendente" nem
+   * exige berço início/fim (nunca chegou a encher nada).
+   *
+   * Indisponível em Modo de Teste (ver renderTracos, link que chama esta
+   * função): POST /registrar-traco-descartado grava direto na tabela
+   * real `tracos_descartados` (sem a distinção real/teste que
+   * /salvar-operacao-andamento e afins têm via dirParaModoTeste) — expor
+   * o link ali criaria dado de perda fantasma na produção de verdade.
+   */
+  function abrirDescarteTraco(i) {
+    if (state.modo_teste) return;
+    const t = state.tracos[i];
+    if (!t) return;
+
+    const existente = document.getElementById('modal-descarte-traco');
+    if (existente) existente.remove();
+
+    // Mesma derivação de "data" usada no registro final (ver
+    // registrarOperacao, `state.fim.split('T')[0]`) — só que aqui, a
+    // operação pode ainda não ter terminado, então cai pro início (já
+    // definido, já que só dá pra chegar a um traço depois de "Iniciar
+    // Injeção") ou, no limite, o momento atual.
+    const dataLocal = (state.inicio || nowBrasilia().toISOString()).split('T')[0];
+
+    // Valor ATUAL de cada insumo (original + ajustes já aplicados via
+    // "⚖️ Ajustar Receita", mesmo cálculo de renderCampoInsumo) — número
+    // simples, sem a forma {original, ajustes}: não faz sentido
+    // remedir/ajustar um traço que já vai ser descartado.
+    const valorInsumo = fieldKey => {
+      const total = totalInsumo(t[fieldKey] || { original: '', ajustes: [] }, fieldKey);
+      return total !== '' ? total : '';
+    };
+    const tempoBatidaSeg = totalInsumo(t.tempo_batida || { original: '', ajustes: [] }, 'tempo_batida');
+
+    const modal = document.createElement('div');
+    modal.id = 'modal-descarte-traco';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1001;display:flex;align-items:center;justify-content:center;padding:16px';
+
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+                  padding:28px;width:460px;max-width:92vw;max-height:90vh;overflow:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:2rem;margin-bottom:8px">⚠️</div>
+          <h2 style="font-family:var(--font-display);font-size:1.2rem;color:var(--amber);margin:0">
+            Descartar Traço Nº ${t.num}
+          </h2>
+          <p style="color:var(--text-2);font-size:.85rem;margin:6px 0 0;line-height:1.4">
+            Registra os insumos como perda. Este traço NÃO vira produção nem entra no Relatório de Injeção.
+          </p>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">
+          <div class="form-group">
+            <label class="form-label">Data</label>
+            <input class="form-input readonly-reaproveitado" type="text" value="${dataLocal}" readonly>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Turno</label>
+            <input class="form-input readonly-reaproveitado" type="text" value="${LW.escaparHtml(state.turno || '—')}" readonly>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">
+          <div class="form-group">
+            <label class="form-label">Cimento (kg)</label>
+            <input class="form-input" id="descarte-cimento" type="number" step="0.01" value="${valorInsumo('cimento_real')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Água (kg)</label>
+            <input class="form-input" id="descarte-agua" type="number" step="0.01" value="${valorInsumo('agua_real')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">EPS (kg)</label>
+            <input class="form-input" id="descarte-eps" type="number" step="0.01" value="${valorInsumo('eps_real')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Superplast. (kg)</label>
+            <input class="form-input" id="descarte-superplast" type="number" step="0.001" value="${valorInsumo('superplast_real')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Incorp. de Ar (kg)</label>
+            <input class="form-input" id="descarte-incorporador" type="number" step="0.001" value="${valorInsumo('incorporador_real')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tempo de batida (s)</label>
+            <input class="form-input" id="descarte-tempo" type="number" step="1" value="${tempoBatidaSeg}">
+          </div>
+        </div>
+        <div class="form-group" style="margin:8px 0 4px">
+          <label class="form-label">Motivo do descarte <span class="required">*</span></label>
+          <textarea class="form-input" id="descarte-motivo" rows="3"
+            placeholder="Ex.: erro de dosagem, falha de equipamento, contaminação..."
+            style="resize:vertical;font-family:inherit"></textarea>
+        </div>
+        <div id="descarte-traco-erro" style="color:var(--red);font-size:.8rem;margin-bottom:14px;display:none"></div>
+        <div style="display:flex;gap:12px">
+          <button id="btn-confirmar-descarte-traco"
+            style="flex:1;padding:12px;background:var(--red);color:#fff;border:none;border-radius:var(--radius);
+                   font-weight:700;font-size:.9rem;cursor:pointer">
+            Descartar Traço
+          </button>
+          <button id="btn-cancelar-descarte-traco"
+            style="flex:1;padding:12px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);
+                   border-radius:var(--radius);font-size:.9rem;cursor:pointer">
+            Cancelar
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+
+    const erroEl = document.getElementById('descarte-traco-erro');
+    const mostrarErroModal = msg => { erroEl.textContent = msg; erroEl.style.display = 'block'; };
+
+    document.getElementById('btn-cancelar-descarte-traco').addEventListener('click', () => modal.remove());
+
+    document.getElementById('btn-confirmar-descarte-traco').addEventListener('click', async () => {
+      erroEl.style.display = 'none';
+      const motivo = document.getElementById('descarte-motivo').value.trim();
+      if (!motivo) {
+        mostrarErroModal('Motivo é obrigatório.');
+        return;
+      }
+
+      const btn = document.getElementById('btn-confirmar-descarte-traco');
+      btn.disabled = true;
+      btn.textContent = 'Descartando...';
+      try {
+        await LW.registrarTracoDescartado({
+          data: dataLocal,
+          turno: state.turno || null,
+          cimento: document.getElementById('descarte-cimento').value,
+          agua: document.getElementById('descarte-agua').value,
+          eps: document.getElementById('descarte-eps').value,
+          superplast: document.getElementById('descarte-superplast').value,
+          incorporador: document.getElementById('descarte-incorporador').value,
+          tempo_batida: document.getElementById('descarte-tempo').value,
+          motivo,
+          // Ver "Identidade Leve de Operador" — mesmo campo já usado no
+          // registro final da operação (state.operador_nome).
+          operador_nome: state.operador_nome || null,
+        });
+        modal.remove();
+        // Some da lista de traços pendentes desta operação — não vira uma
+        // linha "pendente" nem exige berço início/fim (nunca encheu
+        // nada). Mesma renumeração usada ao remover um traço normal.
+        state.tracos.splice(i, 1);
+        _renumerarTracos();
+        expandedTracoIndex = Math.min(expandedTracoIndex, state.tracos.length - 1);
+        renderTracos();
+        persist();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Descartar Traço';
+        mostrarErroModal(e.message || 'Erro ao registrar o descarte.');
+      }
     });
   }
 
@@ -2131,6 +2305,29 @@
       </div>`;
   }
 
+  // Relação Água/Cimento (A/C) do traço — água ÷ cimento, calculada a
+  // partir do TOTAL atual de cada insumo (original + ajustes, ver
+  // totalInsumo). Só informativa/somente-leitura: não é um campo do
+  // traço, é derivada dos dois campos que já existem. Faixa ideal
+  // 0,35–0,40 (LW.RELACAO_AC_MIN/MAX, data.js) — fora da faixa, o valor
+  // fica destacado em vermelho como aviso visual pra quem está pesando a
+  // receita.
+  function renderRelacaoAC(t) {
+    const cimento = totalInsumo(t.cimento_real || { original: '', ajustes: [] }, 'cimento_real');
+    const agua = totalInsumo(t.agua_real || { original: '', ajustes: [] }, 'agua_real');
+    const { texto, status } = LW.formatarRelacaoAC(cimento, agua);
+    const cor = status === 'ok' ? 'var(--green)' : (status ? 'var(--red)' : 'var(--text-2)');
+    const aviso = status && status !== 'ok'
+      ? ` <span style="font-weight:400">(ideal: 0,35 a 0,40)</span>`
+      : '';
+    return `
+      <div class="traco-ac-relacao" style="margin:-4px 0 14px;padding:8px 12px;border-radius:8px;
+                  background:var(--bg-2, rgba(255,255,255,.03));border:1px solid var(--border);
+                  font-size:.85rem;color:var(--text-2)">
+        Relação Água/Cimento (A/C): <strong style="color:${cor}">${texto}</strong>${aviso}
+      </div>`;
+  }
+
   function renderTracos() {
     const container = $('tracos-container');
     if (!container) return;
@@ -2223,6 +2420,15 @@
               onclick="LWOp.abrirAjusteReceita(${i}) ${t._reaproveitado ? 'disabled' : ''}"
               title="Adicionar insumo e/ou tempo de batida">⚖️ Ajustar Receita</button>
           </div>
+          <div style="text-align:right;margin:-8px 0 10px">
+            <a href="#" class="link-descartar-traco"
+              onclick="${state.modo_teste ? '' : `LWOp.abrirDescarteTraco(${i});`} return false;"
+              style="font-size:.78rem;color:var(--text-2);text-decoration:underline;
+                     cursor:${state.modo_teste ? 'not-allowed' : 'pointer'};opacity:${state.modo_teste ? '.5' : '1'}"
+              title="${state.modo_teste ? 'Indisponível em Modo de Teste — o descarte grava direto na tabela real.' : 'Registrar este traço como perda (insumos consumidos + motivo), sem virar produção nem exigir berço.'}">
+              ⚠️ Descartar este traço
+            </a>
+          </div>
           <div class="traco-fields-grid traco-fields-grid--6">
             ${renderCampoInsumo(t, i, 'cimento_real', 'Cimento (kg)', '0.01', 2, 'kg', t._reaproveitado)}
             ${renderCampoInsumo(t, i, 'eps_real', 'EPS (kg)', '0.01', 2, 'kg', t._reaproveitado)}
@@ -2231,6 +2437,7 @@
             ${renderCampoInsumo(t, i, 'incorporador_real', 'Incorp. de Ar (kg)', '0.001', 2, 'kg', t._reaproveitado)}
             ${renderCampoTempoBatida(t, i, t._reaproveitado)}
           </div>
+          <div id="ac-relacao-${i}">${renderRelacaoAC(t)}</div>
 
           <!-- Seção: Resultado -->
           <div class="traco-section-label">📊 Resultado Obtido</div>
@@ -2436,7 +2643,7 @@
     ])
       .then(() => {
         LW.clearOperacaoAtual();
-        LW.enviarOperacaoAndamento(null, { imediato: true });
+        LW.finalizarOperacaoAndamento(state.idAndamento);
         clearInterval(timerInterval);
         resetState();
         renderAll();
@@ -2467,10 +2674,21 @@
    * confirmado pelo servidor.
    */
   function _enfileirarEContinuar(historyRecord, fullRecord, qtdTracosNovos) {
-    LW.enfileirarOperacaoPendente(historyRecord, fullRecord, qtdTracosNovos);
+    // Guarda o idAndamento ANTES de resetState() apagar o state — é a
+    // informação que o servidor vai usar, quando a fila sincronizar de
+    // verdade (ver LW.tentarSincronizarFilaPendentes, data.js), pra saber
+    // que ESSA operação específica já terminou (ver POST
+    // /salvar-operacao-andamento, lib/rotas/operacao-andamento.js).
+    const idAndamento = state.idAndamento || null;
+    LW.enfileirarOperacaoPendente(historyRecord, fullRecord, qtdTracosNovos, idAndamento);
 
     LW.clearOperacaoAtual();
-    LW.enviarOperacaoAndamento(null, { imediato: true }); // melhor esforço — sem conexão, só não vai mesmo
+    // Tenta avisar o servidor na hora (melhor esforço — sem conexão, só não
+    // vai mesmo) E garante que isso não fica esquecido pra sempre: se
+    // falhar agora, LW.finalizarOperacaoAndamento guarda o idAndamento
+    // numa filinha própria de retry, que tenta de novo toda vez que
+    // LW.tentarSincronizarFilaPendentes rodar (quando a conexão voltar).
+    LW.finalizarOperacaoAndamento(idAndamento);
     clearInterval(timerInterval);
     resetState();
     renderAll();
@@ -3011,8 +3229,17 @@
         insumo.original = value;
       }
       persist();
+      // Cimento/água mudaram → atualiza só o mini-card de Relação A/C
+      // (sem re-renderizar o traço inteiro, que tiraria o foco do campo
+      // que a pessoa está digitando).
+      if (field === 'cimento_real' || field === 'agua_real') {
+        const el = document.getElementById(`ac-relacao-${i}`);
+        if (el) el.innerHTML = renderRelacaoAC(state.tracos[i]);
+      }
     },
     removeTraco,
+    // Registro de Traço Descartado (Perda) — ver README, passo 3 do plano.
+    abrirDescarteTraco,
     addTraco,
 
     // Lê os valores h/m/s do picker e retorna total em segundos
