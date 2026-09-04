@@ -127,6 +127,8 @@ const {
   negarEdicao,
   temPoderesDeAdmin,
   sessaoOuAdmin,
+  podeUsarItem,
+  negarAcesso,
   podeExcluirChamado,
   nomeDeQuemAceita,
   nomeParaVisualizacao,
@@ -136,6 +138,15 @@ const {
   podeRenotificarManutencao,
   podeConfirmarRecebimentoPeca,
 } = require('./lib/permissoes-area.js')({ sessao, sessaoUsuario, perfis, perfisFixosOverrides, perfisCustomizados });
+
+// ─── CERTIFICADO DE DISPOSITIVO (mTLS) — ver lib/certificado-dispositivo.js ──
+// Camada ADICIONAL de reconhecimento de dispositivo, em paralelo ao cookie
+// HttpOnly + fallback por IP que já existiam (não substitui nenhum dos
+// dois) — resolve o caso de limpar TODOS os dados do navegador, via
+// certificado de cliente TLS instalado uma vez por máquina (Configurações
+// → Dispositivos Autorizados → "Gerar certificado"). Precisa vir ANTES de
+// dispositivo-autorizado.js, que consome `certificadoDispositivo` abaixo.
+const certificadoDispositivo = require('./lib/certificado-dispositivo.js')({ fs, path, DB_DIR, PRIVATE_DIR });
 
 // ─── DISPOSITIVO AUTORIZADO — Fase 12 do fatiamento, ver README ───────────
 // lerDispositivosAutorizados/salvarDispositivosAutorizados/
@@ -150,7 +161,7 @@ const {
   dispositivoAutorizado,
   podeControlarOperacao,
   negarControleDeOperacao,
-} = require('./lib/dispositivo-autorizado.js')({ fs, path, DB_DIR, sessao, sessaoUsuario, perfis, podeEditarArea });
+} = require('./lib/dispositivo-autorizado.js')({ fs, path, DB_DIR, sessao, sessaoUsuario, perfis, podeEditarArea, certificadoDispositivo });
 
 // ─── WEBSOCKET BROADCAST — Fase 13 do fatiamento, ver README ─────────────
 // _enviarWsParaTodos/broadcastOperacaoAndamento/broadcastOperacaoFinalizada/
@@ -266,6 +277,28 @@ const rotasExportarPdf = require('./lib/rotas/exportar-pdf.js')({ db, PRIVATE_DI
 const rotasSobra = require('./lib/rotas/sobra.js')({ db, fs, path, dirParaModoTeste, podeEditarArea, negarEdicao });
 // Registro de Traço Descartado (Perda) — passo 2 do plano, ver README.
 const rotasTracosDescartados = require('./lib/rotas/tracos-descartados.js')({ db, podeEditarArea, negarEdicao });
+// Ocorrências de Segurança — Fase 1 do plano do One Page Report (ver
+// README, "Nova página: One Page Report (planejamento)"). `sessao:
+// sessaoOuAdmin` (não `podeEditarArea`) de propósito — ver comentário de
+// PERMISSÃO DE ESCRITA no topo de lib/rotas/seguranca.js.
+const rotasSeguranca = require('./lib/rotas/seguranca.js')({ db, todayBrasiliaServer, sessao: sessaoOuAdmin });
+// Cargas de Expedição — Fase 2 do plano do One Page Report (ver README,
+// "Nova página: One Page Report (planejamento)"). Mesma decisão de
+// PERMISSÃO DE ESCRITA da Fase 1 — ver comentário no topo de
+// lib/rotas/expedicao.js.
+const rotasExpedicao = require('./lib/rotas/expedicao.js')({ db, todayBrasiliaServer, sessao: sessaoOuAdmin });
+// Comentários do One Page Report — Fase 3 do plano (ver README). Módulo de
+// dados PRÓPRIO (JSON simples em DB_DIR, não a conexão SQLite de db.js) —
+// ver comentário no topo de lib/db/one-page-comentarios.js.
+const comentariosOnePageReport = require('./lib/db/one-page-comentarios.js')({ fs, path, DB_DIR });
+// `dbSql`/`todayBrasiliaServer` — Fase 4 do plano (endpoint de agregação,
+// GET /db/one-page-report.json): junta Segurança/Expedição (SQLite) com
+// Produção/Refugo (também SQLite, tabelas "operacoes"/"avaliacao_paineis"/
+// "traco_usos") e Comentários (`comentarios`, acima). Ver comentário de
+// FASE 4 no topo de lib/rotas/one-page-report.js.
+const rotasOnePageReport = require('./lib/rotas/one-page-report.js')({
+  comentarios: comentariosOnePageReport, sessao: sessaoOuAdmin, dbSql: db, todayBrasiliaServer,
+});
 const rotasContadorTracos = require('./lib/rotas/contador-tracos.js')({ lerContadorTracosHoje, incrementarContadorTracosHoje, podeControlarOperacao, negarControleDeOperacao });
 const rotasLogAcesso = require('./lib/rotas/log-acesso.js')({ fs, path, ROOT_DIR });
 const rotasOperacaoAndamento = require('./lib/rotas/operacao-andamento.js')({
@@ -274,7 +307,8 @@ const rotasOperacaoAndamento = require('./lib/rotas/operacao-andamento.js')({
 });
 const rotasAutenticacao = require('./lib/rotas/autenticacao.js')({ fs, path, DB_DIR, SECURITY_PATH, auth, sessao });
 const rotasDispositivosAutorizados = require('./lib/rotas/dispositivos-autorizados.js')({ fs, path, DB_DIR, sessao: sessaoOuAdmin });
-const rotasImportacao = require('./lib/rotas/importacao.js')({ db, sessao: sessaoOuAdmin, numOuNulo });
+const rotasCertificadosDispositivo = require('./lib/rotas/certificados-dispositivo.js')({ sessao: sessaoOuAdmin, certificadoDispositivo });
+const rotasImportacao = require('./lib/rotas/importacao.js')({ db, podeUsarItem, negarAcesso, numOuNulo });
 const rotasLeituraEAjustes = require('./lib/rotas/leitura-e-ajustes.js')({ fs, path, db, DB_DIR, dirParaModoTeste, broadcastLeituraAutomatica });
 const rotasEdicao = require('./lib/rotas/edicao.js')({ db, podeEditarArea, negarEdicao, numOuNulo });
 const rotasRegistroOperacao = require('./lib/rotas/registro-operacao.js')({
@@ -294,12 +328,12 @@ const rotasRegistroOperacao = require('./lib/rotas/registro-operacao.js')({
 // contrário dos hashes de senha), então um backup não deve incluí-lo.
 const googleDrive = require('./lib/google-drive.js')();
 const backupDriveJson = require('./lib/backup-drive-json.js')({ fs, path, PRIVATE_DIR });
-const rotasBackupDrive = require('./lib/rotas/backup-drive.js')({ sessao: sessaoOuAdmin, auth, googleDrive, backupDriveJson });
+const rotasBackupDrive = require('./lib/rotas/backup-drive.js')({ sessao: sessaoOuAdmin, podeUsarItem, negarAcesso, auth, googleDrive, backupDriveJson });
 
 const rotasBackup = require('./lib/rotas/backup.js')({
   db, fs, path, JSZip,
   ROOT_DIR, DB_DIR, SECURITY_PATH, USUARIOS_PATH, PERFIS_CUSTOMIZADOS_PATH,
-  auth, sessao: sessaoOuAdmin,
+  auth, podeUsarItem, negarAcesso,
   todayBrasiliaServer, horaMinutoBrasiliaServer,
   lerContadorTracosHoje, recalcularFilaNaoAvaliadasApartirDoSql,
   googleDrive, backupDriveJson,
@@ -313,7 +347,7 @@ const rotasOperacaoOffline = require('./lib/rotas/operacao-offline.js')({
   rateLimitOffline, logger, sessao: sessaoOuAdmin, db,
   adicionarNaFilaNaoAvaliadas, incrementarContadorTracosHoje,
 });
-const ROTAS_EXTRAIDAS = [rotasUsuarios, rotasPerfisCustomizados, rotasParadas, rotasManutencao, rotasNotificacoes, rotasQualidade, rotasSqlAdmin, rotasConsultas, rotasExportarPdf, rotasSobra, rotasTracosDescartados, rotasContadorTracos, rotasLogAcesso, rotasOperacaoAndamento, rotasAutenticacao, rotasDispositivosAutorizados, rotasImportacao, rotasLeituraEAjustes, rotasEdicao, rotasRegistroOperacao, rotasBackup.tentar, rotasBackupDrive.tentar, rotasOperacaoOffline];
+const ROTAS_EXTRAIDAS = [rotasUsuarios, rotasPerfisCustomizados, rotasParadas, rotasManutencao, rotasNotificacoes, rotasQualidade, rotasSqlAdmin, rotasConsultas, rotasExportarPdf, rotasSobra, rotasTracosDescartados, rotasSeguranca, rotasExpedicao, rotasOnePageReport, rotasContadorTracos, rotasLogAcesso, rotasOperacaoAndamento, rotasAutenticacao, rotasDispositivosAutorizados, rotasCertificadosDispositivo, rotasImportacao, rotasLeituraEAjustes, rotasEdicao, rotasRegistroOperacao, rotasBackup.tentar, rotasBackupDrive.tentar, rotasOperacaoOffline];
 
 // Migração automática Fase 2 (ver db.js) — só faz algo na primeira vez
 // que sobe com a tabela "operacoes" vazia E historico.json ainda existir

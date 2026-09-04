@@ -62,6 +62,26 @@
     // páginas em que o perfil só visualiza. null = Administrador (master)
     // ou ainda carregando = tudo liberado; Array = lista real de áreas.
     let _areasDeEdicao = null;
+    // Itens "Outros" (Importar Documentos, Exportações, Edição dos
+    // Dados, Backup e Restauração) que o perfil atual tem "Acesso
+    // Total" — mesmo padrão de _areasDeEdicao (acima), só que por ITEM
+    // em vez de por área (ver itensAcaoPorPerfilMesclados,
+    // lib/rotas/usuarios.js). null = Administrador (master) ou ainda
+    // carregando = tudo liberado; Array = lista real de itens.
+    let _itensAcaoPermitidos = null;
+
+    // Confere se o perfil atual pode USAR o item "Outros" `itemId`
+    // ('importar-documentos'/'export-interativo'/'export-excel'/
+    // 'edicao-dados'/'backup-restauracao') — usado só pra ESCONDER
+    // botões/menus no front; a validação que importa de verdade é
+    // sempre a do servidor (podeUsarItem/podeEditarArea,
+    // lib/permissoes-area.js — cada rota confere de novo).
+    function _perfilTemAcao(itemId) {
+      const role = sessionStorage.getItem('lw_role');
+      if (role === 'Administrador') return true; // master: irrestrito
+      if (!_itensAcaoPermitidos) return true; // ainda carregando — fail-open temporário, ver _paginaPermitida
+      return _itensAcaoPermitidos.includes(itemId);
+    }
 
     // Confere se o perfil atual pode EDITAR a `area` (ver AREAS_DE_EDICAO,
     // lib/perfis.js: 'injetora', 'paradas', 'qualidade', 'manutencao',
@@ -99,18 +119,20 @@
 
     async function _carregarPermissoesDoServidor() {
       const role = sessionStorage.getItem('lw_role');
-      if (role === 'Administrador') { _paginasPermitidas = null; _areasDeEdicao = null; return; } // irrestrito, nunca precisa da lista
+      if (role === 'Administrador') { _paginasPermitidas = null; _areasDeEdicao = null; _itensAcaoPermitidos = null; return; } // irrestrito, nunca precisa da lista
       try {
         const res = await fetch('/perfis');
         const data = await res.json();
         _paginasPermitidas = (data.ok && data.paginasPorPerfil[role]) || [];
         _areasDeEdicao = (data.ok && data.areasEdicaoPorPerfil && data.areasEdicaoPorPerfil[role]) || [];
+        _itensAcaoPermitidos = (data.ok && data.itensAcaoPorPerfil && data.itensAcaoPorPerfil[role]) || [];
       } catch (e) {
         // Sem servidor/rede — mantém null (fail-open temporário, ver
         // comentário em _paginaPermitida) em vez de travar a pessoa fora
         // de tudo por causa de uma falha de rede pontual.
         _paginasPermitidas = null;
         _areasDeEdicao = null;
+        _itensAcaoPermitidos = null;
       }
     }
 
@@ -512,6 +534,13 @@
       if (pageId === 'qualidade-tracos') {
         LWQualidade.render();
       }
+      if (pageId === 'consulta-tracos' && !window._consultaTracosInit) {
+        window._consultaTracosInit = true;
+        LWConsultaTracos.init();
+      }
+      if (pageId === 'consulta-tracos') {
+        LWConsultaTracos.render();
+      }
       if (pageId === 'oee' && !window._oeeInit) {
         window._oeeInit = true;
         LWOee.init();
@@ -587,6 +616,15 @@
         // forma) de o config mudar sem um reload completo no meio.
         SQ.aplicarOrdemPaletes();
         SQ.carregarOpcoesBaterias();
+      }
+
+      // One Page Report — resumo mensal (Fase 5 do plano, ver README).
+      // Sempre re-renderiza ao reabrir (não só na 1ª vez): é um resumo
+      // "foto do mês", não uma tela com formulário/filtro pra preservar
+      // entre uma visita e outra — mesmo raciocínio de Traços
+      // Descartados, acima.
+      if (pageId === 'one-page-report') {
+        LWOnePageReport.init();
       }
 
       // Manutenção — mesmo padrão de guarda "só uma vez, na 1ª vez que
@@ -1124,7 +1162,7 @@
     let _importDestino = null; // 'historico' | 'relatorio_injecao'
 
     function abrirImportacao() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('importar-documentos')) return;
       document.getElementById('import-modal').style.display = 'flex';
       resetImportModal();
     }
@@ -1135,7 +1173,7 @@
 
     // ---- Painel "Backup e Restauração" (admin) ----
     function abrirBackupHub() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('backup-restauracao')) return;
       const status = document.getElementById('backup-hub-status');
       if (status) status.style.display = 'none';
       document.getElementById('backup-hub-modal').style.display = 'flex';
@@ -1371,8 +1409,37 @@
     // login como Administrador — não pedimos a senha de novo aqui (ficava
     // redundante). Se a sessão tiver expirado nesse meio tempo, o
     // servidor responde 403 e avisamos pra relogar.
+    // ---- Sincronizar backup automático (README, pendência revisada —
+    // backup automático x backups manuais): pergunta OPCIONAL depois de
+    // qualquer backup manual (Dados ou Geral) bem-sucedido — nunca
+    // automática, a pessoa decide cada vez. "Sim" chama
+    // /sincronizar-backup-automatico (lib/rotas/backup.js), que
+    // sobrescreve o arquivo automático de HOJE com o MESMO conteúdo do
+    // manual que acabou de ser baixado, e reinicia a contagem de
+    // retenção de 3 dias a partir de agora. ----
+    async function _perguntarSincronizarBackupAutomatico(tipo) {
+      const rotulo = tipo === 'geral' ? 'Backup Geral' : 'Backup de Dados';
+      const confirmou = await LW.mostrarConfirmacao(
+        `Quer que este ${rotulo} também vire o backup automático de hoje? Isso sobrescreve o backup automático já salvo hoje (backups-automaticos/) com este mesmo conteúdo, e reinicia a contagem de retenção de 3 dias a partir de agora. Os backups automáticos futuros continuam rodando normalmente depois.`,
+        { titulo: 'Sincronizar backup automático?', textoConfirmar: 'Sim, sincronizar', textoCancelar: 'Não, manter como está' }
+      );
+      if (!confirmou) return;
+      try {
+        const res = await fetch('/sincronizar-backup-automatico', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tipo }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error((data && data.erro) || ('HTTP ' + res.status));
+        LW.mostrarAlerta('Backup automático de hoje atualizado com sucesso.', { tipo: 'sucesso' });
+      } catch (e) {
+        LW.mostrarAlerta('Não consegui sincronizar o backup automático: ' + e.message, { tipo: 'erro' });
+      }
+    }
+
     function fazerBackupDados() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('backup-restauracao')) return;
 
       const card = document.getElementById('backup-hub-card-dados');
 
@@ -1402,6 +1469,7 @@
           URL.revokeObjectURL(url);
 
           fecharBackupHub();
+          await _perguntarSincronizarBackupAutomatico('dados');
         } catch (e) {
           LW.mostrarAlerta('Erro ao gerar backup: ' + e.message, { tipo: 'erro' });
         } finally {
@@ -1423,7 +1491,7 @@
     // redundante). Se a sessão tiver expirado nesse meio tempo, o
     // servidor responde 403 e avisamos pra relogar.
     function fazerBackupGeral() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('backup-restauracao')) return;
 
       const card = document.getElementById('backup-hub-card-geral');
 
@@ -1455,6 +1523,7 @@
           URL.revokeObjectURL(url);
 
           fecharBackupHub();
+          await _perguntarSincronizarBackupAutomatico('geral');
         } catch (e) {
           LW.mostrarAlerta('Erro ao gerar backup geral: ' + e.message, { tipo: 'erro' });
         } finally {
@@ -1587,7 +1656,7 @@
     }
 
     function abrirRestaurarBackup() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('backup-restauracao')) return;
       document.getElementById('restaurar-backup-modal').style.display = 'flex';
       resetRestaurarBackupModal();
     }
@@ -1744,10 +1813,27 @@
       'relatorio_injecao.json': v => Array.isArray(v),
       'ajustes_tracos.json':    v => Array.isArray(v),
       'paradas.json':           v => Array.isArray(v),
+      // Estes 7 estavam faltando aqui (mesmo já suportados no servidor,
+      // ver VALIDADORES_DADOS_PRODUCAO/MESCLAVEIS, lib/rotas/backup.js)
+      // — o front nunca lia/enviava esses arquivos do .zip pra começo de
+      // conversa, então nada do que o servidor sabe fazer com eles
+      // importava (bug real, pego numa conversa: "os dados mesclados não
+      // mostram os berços visuais em Análise Focada" — o berço nem
+      // chegava a sair do .zip).
+      'tracos_descartados.json':    v => Array.isArray(v),
+      'bercos_visuais.json':        v => Array.isArray(v),
+      'avaliacoes_qualidade.json':  v => Array.isArray(v),
+      'operacoes_avaliadas.json':   v => Array.isArray(v),
+      'relatorio_edicoes.json':     v => Array.isArray(v),
+      'manutencao_corretiva.json':  v => Array.isArray(v),
+      'manutencao_programada.json': v => Array.isArray(v),
     };
     const MESCLAR_DEFAULT_SE_VAZIO = {
       'historico.json': [], 'historico_edicoes.json': [], 'relatorio_injecao.json': [],
       'ajustes_tracos.json': [], 'paradas.json': [],
+      'tracos_descartados.json': [], 'bercos_visuais.json': [], 'avaliacoes_qualidade.json': [],
+      'operacoes_avaliadas.json': [], 'relatorio_edicoes.json': [],
+      'manutencao_corretiva.json': [], 'manutencao_programada.json': [],
     };
     const MESCLAR_LABELS = {
       'historico.json': 'Operações (Registro de Baterias)',
@@ -1755,6 +1841,13 @@
       'relatorio_injecao.json': 'Traços (Relatório de Injeção)',
       'ajustes_tracos.json': 'Ajustes de receita',
       'paradas.json': 'Paradas',
+      'tracos_descartados.json': 'Traços Descartados (Perda)',
+      'bercos_visuais.json': 'Berços Visuais',
+      'avaliacoes_qualidade.json': 'Avaliações de Qualidade',
+      'operacoes_avaliadas.json': 'Operações Avaliadas (marcação)',
+      'relatorio_edicoes.json': 'Histórico de edição de traços',
+      'manutencao_corretiva.json': 'Manutenção Corretiva',
+      'manutencao_programada.json': 'Manutenção Programada',
     };
 
     function parseArquivoMesclar(nome, texto) {
@@ -1766,8 +1859,17 @@
 
     let _mesclarArquivos = null; // { 'historico.json': '<texto original>', ... } já validados
 
+    // "YYYY-MM-DD" (formato de <input type="date">) -> "DD/MM/AAAA", só
+    // pra exibição no aviso de confirmação/resultado do filtro de data
+    // (abaixo) — não existia um helper genérico pra isso em data.js.
+    function _formatarDataInputBr(iso) {
+      if (!iso) return '';
+      const [ano, mes, dia] = iso.split('-');
+      return `${dia}/${mes}/${ano}`;
+    }
+
     function abrirMesclarBackup() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('backup-restauracao')) return;
       document.getElementById('mesclar-backup-modal').style.display = 'flex';
       resetMesclarBackupModal();
     }
@@ -1784,6 +1886,23 @@
       document.getElementById('mesclar-erro').style.display = 'none';
       document.getElementById('mesclar-file-input').value = '';
       document.getElementById('mesclar-senha').value = '';
+      document.getElementById('mesclar-filtro-data-ativo').checked = false;
+      document.getElementById('mesclar-filtro-data-inicio').value = '';
+      document.getElementById('mesclar-filtro-data-fim').value = '';
+      document.getElementById('mesclar-filtro-data-campos').style.display = 'none';
+    }
+
+    // Mostra/esconde os dois campos de data — desativar o filtro também
+    // limpa as datas (evita mandar um filtro "fantasma" se a pessoa
+    // preencheu e depois desmarcou o checkbox sem limpar os campos).
+    function toggleMesclarFiltroData() {
+      const ativo = document.getElementById('mesclar-filtro-data-ativo').checked;
+      const campos = document.getElementById('mesclar-filtro-data-campos');
+      campos.style.display = ativo ? 'flex' : 'none';
+      if (!ativo) {
+        document.getElementById('mesclar-filtro-data-inicio').value = '';
+        document.getElementById('mesclar-filtro-data-fim').value = '';
+      }
     }
 
     function voltarMesclarStep0() {
@@ -1820,7 +1939,7 @@
         // relatório de injeção, por exemplo, ainda é válido pra mesclar.
         const presentes = Object.keys(MESCLAR_VALIDACOES).filter(nome => !!zip.file(nome));
         if (!presentes.length) {
-          mostrarErroMesclar('Nenhum arquivo mesclável encontrado neste .zip (historico.json, relatorio_injecao.json, ajustes_tracos.json ou paradas.json).');
+          mostrarErroMesclar('Nenhum arquivo mesclável encontrado neste .zip.');
           return;
         }
 
@@ -1859,8 +1978,23 @@
       const senha = document.getElementById('mesclar-senha').value;
       if (!senha) { mostrarErroMesclar('Digite sua senha de administrador.'); return; }
 
+      const filtroAtivo = document.getElementById('mesclar-filtro-data-ativo').checked;
+      const filtroDataInicio = filtroAtivo ? document.getElementById('mesclar-filtro-data-inicio').value : '';
+      const filtroDataFim = filtroAtivo ? document.getElementById('mesclar-filtro-data-fim').value : '';
+      if (filtroAtivo && !filtroDataInicio && !filtroDataFim) {
+        mostrarErroMesclar('Preencha ao menos uma data, ou desmarque "Trazer só um período específico".');
+        return;
+      }
+      if (filtroAtivo && filtroDataInicio && filtroDataFim && filtroDataInicio > filtroDataFim) {
+        mostrarErroMesclar('A data "De" não pode ser depois da data "Até".');
+        return;
+      }
+
+      const mensagemConfirmacao = filtroAtivo
+        ? `Isso vai ADICIONAR aos dados atuais só os registros deste backup entre ${filtroDataInicio ? _formatarDataInputBr(filtroDataInicio) : 'o início'} e ${filtroDataFim ? _formatarDataInputBr(filtroDataFim) : 'o fim'} do backup — o resto do arquivo é ignorado. Nada do que já existe aqui será apagado ou alterado.`
+        : 'Isso vai ADICIONAR os registros deste backup aos dados atuais. Nada do que já existe aqui será apagado ou alterado.';
       const confirmou = await LW.mostrarConfirmacao(
-        'Isso vai ADICIONAR os registros deste backup aos dados atuais. Nada do que já existe aqui será apagado ou alterado.',
+        mensagemConfirmacao,
         { titulo: 'Mesclar backup de dados?', textoConfirmar: 'Mesclar', icon: '🔗' }
       );
       if (!confirmou) return;
@@ -1874,7 +2008,12 @@
         const res = await fetch('/mesclar-backup-dados', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ senha, arquivos: _mesclarArquivos }),
+          body: JSON.stringify({
+            senha,
+            arquivos: _mesclarArquivos,
+            ...(filtroDataInicio ? { filtroDataInicio } : {}),
+            ...(filtroDataFim ? { filtroDataFim } : {}),
+          }),
         });
         const json = await res.json();
         if (!json.ok) throw new Error(json.erro || 'Erro ao mesclar backup.');
@@ -1893,7 +2032,36 @@
         if (r.edicoes_operacao.inseridos) {
           linhas.push(`Histórico de edição: <strong>${r.edicoes_operacao.inseridos}</strong> registro(s)`);
         }
+        // Estes 7 também estavam faltando aqui (mesmo já suportados pelo
+        // servidor) — mesmo bug de fundo do MESCLAR_VALIDACOES (acima):
+        // o resultado até vinha da API, mas a tela nunca mostrava.
+        if (r.tracos_descartados && (r.tracos_descartados.inseridos || r.tracos_descartados.duplicatas)) {
+          linhas.push(`Traços descartados: <strong>${r.tracos_descartados.inseridos} adicionados</strong>, ${r.tracos_descartados.duplicatas} já existiam aqui`);
+        }
+        if (r.bercos_visuais && (r.bercos_visuais.inseridos || r.bercos_visuais.duplicatas || r.bercos_visuais.sem_operacao)) {
+          let linha = `Berços visuais: <strong>${r.bercos_visuais.inseridos} adicionados</strong>, ${r.bercos_visuais.duplicatas} já existiam aqui`;
+          if (r.bercos_visuais.sem_operacao) linha += `, ${r.bercos_visuais.sem_operacao} ignorados (operação não encontrada)`;
+          linhas.push(linha);
+        }
+        if (r.avaliacoes_qualidade && (r.avaliacoes_qualidade.inseridos || r.avaliacoes_qualidade.duplicatas)) {
+          linhas.push(`Avaliações de qualidade: <strong>${r.avaliacoes_qualidade.inseridos} adicionadas</strong>, ${r.avaliacoes_qualidade.duplicatas} já existiam aqui`);
+        }
+        if (r.operacoes_avaliadas && (r.operacoes_avaliadas.inseridos || r.operacoes_avaliadas.duplicatas)) {
+          linhas.push(`Operações avaliadas: <strong>${r.operacoes_avaliadas.inseridos} marcadas</strong>, ${r.operacoes_avaliadas.duplicatas} já estavam marcadas`);
+        }
+        if (r.edicoes_traco && r.edicoes_traco.inseridos) {
+          linhas.push(`Histórico de edição de traços: <strong>${r.edicoes_traco.inseridos}</strong> registro(s)`);
+        }
+        if (r.manutencao_corretiva && (r.manutencao_corretiva.inseridos || r.manutencao_corretiva.duplicatas)) {
+          linhas.push(`Manutenção corretiva: <strong>${r.manutencao_corretiva.inseridos} adicionados</strong>, ${r.manutencao_corretiva.duplicatas} já existiam aqui`);
+        }
+        if (r.manutencao_programada && (r.manutencao_programada.inseridos || r.manutencao_programada.duplicatas)) {
+          linhas.push(`Manutenção programada: <strong>${r.manutencao_programada.inseridos} adicionados</strong>, ${r.manutencao_programada.duplicatas} já existiam aqui`);
+        }
         if (!linhas.length) linhas.push('Nenhum registro novo encontrado — tudo neste backup já existia aqui.');
+        if (r.filtroData) {
+          linhas.push(`<span style="color:var(--text-3)">📅 Filtro de data aplicado (${r.filtroData.inicio ? _formatarDataInputBr(r.filtroData.inicio) : '…'} a ${r.filtroData.fim ? _formatarDataInputBr(r.filtroData.fim) : '…'}) — ${r.filtroData.ignorados} registro(s) do backup ficaram de fora por estarem fora do período.</span>`);
+        }
 
         document.getElementById('mesclar-step-1').style.display = 'none';
         document.getElementById('mesclar-step-2').style.display = 'block';
@@ -1943,7 +2111,7 @@
     let _restaurarGeralArquivos = null; // { 'historico.json': '<conteúdo>', ... } já lidos do .zip
 
     function abrirRestaurarGeral() {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('backup-restauracao')) return;
       document.getElementById('restaurar-geral-modal').style.display = 'flex';
       resetRestaurarGeralModal();
     }
@@ -2673,81 +2841,42 @@
     }
 
     // ---- Menu lateral das Configurações ----
-    function cfgMostrarSecao(secao) {
-      const elDados = document.getElementById('cfg-secao-dados');
-      const elPaletes = document.getElementById('cfg-secao-paletes');
-      const elAtalhos = document.getElementById('cfg-secao-atalhos');
-      const elUsuarios = document.getElementById('cfg-secao-usuarios');
-      const elAutorizados = document.getElementById('cfg-secao-autorizados');
-      const elDispositivos = document.getElementById('cfg-secao-dispositivos');
-      const elOperacoesOffline = document.getElementById('cfg-secao-operacoes-offline');
-      const elAutomacao = document.getElementById('cfg-secao-automacao');
-      const elSql = document.getElementById('cfg-secao-sql');
-      const elNotificacoes = document.getElementById('cfg-secao-notificacoes');
-      const elParadas = document.getElementById('cfg-secao-paradas');
-      const elTiposManutencao = document.getElementById('cfg-secao-tipos-manutencao');
-      const elPrioridades = document.getElementById('cfg-secao-prioridades');
-      if (elDados) elDados.style.display = secao === 'dados' ? 'block' : 'none';
-      if (elPaletes) elPaletes.style.display = secao === 'paletes' ? 'block' : 'none';
-      if (elAtalhos) elAtalhos.style.display = secao === 'atalhos' ? 'block' : 'none';
-      if (elUsuarios) elUsuarios.style.display = secao === 'usuarios' ? 'block' : 'none';
-      if (elAutorizados) elAutorizados.style.display = secao === 'autorizados' ? 'block' : 'none';
-      if (elDispositivos) elDispositivos.style.display = secao === 'dispositivos' ? 'block' : 'none';
-      if (elOperacoesOffline) elOperacoesOffline.style.display = secao === 'operacoes-offline' ? 'block' : 'none';
-      if (elAutomacao) elAutomacao.style.display = secao === 'automacao' ? 'block' : 'none';
-      if (elSql) elSql.style.display = secao === 'sql' ? 'block' : 'none';
-      if (elNotificacoes) elNotificacoes.style.display = secao === 'notificacoes' ? 'block' : 'none';
-      if (elParadas) elParadas.style.display = secao === 'paradas' ? 'block' : 'none';
-      if (elTiposManutencao) elTiposManutencao.style.display = secao === 'tipos-manutencao' ? 'block' : 'none';
-      if (elPrioridades) elPrioridades.style.display = secao === 'prioridades' ? 'block' : 'none';
+    // Seções de Configurações — nome da seção -> ids de conteúdo/nav
+    // (usado por cfgMostrarSecao, abaixo). Lista central em vez de 13
+    // pares de `const el.../if (el...)` repetidos: mesmo comportamento,
+    // menos código pra manter sincronizado quando uma seção nova entrar.
+    const CFG_SECOES = [
+      'dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'dispositivos',
+      'operacoes-offline', 'automacao', 'sql', 'notificacoes', 'paradas',
+      'tipos-manutencao', 'prioridades',
+    ];
 
-      const ESTILO_ATIVO = 'text-align:left;background:var(--bg-2);border:1px solid var(--accent-dim);color:var(--accent);border-radius:var(--radius);padding:10px 14px;font-size:.85rem;cursor:pointer;font-weight:600';
-      const ESTILO_INATIVO = 'text-align:left;background:none;border:1px solid transparent;color:var(--text-2);border-radius:var(--radius);padding:10px 14px;font-size:.85rem;cursor:pointer';
-      const navDados = document.getElementById('cfg-nav-dados');
-      const navPaletes = document.getElementById('cfg-nav-paletes');
-      const navAtalhos = document.getElementById('cfg-nav-atalhos');
-      const navUsuarios = document.getElementById('cfg-nav-usuarios');
-      const navAutorizados = document.getElementById('cfg-nav-autorizados');
-      const navDispositivos = document.getElementById('cfg-nav-dispositivos');
-      const navOperacoesOffline = document.getElementById('cfg-nav-operacoes-offline');
-      const navAutomacao = document.getElementById('cfg-nav-automacao');
-      const navSql = document.getElementById('cfg-nav-sql');
-      const navNotificacoes = document.getElementById('cfg-nav-notificacoes');
-      const navParadas = document.getElementById('cfg-nav-paradas');
-      const navTiposManutencao = document.getElementById('cfg-nav-tipos-manutencao');
-      const navPrioridades = document.getElementById('cfg-nav-prioridades');
-      if (navDados) navDados.style.cssText = secao === 'dados' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navPaletes) navPaletes.style.cssText = secao === 'paletes' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navAtalhos) navAtalhos.style.cssText = secao === 'atalhos' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navUsuarios) navUsuarios.style.cssText = secao === 'usuarios' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navAutorizados) navAutorizados.style.cssText = secao === 'autorizados' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navDispositivos) navDispositivos.style.cssText = secao === 'dispositivos' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navOperacoesOffline) navOperacoesOffline.style.cssText = secao === 'operacoes-offline' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navAutomacao) navAutomacao.style.cssText = secao === 'automacao' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navSql) navSql.style.cssText = secao === 'sql' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navNotificacoes) navNotificacoes.style.cssText = secao === 'notificacoes' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navParadas) navParadas.style.cssText = secao === 'paradas' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navTiposManutencao) navTiposManutencao.style.cssText = secao === 'tipos-manutencao' ? ESTILO_ATIVO : ESTILO_INATIVO;
-      if (navPrioridades) navPrioridades.style.cssText = secao === 'prioridades' ? ESTILO_ATIVO : ESTILO_INATIVO;
+    function cfgMostrarSecao(secao) {
+      CFG_SECOES.forEach(s => {
+        const conteudo = document.getElementById('cfg-secao-' + s);
+        if (conteudo) conteudo.style.display = secao === s ? 'block' : 'none';
+        // Estado ativo do nav agora é só uma classe (.ativo, ver <style>
+        // em modal-config.html) — NUNCA mais sobrescreve style.cssText
+        // inteiro (era o bug de antes: apagava sem querer o
+        // `display:none` que _cfgAplicarVisibilidadeDeAbas() tinha
+        // aplicado pra perfis sem aquela aba liberada).
+        const nav = document.getElementById('cfg-nav-' + s);
+        if (nav) nav.classList.toggle('ativo', secao === s);
+      });
 
       if (secao === 'atalhos') cfgRenderAtalhos();
       if (secao === 'usuarios') cfgRenderUsuarios();
       if (secao === 'autorizados') cfgRenderAutorizados();
-      if (secao === 'dispositivos') cfgRenderDispositivos();
+      if (secao === 'dispositivos') { cfgRenderDispositivos(); cfgRenderCertificados(); }
       if (secao === 'operacoes-offline') cfgRenderOperacoesOffline();
       if (secao === 'automacao') cfgRenderAutomacao();
       if (secao === 'sql') cfgSqlAoAbrirSecao();
       if (secao === 'notificacoes') cfgRenderNotificacoes();
 
-      // Reaplica por último, de propósito: os `navX.style.cssText = ...`
-      // acima SUBSTITUEM o style inteiro do botão (é assim que o destaque
-      // visual da aba ativa funciona) — isso apaga sem querer o
-      // `display:none` que _cfgAplicarVisibilidadeDeAbas() tinha aplicado,
-      // reexibindo TODAS as abas de Configurações pra qualquer perfil
-      // não-admin (bug real, pego numa conversa: um perfil customizado só
-      // com Atalhos liberado via visto TODAS as outras abas mesmo assim).
-      // Reforçar aqui, toda vez que uma seção é mostrada, corrige na
-      // raiz — não importa quantas vezes cfgMostrarSecao for chamada.
+      // Reforça a visibilidade de abas por perfil aqui também (não só na
+      // abertura do modal) — não importa quantas vezes cfgMostrarSecao
+      // for chamada, garante que uma aba escondida pro perfil atual
+      // nunca reapareça.
       _cfgAplicarVisibilidadeDeAbas();
     }
 
@@ -3877,6 +4006,92 @@
       }
     }
 
+    // ---- Certificado de Autorização de Dispositivo (mTLS) — ver
+    // lib/certificado-dispositivo.js, lib/dispositivo-autorizado.js.
+    // Camada ADICIONAL de reconhecimento, em paralelo ao deviceId/cookie
+    // acima: sobrevive a limpar todos os dados do navegador. ------------
+
+    async function cfgRenderCertificados() {
+      const elLista = document.getElementById('cfg-certificados-lista');
+      if (!elLista) return;
+      elLista.innerHTML = '<span style="color:var(--text-3);font-size:.8rem">Carregando…</span>';
+
+      let lista = [];
+      try {
+        lista = await LW.listarCertificadosDispositivo();
+      } catch (e) {
+        elLista.innerHTML = `<span style="color:var(--red);font-size:.8rem">${_escaparHtmlLocal(e.message)}</span>`;
+        return;
+      }
+
+      if (!lista.length) {
+        elLista.innerHTML = '<span style="color:var(--text-3);font-size:.8rem">Nenhum certificado emitido ainda.</span>';
+        return;
+      }
+
+      elLista.innerHTML = lista.map(c => {
+        const nome = c.nome ? _escaparHtmlLocal(c.nome) : '<span style="color:var(--text-3)">(sem nome)</span>';
+        const dataFmt = c.emitidoEm ? new Date(c.emitidoEm).toLocaleString('pt-BR') : '';
+        const serialCurto = (c.serial || '').slice(0, 12) + '…';
+        return `
+          <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;flex-wrap:wrap">
+            <div style="min-width:0">
+              <div style="font-size:.85rem;color:var(--text-1)">${nome}</div>
+              <div style="font-size:.7rem;color:var(--text-3);word-break:break-all">${_escaparHtmlLocal(serialCurto)}${dataFmt ? ' · emitido em ' + dataFmt : ''}</div>
+            </div>
+            <button type="button" onclick="cfgRevogarCertificado('${_escaparHtmlLocal(c.serial)}')"
+              style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.8rem;margin-left:auto">✕ Revogar</button>
+          </div>`;
+      }).join('');
+    }
+
+    /** Botão "🔏 Gerar certificado" — emite, dispara o download do .p12 e mostra a senha (só existe nesta hora). */
+    async function cfgGerarCertificado() {
+      const inputNome = document.getElementById('cfg-certificado-nome');
+      const nome = (inputNome?.value || '').trim();
+      try {
+        const { blob, nomeArquivo, senha } = await LW.gerarCertificadoDispositivo(nome);
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = nomeArquivo;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        if (inputNome) inputNome.value = '';
+        cfgRenderCertificados();
+
+        await LW.mostrarAlerta(
+          `Certificado "${nome || 'Dispositivo Lightwall'}" gerado — o download do arquivo .p12 começou.\n\n`
+          + `Senha do arquivo (anote agora, só aparece esta vez):\n${senha}\n\n`
+          + 'Instale o .p12 no computador que vai operar (duplo-clique no Windows) usando essa senha. '
+          + 'Depois de instalado, esse computador continua autorizado mesmo se os dados do navegador forem limpos.',
+          { titulo: '🔏 Certificado gerado', tipo: 'sucesso' }
+        );
+      } catch (e) {
+        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+      }
+    }
+
+    /** Botão "✕ Revogar" de cada linha — remove da lista de aceitos (não invalida o arquivo já instalado, só o servidor para de reconhecer o serial). */
+    async function cfgRevogarCertificado(serial) {
+      const confirmou = await LW.mostrarConfirmacao(
+        'O computador que usa este certificado só vai continuar autorizado se também estiver na lista por deviceId/IP, acima.',
+        { titulo: 'Revogar este certificado?', textoConfirmar: 'Revogar', tipo: 'perigo', icon: '🛑' }
+      );
+      if (!confirmou) return;
+      try {
+        await LW.revogarCertificadoDispositivo(serial);
+        LW.mostrarAlerta('Certificado revogado.', { tipo: 'sucesso' });
+        cfgRenderCertificados();
+      } catch (e) {
+        LW.mostrarAlerta(e.message, { tipo: 'erro' });
+      }
+    }
+
     // ─── Operações a Validar (Registro Offline) — itens 6/7 do plano, ver
     // README, "Registro de Operação Offline (PWA)". Lista o que chegou de
     // POST /operacao-offline/enviar (tela public/offline.html), com
@@ -4886,7 +5101,7 @@
     let _eoBercosPersonalizados = [];
 
     function abrirEdicaoOperacao(bateria) {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('edicao-dados')) return;
       _eoRegistroOriginal = JSON.parse(JSON.stringify(bateria));
       _eoBercosPersonalizados = Array.isArray(bateria.bercos_personalizados)
         ? [...bateria.bercos_personalizados]
@@ -5410,7 +5625,7 @@
     }
 
     async function abrirEdicaoTraco(traco, uso) {
-      if (sessionStorage.getItem('lw_role') !== 'Administrador') return;
+      if (!_perfilTemAcao('edicao-dados')) return;
       _etTracoOriginal = JSON.parse(JSON.stringify(traco));
       _etUsoOriginal = JSON.parse(JSON.stringify(uso || {}));
 

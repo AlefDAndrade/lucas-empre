@@ -214,9 +214,9 @@ As 5 fases estão feitas — `public/db/` só guarda mais `config.json` e `opera
 
 **Limitação conhecida da instalação**: `better-sqlite3` compila um módulo nativo na instalação (`npm install`) — normalmente automático, mas se o `npm install` falhar por falta de binário pré-compilado pra sua versão exata do Node, o fallback é compilar do código-fonte, o que exige ferramentas de build (`build-essential`/`python3` no Linux) e acesso de rede pra baixar os headers do Node. Em ambientes com rede restrita, isso pode falhar — use `npm install` (nunca `npm ci`) na primeira vez depois de puxar essa mudança, já que o `package-lock.json` ainda não tem a entrada de `better-sqlite3` resolvida de verdade.
 
-## Fatiamento de db.js (plano)
+## Fatiamento de db.js
 
-`db.js` está com 3.353 linhas — cresceu por fases (ver "Banco de Dados (SQLite)", acima) sem nunca ser reorganizado depois, então hoje mistura schema, migrações de JSON legado e regras de negócio de domínios sem nenhuma relação entre si (traço, manutenção, sessão de usuário) num arquivo só. Isso está **planejado**, seguindo o mesmo padrão já validado no fatiamento de `server.js`: um domínio por vez, sem mudar lógica nenhuma — só onde o código mora —, com a suíte de testes daquele domínio (e uma bateria manual das rotas que o usam) rodando verde antes de seguir pra próxima fase.
+`db.js` tinha 3.353 linhas — cresceu por fases (ver "Banco de Dados (SQLite)", acima) sem nunca ser reorganizado depois, então misturava schema, migrações de JSON legado e regras de negócio de domínios sem nenhuma relação entre si (traço, manutenção, sessão de usuário) num arquivo só. Isso foi **concluído** (Fases 2–9, ver Status ao final desta seção), seguindo o mesmo padrão já validado no fatiamento de `server.js`: um domínio por vez, sem mudar lógica nenhuma — só onde o código mora —, com a suíte de testes daquele domínio (e uma bateria manual das rotas que o usam) rodando verde antes de seguir pra próxima fase. Hoje `db.js` tem só schema/setup do banco (Fase 1) e a migração de histórico legado ainda não movida (Fase 10, ver Status).
 
 **Diferença importante em relação ao fatiamento de `server.js`**: `db.js` não é só um conjunto de funções — o módulo inteiro **é** a conexão viva com o SQLite (`module.exports = db`, o objeto de conexão do `better-sqlite3`, com as funções de cada domínio "penduradas" nele). Cada módulo extraído vai precisar **receber** essa conexão já aberta (via factory, mesmo padrão de `lib/rotas/`) em vez de abrir a própria — só existe uma conexão com o banco no processo inteiro, isso não muda.
 
@@ -272,7 +272,7 @@ O mapa de permissões (páginas e áreas de edição) é definido num lugar só 
 Além dos 6 perfis fixos acima, o Administrador pode **criar novos tipos de perfil** em Configurações → Usuários → "+ Criar novo tipo de perfil" (ver `lib/itens-permissao.js`, `lib/perfis-customizados.js`, `lib/rotas/perfis-customizados.js`). Cada perfil customizado tem seu próprio mapa, item por item, sobre o catálogo inteiro (páginas, dashboards, sub-itens de Setor de Qualidade e Manutenção — inclusive as 4 seções do formulário de chamado corretivo — e "Outros"), marcando cada um como **Acesso Total**, **Apenas Visualizar** ou **Ocultar**. Item não marcado fica oculto por padrão (perfil novo é restritivo, ao contrário dos 6 fixos, que são "visualização aberta").
 
 - **Enforcement real no servidor**: só as 5 áreas já validadas de verdade (injetora, paradas, qualidade, manutenção, manutenção-chamado) — marcar "Acesso Total" num item ligado a uma dessas áreas (ex: "Registrar Operação" → área injetora) concede a permissão de escrita de verdade, com a mesma validação server-side que os 6 perfis fixos já têm.
-- **Só front-end por enquanto**: os itens de "Outros" (Importar, Exportações, Edição de Dados, Backup/Restauração) e as abas de Configurações (exceto Atalhos) continuam sendo, no backend, exclusivos do Administrador Master e do perfil fixo "Administrador" — marcá-los num perfil customizado ainda não libera acesso de verdade a essas rotas. Por isso ficam travados em "Ocultar" no formulário de criação, com um aviso explicando o motivo — chegam numa próxima etapa.
+- **Itens de "Outros" — acesso real implementado**: Importar Documentos e Backup/Restauração eram os únicos genuinamente exclusivos do Administrador Master/perfil fixo "Administrador" no backend (`sessaoOuAdmin`/`temPoderesDeAdmin`) — agora usam um portão granular próprio, `podeUsarItem(req, itemId)` (`lib/permissoes-area.js`): concede acesso só pelo item específico marcado "Acesso Total" (perfil customizado, ou perfil fixo com override), sem tocar em nenhuma outra permissão administrativa (SQL admin, gerenciar usuários, dispositivos autorizados continuam intocados). As rotas de RESTAURAR/MESCLAR backup (destrutivas) continuam exigindo a senha do Administrador Master reverificada — não mudaram. Exportações Interativas/Excel e Edição dos Dados na verdade **nunca dependeram** desse portão pra valer de verdade (exportação roda no cliente; edição de dados já era protegida por `podeEditarArea('injetora')`, igual Registrar Operação) — só o front escondia a opção sem necessidade. Os 5 itens saíram da trava incondicional no formulário de criação de perfil (`_cpItemAindaExclusivoDoAdmin`, `public/js/perfis-customizados.js`); os botões correspondentes (Importar/Backup/Edição de Dados) agora checam a permissão real por item (`_perfilTemAcao`, `public/js/app-core.js`, alimentado por `itensAcaoPorPerfil` em `GET /perfis`) em vez do antigo `lw_role !== 'Administrador'` fixo. Abas de Configurações (exceto Atalhos) continuam travadas em "Ocultar" pra perfis customizados — isso sim ainda não tem ponte real no backend (rotas de SQL admin, salvar configurações, gerenciar usuários continuam checando só a IDENTIDADE do perfil, não o catálogo granular). Coberto por `test/perfis-customizados-itens-acao.test.js`.
 - Perfis customizados não podem usar um nome já reservado (os 6 fixos, ou "Administrador"), nem duplicar o nome de outro customizado.
 - Excluir um perfil customizado é bloqueado enquanto algum usuário cadastrado ainda o estiver usando.
 
@@ -295,6 +295,7 @@ A lista de atalhos exibida (em Configurações → Atalhos de Teclado e no modal
 - **OEE** — ver seção dedicada abaixo.
 - **Modo TV** (`tv.html`, fora da SPA principal) — painel fullscreen pra telão da fábrica: operação ao vivo, traços do dia, OEE, últimas paradas. Não exige login.
 - **Menu Principal** — atalhos rápidos + (admin) Backup, Restauração e Importação.
+- **One Page Report** — resumo executivo mensal de página única (Segurança, Produção, Refugo, Expedição + Assuntos Gerais), pensado pra imprimir/exportar como PDF. Ver seção dedicada abaixo.
 
 Atalho `F1` abre o modal de ajuda com todos os atalhos de teclado disponíveis.
 
@@ -336,7 +337,10 @@ Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é
 
 **Pré-requisitos**
 - VM com o Lightwall já rodando (`npm start`, ver *Como rodar*) — o script assume que o Node está escutando em `localhost` numa porta (padrão `3000`).
-- Portas **80** e **443** liberadas no firewall da VM (necessário pro Let's Encrypt validar o domínio e emitir o certificado). No Google Cloud: Console → VPC network → Firewall → criar/editar regra permitindo `tcp:80,443` de `0.0.0.0/0`.
+- Portas **80** e **443** liberadas na VM (necessário pro Let's Encrypt validar o domínio e emitir o certificado):
+  - **Locaweb Cloud**: painel → Rede → sua VM → **Port Forwarding** (não "NAT Estático" — esse libera a VM inteira, todas as portas, por padrão) → adicione regras pras portas 22 (SSH), 80 e 443 apontando pra VM. A Locaweb Cloud é construída sobre Apache CloudStack: o IP público não fica direto na VM, ele é alocado à parte e você decide quais portas encaminhar.
+  - **Magalu Cloud**: Console → Virtual Machine → sua instância → Segurança/Security Group → adicionar regra de entrada (ingress) TCP 80 e 443, origem `0.0.0.0/0`. Por padrão a Magalu Cloud bloqueia todo tráfego de entrada — sem essa regra o Caddy nem consegue validar o domínio.
+  - **Google Cloud**: Console → VPC network → Firewall → criar/editar regra permitindo `tcp:80,443` de `0.0.0.0/0`.
 - Acesso root/sudo na VM.
 
 **Passo a passo**
@@ -347,7 +351,7 @@ Notificações Push só funcionam sob HTTPS (ou `localhost`) — se o sistema é
    ```
    `[porta-do-node]` é opcional — padrão `3000` (mesma porta padrão de `server.js`). Só informe se o `PORT` estiver configurado com outro valor.
 3. O script faz tudo sozinho:
-   - Descobre o IP externo da VM (via metadata do Google Cloud; se não conseguir — ex: VM fora do GCP — pergunta o IP manualmente).
+   - Descobre o IP externo da VM (tenta Magalu Cloud, depois Google Cloud, depois um serviço externo genérico — esse último é o que funciona na Locaweb Cloud, já que lá o IP público não fica direto na VM; ver `deploy/instalar-https.sh`). Se nada responder, pergunta manualmente.
    - Instala o Caddy (repositório oficial via `apt`).
    - Gera `/etc/caddy/Caddyfile` apontando `SEU-IP-COM-HIFENS.nip.io` → `localhost:PORTA` (ver `deploy/Caddyfile.exemplo` pra um modelo de referência, caso prefira editar manualmente).
    - Recarrega o Caddy — ele mesmo emite e renova o certificado HTTPS automaticamente, sem passo manual nenhum.
@@ -422,6 +426,30 @@ Ao escolher "Personalizado" em Tipo de Montagem, abre a grade de berços:
 
 **Limitação conhecida**: o badge de "Tipo de Montagem" pra uma bateria Personalizada usa a mesma cor neutra (cinza) de um tipo desconhecido — diferente de Simples/Híbrida, que têm cor própria. O detalhe da composição (quais berços, quais tipos) só fica visível olhando o registro completo (`bercos_personalizados`), sem uma visualização dedicada ainda.
 
+## Consulta de Insumos por Traço
+
+Tela **auxiliar** do Dashboard de Traço/CEP (`public/js/qualidade-tracos.js`) — pedido registrado numa conversa: sem alterar o dashboard existente, uma tela à parte pra consultar/comparar/exportar o consumo de insumos traço a traço (`public/partials/page-consulta-tracos.html`, `public/js/consulta-tracos.js`). Acessível pelo menu "Traços" da barra de navegação ou pelo botão "🔍 Consultar Insumos por Traço" dentro do próprio Dashboard de Traço (que já leva o período atualmente filtrado, sem precisar escolher tudo de novo).
+
+**Atalho Ctrl+clique** (pedido numa conversa posterior — "atalho no Ctrl pra jogar pra essa consulta, assim como a operação joga pra Análise Focada"): no Relatório de Injeção (`public/js/dashboard.js`, `onClickLinhaRelatorio`), Ctrl (ou ⌘ no Mac) + clique numa linha de traço abre a Consulta de Insumos direto naquele traço — funciona em qualquer modo (normal ou edição), mesmo padrão de `onClickLinhaRegistro` (Registro de Baterias → Análise Focada). Catalogado em `REFERENCIA_CONFIG` (`public/js/keyboard-shortcuts.js`), aparece em Configurações → Atalhos de Teclado e no modal de ajuda (F1). Coberto por `test/atalho-ctrl-clique-consulta-tracos.test.js`.
+
+**Fluxo**: escolher período → lista de traços daquele intervalo → clicar num traço → ver os insumos → exportar (o traço, ou o período inteiro) em Excel.
+
+**Sem rota nova no backend** — reaproveita `db/relatorio_injecao.json` (mesma fonte do CEP e do Relatório de Injeção); filtro por data, cálculo de "ordem no dia" e totais são feitos 100% no cliente.
+
+**"Ordem no Dia" em vez de "Horário de produção"** — decisão tomada na mesma conversa: o sistema nunca gravou (e ainda não grava) um horário por TRAÇO individual, só o horário de início/fim da OPERAÇÃO inteira (a bateria toda — colunas `inicio`/`fim` de `operacoes`). Mostrar uma hora ali seria inventar precisão que não existe; em vez disso, cada traço recebe sua posição de produção dentro do dia (1º, 2º, 3º...), assumindo que a ordem de chegada em `db/relatorio_injecao.json` reflete a ordem real de registro (a query que gera esse JSON, `todosOsTracos()` em `lib/db/tracos.js`, não tem `ORDER BY` — volta na ordem de inserção do SQLite). Essa premissa é testada diretamente (`test/consulta-tracos-ordem-insercao.test.js`: registra traços em sequência conhecida e confere que voltam na mesma ordem).
+
+**Detalhe de 1 traço** (modal, versão bem mais simples que a Análise Focada, de propósito — só os insumos, sem berços nem movimentação): Cimento, Água, EPS, Superplastificante, Incorporador de Ar, e o total somado.
+
+**Bug real corrigido numa conversa posterior** ("alguns traços mostram insumo zerado mesmo tendo insumo"): um campo de insumo (`cimento_real` etc., `db/relatorio_injecao.json`) só é um número puro quando o traço NUNCA teve um Ajuste de Receita — assim que existe pelo menos 1 ajuste, o campo vira `{ original, ajustes: [...] }` (ver `colapsarOriginalEAjustes`, `lib/db/tracos.js`). `Number({...})` dá `NaN`, tratado como 0 silenciosamente — todo traço AJUSTADO aparecia com aquele insumo zerado. `_valorFinalInsumo()` (`public/js/consulta-tracos.js`) resolve isso corretamente: `original + soma de todos os ajustes` (nunca "o último valor vence", que é a regra certa só pra densidade/flow — ver `_valRel`, `dashboard.js`). Coberto por `test/consulta-tracos-logica.test.js`.
+
+**Exportação Excel** (SheetJS/`window.XLSX`, mesma lib já usada em `setor-qualidade.js`):
+- **Período inteiro**: 1 linha por traço (Data, Ordem no Dia, Turno, Nº do Traço, os 5 insumos, Total) — cronológico, mais antigo primeiro (facilita somar/analisar na planilha).
+- **1 traço só**: formato "ficha" (Campo/Valor), não a mesma tabela — é um registro individual, não uma lista pra somar.
+
+**Permissão**: item próprio no catálogo (`consulta-tracos`, tipo `dashboard`) — não amarrado ao item do CEP (`qualidade-tracos`); um Administrador pode liberar um sem o outro, se fizer sentido pro perfil.
+
+Cobertura de testes em `test/consulta-tracos-logica.test.js` (cálculos/ordenação/formato de exportação, funções puras) e `test/consulta-tracos-ordem-insercao.test.js` (premissa de ordem de inserção, ponta a ponta via API).
+
 ## Editar Traço (Relatório de Injeção)
 
 Em **Menu → Relatório de Injeção → ✏️ Editar** (Administrador): liga um modo de edição — clicar numa linha abre a edição completa daquele traço, em vez do painel de detalhe de ajustes. Mesmo padrão visual do "✏️ Editar" do Registro de Baterias.
@@ -492,16 +520,20 @@ Estava listada como "fora de escopo" na versão original deste plano — decisã
 
 ### 5. Fora de escopo (o que ainda fica pra depois)
 
-- Editar ou excluir um traço descartado já registrado (por design: é um registro que só existe pra criação, ver `lib/rotas/tracos-descartados.js`).
-- Exportação (CSV/PDF) do histórico de descartes.
-- Qualquer tentativa de vincular um traço descartado a um "motivo padronizado" ou transformá-lo em indicador de qualidade automático (ver item 6, abaixo, sobre a decisão de motivo em texto livre).
+- Qualquer tentativa de vincular um traço descartado a um "motivo padronizado" ou transformá-lo em indicador de qualidade automático (ver item 6, abaixo, sobre a decisão de motivo em texto livre — **decisão reavaliada nesta tarefa e mantida como está**: ainda não existe uso real suficiente pra saber quais opções fechadas fariam sentido; fechar uma lista agora seria chute, não dado. Continua em aberto pra quando houver histórico de verdade pra analisar).
 
 ### 6. Perguntas respondidas (registradas aqui para não se perderem)
 
 - **Onde registrar**: atalho na tela atual de Registro de Traço, que abre um formulário dedicado simples (não uma tela cheia nova, nem só embutido inline na tela atual).
 - **Formato do motivo**: texto livre (não lista padronizada) — decisão tomada para não travar o operador numa lista fixa nesta primeira versão; pode virar lista padronizada depois, se o texto livre gerado no uso real mostrar poucos padrões repetidos que valham a pena fechar em opções.
 
-**Status**: passos 1 (estrutura de dados), 2 (backend), 3 (frontend de registro) e 4 (tela de histórico) concluídos. Passo 3: link discreto "⚠️ Descartar este traço" no card de cada traço (`public/js/operacao.js`, próximo à seção "Receita Real Pesada"), abrindo um modal dedicado com Data/Turno preenchidos automaticamente e os insumos já pesados pré-carregados; motivo em texto livre obrigatório; ao salvar, chama `LW.registrarTracoDescartado` (`public/js/data.js`) e remove o traço da lista de pendentes da operação atual (sem virar linha "pendente" nem exigir berço). Indisponível em Modo de Teste — a rota grava direto na tabela real, sem a distinção real/teste que outras rotas de registro têm; o link fica visualmente desabilitado nesse modo, com tooltip explicando o motivo. Passo 4: tela "Traços Descartados" (menu + tabbar), só leitura, com KPIs de insumo perdido e filtro por data/busca — ver item 4, acima. Cobertura de testes em `test/tracos-descartados-crud.test.js` (backend) e `test/operacao-descarte-traco.test.js` (UI, jsdom).
+**Status**: passos 1 (estrutura de dados), 2 (backend), 3 (frontend de registro) e 4 (tela de histórico) concluídos. Passo 3: link discreto "⚠️ Descartar este traço" no card de cada traço (`public/js/operacao.js`, próximo à seção "Receita Real Pesada"), abrindo um modal dedicado com Data/Turno preenchidos automaticamente e os insumos já pesados pré-carregados; motivo em texto livre obrigatório; ao salvar, chama `LW.registrarTracoDescartado` (`public/js/data.js`) e remove o traço da lista de pendentes da operação atual (sem virar linha "pendente" nem exigir berço). Indisponível em Modo de Teste — a rota grava direto na tabela real, sem a distinção real/teste que outras rotas de registro têm; o link fica visualmente desabilitado nesse modo, com tooltip explicando o motivo. Passo 4: tela "Traços Descartados" (menu + tabbar), com KPIs de insumo perdido e filtro por data/busca — ver item 4, acima.
+
+**Editar/excluir** (revisão desta decisão original — corrigir um valor digitado errado ou apagar um descarte lançado por engano é um caso real que apareceu depois): `POST /editar-traco-descartado` e `POST /excluir-traco-descartado` (`lib/rotas/tracos-descartados.js`, `lib/db/tracos-descartados.js`), mesma área de permissão do registro (`injetora`). `id`/`registrado_em` nunca mudam numa edição — só os campos de dado (insumos/motivo/turno/data/operador). Botões ✏/✕ na tabela do histórico, só pra quem tem a área liberada (`_perfilPodeEditar`, mesmo padrão de `paradas.js`).
+
+**Exportação (CSV/PDF)**: dois botões na tela de histórico, respeitando o filtro atual (não sempre o histórico inteiro) — CSV mesmo padrão de `manutencao.js` (`;` como delimitador, aspas escapadas), PDF via o mesmo pipeline Chromium dos outros dashboards (`LW.baixarPdfApartirDeHtml`, `public/js/data.js`), sem o truque de "página única" do One Page Report (uma lista paginando normalmente não precisa forçar 1 folha só).
+
+Cobertura de testes em `test/tracos-descartados-crud.test.js` (backend, criação + edição + exclusão) e `test/operacao-descarte-traco.test.js` (UI de registro, jsdom).
 
 ## Configuração (Administrador)
 
@@ -577,7 +609,27 @@ Isso foi reforçado com um **cookie `HttpOnly`** (`lw_device_id`, ver `lib/dispo
 
 Isso fecha o ponto (2) (não dá mais pra forjar via DevTools), mas não sozinho o ponto (1): limpar cookies também apaga o `lw_device_id`. Pra reduzir esse atrito sem reautorização manual, cada dispositivo autorizado também guarda o **IP** de quando foi autorizado (`ip`, em `config.json`); se um request chegar com um `deviceId` desconhecido mas do **mesmo IP** de um dispositivo já autorizado antes, o servidor religa automaticamente o cadastro ao novo `deviceId` (`religadoEm` fica registrado, pra auditoria) — cobre o caso comum de rede interna com IP fixo por máquina (chão de fábrica). Não é uma trava adicional, só um atalho de reconhecimento; um IP nunca visto antes continua exigindo autorização manual normalmente.
 
-**Ideia futura, ainda não implementada**: pra fechar os dois pontos de vez (inclusive sobreviver a limpar dados do navegador), a alternativa mais robusta seria **mTLS** (autenticação mútua por certificado de cliente) — cada máquina recebe um certificado assinado por uma CA própria, instalado uma vez no navegador/SO, e o Caddy (já usado pra HTTPS, ver `deploy/Caddyfile.exemplo`) passa a exigi-lo no handshake TLS, antes de qualquer requisição HTTP. É uma identidade que vive na camada de rede, não em cookie/localStorage — não é apagada limpando dados do navegador e não dá pra forjar via JS. Autorizar continuaria parecido com hoje (gerar e emitir um certificado por máquina), mas desautorizar poderia continuar sendo só remover da lista de seriais permitidos (mesma UX de Configurações → Dispositivos Autorizados) sem precisar de infraestrutura de revogação (CRL/OCSP). Custo: precisa manter uma CA e instalar um certificado por máquina nova — só vale a pena se o cenário de spoofing for um risco real levado a sério, não só a questão de "some ao limpar cache" (que a combinação cookie+IP acima já resolve com bem menos esforço).
+**Resolvido de vez** pelo Certificado de Dispositivo (mTLS), a seguir — sobrevive inclusive a limpar todos os dados do navegador, sem depender de IP nem de o Administrador reautorizar manualmente. Ativar (`deploy/ativar-mtls-caddy.sh`) é opcional — sem ativar, cookie + IP continuam sendo a única checagem, exatamente como hoje.
+
+### Certificado de Dispositivo (mTLS)
+
+Uma terceira via de reconhecimento, em paralelo às duas acima (nunca substitui, sempre reforça) — resolve os dois pontos de vez, inclusive sobreviver a limpar TODOS os dados do navegador: cada máquina recebe um **certificado de cliente TLS**, instalado uma vez no navegador/SO, que vive na camada de rede em vez de cookie/localStorage. Não é apagado limpando dados do navegador e não dá pra forjar via DevTools.
+
+**Como gerar (Administrador Master ou perfil Administrativo)**: Configurações → Dispositivos Autorizados → seção "🔏 Certificado de Autorização" → dá um nome à máquina (ex: "PC Injetora 1") → "Gerar certificado". O servidor:
+
+1. Gera (na primeira vez que isso acontece nesta instalação) uma **CA própria** — um par de chaves que assina os certificados de dispositivo — guardada em `private/ca-dispositivos/` (fora de `public/`, nunca servida pela web, mesmo tratamento de `security.json`/`usuarios.json`). A chave privada da CA nunca sai da VM.
+2. Emite um certificado assinado por essa CA, empacota num arquivo `.p12` protegido por senha aleatória, e devolve o download — a senha só aparece nesta hora (não fica guardada em lugar nenhum depois; se for perdida, gere um certificado novo e revogue o antigo).
+3. Registra o **serial** do certificado (informação pública por natureza — já vai em todo handshake TLS) numa lista em `config.json` (`certificadosAutorizados`), ao lado de `dispositivosAutorizados`.
+
+**Instalar na máquina**: duplo-clique no `.p12` (Windows) → assistente de importação de certificado → Chrome/Edge já reconhece. Isso é o único passo manual por máquina — feito uma vez, nunca mais precisa reautorizar aquele computador, mesmo limpando cookies/localStorage.
+
+**Ativar o reconhecimento no servidor** (só precisa rodar uma vez por instalação, depois do primeiro certificado gerado): `sudo bash deploy/ativar-mtls-caddy.sh` — copia o certificado PÚBLICO da CA pro Caddy confiar nele, e configura `client_auth` em modo **opcional** (`mode request` — nunca bloqueia quem não tem certificado instalado; é reforço, não substituição). O Caddy passa a repassar o serial do certificado apresentado pro Node via header `X-Client-Cert-Serial`, que `dispositivoAutorizado()` (`lib/dispositivo-autorizado.js`) passa a checar **antes** de deviceId/IP — se o serial bate com um certificado autorizado, o dispositivo é reconhecido direto, sem precisar de cookie nem de religar por IP.
+
+**Revogar**: mesma UX de "Remover" que `dispositivosAutorizados` já tinha — botão "✕ Revogar" na lista de certificados emitidos. Sem infraestrutura de CRL/OCSP: o certificado continua tecnicamente válido/instalado na máquina, só para de autorizar a partir do momento em que sai da lista.
+
+**Custo**: só vale a pena ativar (`ativar-mtls-caddy.sh`) se o atrito de reautorizar depois de limpar dados do navegador for um problema real — sem ativar, gerar certificados não muda nada no comportamento atual (cookie + IP continuam sendo a única checagem).
+
+Cobertura de testes em `test/certificados-dispositivo-mtls.test.js` (emissão/listagem/revogação, e o ponto central: um request com o header `X-Client-Cert-Serial` autoriza o dispositivo sozinho, sem deviceId nem IP conhecido — o handshake TLS em si, feito pelo Caddy, não é testável aqui).
 
 ## Backup e Restauração (Administrador)
 
@@ -588,7 +640,7 @@ Um único card no menu ("💾 Backup e Restauração") abre um painel com todas 
 | **Backup de Dados** | Baixa um `.zip` só com dados de produção (histórico, traços, paradas, avaliações de qualidade, manutenção etc. — 17 arquivos, alguns reconstruídos a partir do SQLite). Gerado no servidor. |
 | **Backup Geral** | Baixa um `.zip` com dados de produção + `config.json` (baterias, tipos de montagem, automação) + `security.json`/`usuarios.json`/`operadores.json` (identidade e acesso — senhas sempre em hash). Gerado no servidor. Sem código-fonte (esse tem controle de versão próprio — ver Git). |
 | **Restaurar Dados** | Sobrescreve os dados de produção a partir de um backup de dados. |
-| **Restaurar Geral** | Sobrescreve dados de produção + config a partir de um backup geral. `security.json`/`usuarios.json`/`operadores.json` são **opcionais** — se o backup não os incluir (ex: veio de uma instalação mais antiga, sem esses arquivos), o cadastro atual de usuários/senha de administrador é **preservado**, não apagado. |
+| **Mesclar Backup de Dados** | Soma (nunca substitui) operações/traços/paradas/traços descartados de um backup de **outra instalação** aos dados atuais — dedup automática por id. Cobre também 6 domínios "satélite" (pedido numa conversa — "não abarca alguns dados, como berço visual"): berços visuais, avaliações de qualidade, operações avaliadas, edições de traço, manutenção corretiva e manutenção programada — todos amarrados a uma operação/traço já existente (no destino ou trazida na mesma mesclagem), nunca criam um registro órfão. **Detalhe importante**: `mesclarTracosEAjustes` sempre gera um id_traco NOVO e sintético pro traço mesclado (nunca reaproveita o id do backup de origem) — por isso "edições de traço" só entram se `relatorio_injecao.json` vier JUNTO no mesmo backup (a função devolve um mapa id-de-origem→id-de-destino pra traduzir a referência; sem isso, a edição é ignorada silenciosamente, nunca vira uma edição órfã). **Segundo bug real corrigido na mesma conversa** ("clico numa operação mesclada e joga pra traço, nenhum filtro funciona"): `operacoes.tracos_json` (usada por `navegarParaTracosDoRegistro`, `public/js/dashboard.js`, pra montar o filtro de traço ao pular de uma operação pro Relatório de Injeção) é uma FOTOGRAFIA gravada no INSERT (`operacaoParaRow`) — certa pro registro ao vivo (ids nascem juntos, nunca mudam), mas errada pra mesclagem, já que `mesclarTracosEAjustes` troca o id_traco por um novo sintético: a fotografia de uma operação recém-mesclada continuava apontando pros ids ANTIGOS do backup de origem, que não existem em lugar nenhum do destino — o filtro nunca batia com nada. Corrigido reconstruindo `tracos_json` a partir da fonte de verdade (`traco_usos`, não uma cópia) pra toda operação afetada pela mesclagem — inclusive "self-healing": se `relatorio_injecao.json` for mesclado DEPOIS pra uma operação que já existia, o `tracos_json` dela é corrigido mesmo assim, mesmo a operação não fazendo parte daquela mesclagem específica. Filtro de data opcional (`filtroDataInicio`/`filtroDataFim`): pra trazer só um período do backup (ex: "só o dia 04/09"), preenchendo os dois campos com a mesma data — o resto do arquivo é ignorado, mesmo que fosse tudo registro novo. Sem o filtro, mescla o backup inteiro (comportamento de sempre). Coberto por `test/mesclar-backup-dados.test.js` (25 testes). **Terceiro bug real corrigido na mesma conversa**: o backend suportava mesclar berços visuais (e os outros 6 domínios satélite) desde o primeiro commit, mas o FRONT-END tinha sua própria lista separada de quais arquivos ler do `.zip` (`MESCLAR_VALIDACOES`, `public/js/app-core.js`) — essa lista nunca tinha sido atualizada (nem `tracos_descartados.json`, de uma mudança anterior, chegava a sair do zip), então nada do que o servidor sabia fazer importava. `test/mesclar-backup-front-lista-completa.test.js` trava as duas listas (front `MESCLAR_VALIDACOES` e backend `MESCLAVEIS`) ficarem sempre no mesmo conjunto, pra esta classe de bug nunca mais passar despercebida. || **Restaurar Geral** | Sobrescreve dados de produção + config a partir de um backup geral. `security.json`/`usuarios.json`/`operadores.json` são **opcionais** — se o backup não os incluir (ex: veio de uma instalação mais antiga, sem esses arquivos), o cadastro atual de usuários/senha de administrador é **preservado**, não apagado. |
 | **Backups Automáticos** | Lista os backups de dados diários gerados pelo servidor (ver abaixo), com link de download pra cada um. |
 
 Toda restauração: exige a senha do administrador (reverificada no servidor), valida o formato de cada arquivo antes de gravar qualquer coisa, e salva automaticamente uma cópia de segurança do estado atual em `backups-seguranca/` (fora de `public/`, nunca servida pela web) antes de sobrescrever. A restauração geral pede também uma frase de confirmação (`RESTAURAR TUDO`).
@@ -604,6 +656,57 @@ O próprio `server.js` gera um backup de dados todo fim de dia, sem depender de 
 - Mantém sempre os **últimos 3 dias**: ao criar um novo, remove automaticamente o mais antigo se já houver 3.
 - Arquivos ficam em `backups-automaticos/` (fora de `public/`, nunca servida como arquivo estático comum), nomeados por data: `backup-dados_AAAA-MM-DD.zip`.
 - Acessível só pelas rotas dedicadas (`/backups-automaticos` e `/backups-automaticos/<nome>`) — essa pasta cresce e diminui sozinha, sem precisar de limpeza manual (diferente de `backups-seguranca/`).
+- **Sincronizar com um backup manual (conversa que motivou a mudança)**: até aqui, backup manual (Dados/Geral) e o job automático diário eram 100% independentes — baixar um backup manual nunca afetava `backups-automaticos/`. Agora, depois de qualquer backup manual bem-sucedido, o front pergunta (`LW.mostrarConfirmacao`) se a pessoa quer que ESSE backup também vire o automático de hoje — nunca acontece sozinho. Se ela confirmar, `POST /sincronizar-backup-automatico` (`lib/rotas/backup.js`, `{ tipo: 'dados'|'geral' }`) sobrescreve `backup-dados_<hoje>.zip` com o MESMO conteúdo do manual (mesmo nome de arquivo — não cria um segundo) e reinicia a contagem de retenção de 3 dias a partir de agora; como o job agendado já pula o dia se o arquivo existir, ele não roda de novo mais tarde sobrescrevendo um "Geral" escolhido de propósito com um "Dados" simples. Coberto por `test/backup-sincronizar-automatico.test.js`.
+
+## Migrando para outra VM (ex: Google Cloud → Locaweb Cloud/Magalu Cloud)
+
+Roteiro pra trocar a VM que hospeda o sistema sem perder dado nenhum — usa o próprio **Backup Geral** (ver seção acima) como ponte entre as duas máquinas, em vez de copiar arquivo por arquivo na mão. `git clone`/`git pull` só traz **código**; os dados de produção (histórico, traços, avaliações, manutenção, config, usuários) vivem fora do controle de versão (`.gitignore`: `data/`, `private/`, `public/db/security.json` etc. — ver *Estrutura de pastas*) e por isso não vêm junto de um clone.
+
+**1. Provisionar a VM nova**
+- Imagem **Ubuntu 24.04 LTS** (ou mais recente disponível), tipo de instância conforme a carga (a mesma configuração de vCPU/RAM da VM antiga é um bom ponto de partida). Acesso Linux é só por **chave SSH** (sem senha) — cadastre sua chave pública na criação.
+- Marque a opção de **IP público** (necessário pra acessar o sistema de fora e pro Let's Encrypt emitir o certificado HTTPS).
+- Libere as portas 22 (SSH), 80 e 443 — o procedimento muda por provedor:
+  - **Locaweb Cloud**: painel → Rede → sua VM → aloque um **IP Público** e configure **Port Forwarding** (não "NAT Estático") pras portas 22, 80 e 443 apontando pra VM. A Locaweb Cloud é construída sobre Apache CloudStack: o IP público fica separado da VM, você decide o que encaminhar pra ela — "NAT Estático" libera a VM inteira (todas as portas), evite pra não expor mais do que o necessário.
+  - **Magalu Cloud**: Console → Virtual Machine → sua instância → Segurança/Security Group → adicionar regra de entrada (ingress) TCP 22/80/443, origem `0.0.0.0/0` (ou seu IP, pra 22). Por padrão a Magalu Cloud bloqueia todo tráfego de entrada.
+- A porta do Node (`3000`) **não** precisa ficar exposta publicamente em nenhum dos dois — o Caddy é quem fica na frente, fazendo proxy pra `localhost:3000`.
+
+**2. Instalar Node e trazer o código**
+```bash
+# Node 20 LTS (qualquer >= 18 serve, ver package.json "engines")
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+
+git clone <url-do-seu-repositorio>
+cd teste-ligthwall
+npm install
+```
+
+**3. Rodar como serviço (recomendado)**
+`deploy/lightwall.service` é um modelo de serviço systemd — mantém o Node no ar sozinho (reinicia em crash, sobe no boot), sem depender de uma sessão SSH aberta (`nohup`/`tmux`) pra continuar rodando. Ajuste `User`/`WorkingDirectory` no arquivo e siga as instruções no topo dele:
+```bash
+sudo cp deploy/lightwall.service /etc/systemd/system/lightwall.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now lightwall
+sudo systemctl status lightwall   # confere que subiu
+```
+Alternativa mais simples (sem systemd): `npm start` dentro de um `tmux`/`screen`.
+
+**4. HTTPS**
+```bash
+sudo bash deploy/instalar-https.sh
+```
+Detecta o IP público da VM automaticamente (ver *HTTPS via Caddy + nip.io*, acima — já atualizado pra reconhecer Magalu Cloud, Google Cloud, e um fallback genérico que cobre a Locaweb Cloud e qualquer outro provedor).
+
+**5. Migrar os dados (na VM ANTIGA → depois na NOVA)**
+1. Na VM antiga, ainda no ar: **Configurações → Backup e Restauração → Backup Geral** — baixa um `.zip` com produção + config + usuários/senhas (hash).
+2. Acesse o sistema já rodando na VM nova (ainda com dados "de fábrica", vazios) e faça login com a senha padrão/inicial.
+3. **Configurações → Backup e Restauração → Restaurar Geral** → escolha o `.zip` baixado no passo 1 → confirme com a frase `RESTAURAR TUDO`.
+4. Confira uma tela com dado real (ex: Relatório de Injeção) pra confirmar que a restauração trouxe tudo.
+
+**6. Depois de confirmar que a VM nova está 100%**
+- Repita "Ativar notificações" (🔔) em cada dispositivo — a inscrição de Web Push é atrelada ao domínio/origem (o `SEU-IP.nip.io` muda com a VM), então as inscrições antigas não migram sozinhas (mesmo aviso da seção *HTTPS via Caddy + nip.io*).
+- Se a instalação tinha o Backup Automático no Google Drive configurado (ver seção abaixo, ainda em plano), reconecte a conta na VM nova.
+- Só desligue/exclua a VM antiga depois de confirmar que a nova está estável por alguns dias — mantenha os backups automáticos gerados por ela (`backups-automaticos/`) até ter certeza de que não vai precisar deles.
 
 ## Backup Automático no Google Drive (plano)
 
@@ -901,7 +1004,7 @@ A Fase 3 deixou 2 das 3 sub-fases da barra (`carregando`, `ajustando`) com progr
 
 **Ordem de aplicação**: 5.1 → 5.2+5.3 juntos (a chamada em N partes só faz sentido já mesclando o resultado, senão o PDF final fica quebrado em pedaços soltos) → 5.4 (limpeza, só depois de confirmar que 5.2/5.3 funcionam de ponta a ponta) → 5.5 (client-side, só depois do servidor já mandar o formato novo) → 5.6 (refinamento em cima do loop já funcionando). 5.2/5.3 são o núcleo arriscado — validar manualmente com uma "Personalizada" de várias operações (múltiplas páginas, testa o merge e a ordem) E uma "Simples" (1 página só, garante que o caminho de N=1 não regride o comportamento de hoje) antes de considerar a fase concluída.
 
-**Status:** 5.1, 5.2, 5.3, 5.4 e 5.5 concluídas e aplicadas — falta só a 5.6 (refinamento do cancelamento entre páginas; já parcialmente coberto desde a 5.2 pela checagem de `job.status` dentro do loop, mas ainda não formalizado como passo próprio).
+**Status:** 5.1, 5.2, 5.3, 5.4, 5.5 e 5.6 concluídas e aplicadas — plano completo. A checagem de `job.status` entre um bloco e outro do loop de impressão (5.6) já existia desde a 5.2; formalizada como passo próprio, coberta por `test/exportar-pdf-cancelamento-entre-paginas.test.js`.
 
 ## Registro de Operação Offline (PWA) — plano
 
@@ -995,7 +1098,7 @@ Ponto crítico, porque é um contador **global e compartilhado** (`contador_trac
 - **Múltiplas abas/dispositivos offline ao mesmo tempo**: cada navegador tem seu próprio `localStorage` — nada impede 2 tablets diferentes registrando offline ao mesmo tempo, cada um com seu próprio pendente. Isso é esperado (não existe "dono" nem singleton no modo offline, diferente da operação ao vivo) — a fila do Master (`operacoes_offline_pendentes.json`, ✅ implementada) suporta mais de um item de uma vez sem problema, mesmo que cada DISPOSITIVO só tenha um pendente por vez (item 3).
 - **IDs**: `idTemp` (prefixo `OFF-`) nunca é o `id` final da operação — ✅ implementado: na aprovação, o `id` real é derivado de forma determinística (`'op_off_' + idTemp.slice(4)`), evitando colisão com IDs de operações registradas ao vivo (que usam outro formato, `'op_' + timestamp`).
 - **Reaproveitar sobra de outra operação no Contador de Traços**: não implementado (ver item 7) — todo traço offline conta como novo na aprovação, mesmo que na prática reaproveite sobra de uma bateria anterior. Dependeria de consultar o estado do servidor em tempo real no momento do registro, o que não existe (nem pode existir) no fluxo puramente offline.
-- **Expiração**: um pendente que nunca sincroniza (dispositivo trocado, `localStorage` limpo) fica preso pra sempre nesse navegador — não implementado. Continua em aberto se cabe algum aviso/expiração automática, ou se fica como responsabilidade manual de quem usa o dispositivo.
+- **Expiração**: um pendente que nunca sincroniza (dispositivo trocado, `localStorage` limpo) fica preso pra sempre nesse navegador — **decidido e implementado**: nunca apagar nada sozinho (um pendente é um registro real de operação; apagar à toa seria perder trabalho de verdade), só tornar **visível** quando algo está esperando envio há tempo demais (`LIMIAR_AVISO_HORAS = 24`, `public/js/offline-operacao.js`, `renderFila`) — item mais antigo aparece primeiro, destacado, com aviso pra checar a conexão ou avisar um Administrador. Descartar continua manual (botão "✕ Descartar", já existia). Coberto por `test/operacao-offline-fila-aviso-idade.test.js`.
 - **Aviso visual de descompasso de dia** (ver item 7, "Dia usado"): quando a operação aprovada é de um dia diferente do dia real da aprovação, o contador soma no dia de hoje sem nenhum aviso na tela de validação — não implementado.
 
 ### 9. Conexão cai NO MEIO de uma operação normal (logada) — aviso ao vivo
@@ -1014,7 +1117,7 @@ Cenário diferente do resto deste plano (ver *Fora de escopo*, no topo): a pesso
 
 Reaproveita 100% da UI (`_mostrarAvisoConexao`) e da lógica de fila (`enfileirarOperacaoPendente`/`tentarSincronizarFilaPendentes`) que já existem — este item é só sobre **quando** o aviso aparece (ao vivo, assim que a rede cai) em vez de só no momento de registrar.
 
-**Status:** plano ainda não implementado — nenhuma linha de código deste item existe hoje.
+**Status:** plano implementado e aplicado (`_conexaoLive_marcarCaiu`/`_conexaoLive_marcarVoltou`, `public/js/operacao.js`) — evento `online`/`offline` do navegador + checagem ativa por `fetch` a cada 15s, banner persistente enquanto a queda durar. Coberto por `test/operacao-aviso-conexao-ao-vivo.test.js`.
 
 ### 10. Numeração inicial customizável + marcação de "sobra" (com nota e vínculo na validação) — IMPLEMENTADO
 
@@ -1033,3 +1136,35 @@ Como a tabela `tracos` tem uma lista fechada de colunas na hora de aprovar (`_tr
 - Backups de segurança (`backups-seguranca/`) não têm rotina de limpeza automática.
 - "Volume por placa" (referência informativa na tela de Operação) não é atualizado automaticamente ao criar um novo tipo de montagem — precisa ser adicionado manualmente no `config.json`.
 - Testes automatizados (`test/`) cobrem autenticação/sessão, Setor de Qualidade, registrar operação (`test/registrar-operacao.test.js`), traços (`test/registrar-relatorio-injecao.test.js`), editar operação/traço (`test/edicao-operacao-traco.test.js`), paradas (`test/paradas-crud.test.js`), sobra (`test/sobra-crud.test.js`), mesclar backup de dados (`test/mesclar-backup-dados.test.js`), importação (`test/importacao.test.js`) e o fluxo de ponta a ponta do Backup Geral (`test/backup-geral-fluxo-completo.test.js`, além dos testes de regras isoladas já existentes em `test/backup-dados-vs-geral.test.js`, `test/backup-metas-opcional.test.js` e `test/restaurar-backup-checklist.test.js`).
+
+## One Page Report — IMPLEMENTADO
+
+Tela (`public/partials/page-one-page-report.html`) de dashboard de página única no modelo do relatório executivo mensal já usado pelo time (4 blocos — **Segurança**, **Produção**, **Refugo**, **Expedição** — mais um rodapé de **Assuntos Gerais**), pra dar uma visão rápida e imprimível do mês sem precisar abrir os dashboards analíticos um por um. Acesso pelo Menu Principal ou pela barra de navegação lateral (`showPage('one-page-report')`), disponível a todos os perfis (`lib/perfis.js`).
+
+### Levantamento: o que já existia vs. o que foi criado
+
+| Bloco do relatório | Dado | Situação | Fonte |
+|---|---|---|---|
+| Produção | Injeção de baterias por dia/linha, m² total | ✅ Já existia | tabela `operacoes` (SQLite) |
+| Refugo | % refugo diário, traços por linha | ✅ Já existia | tabelas `avaliacao_paineis`/`traco_usos` (SQLite) |
+| Segurança | Ocorrências, acumulado do mês, dias sem acidentes | ✅ Criado (Fase 1) | tabela `seguranca_ocorrencias` — `lib/db/seguranca-ocorrencias.js` |
+| Expedição | Cargas expedidas, m² por semana (S1–S4), acumulado, forecast | ✅ Criado (Fase 2) | tabela `expedicao_cargas` — `lib/db/expedicao.js` |
+| Todos os blocos | Comentários / Próximos passos + Assuntos Gerais (texto + fotos com tema) | ✅ Criado (Fase 3) | JSON simples por mês — `lib/db/one-page-comentarios.js` |
+
+Regra combinada em todas as fases: **onde não há dado real, a tela mostra "Dado indisponível" no lugar do gráfico/número** (`opr-indisponivel`, `public/css/one-page-report.css`) — nunca zero disfarçado de dado real. Vale tanto pro histórico ainda curto de Segurança/Expedição quanto pra qualquer falha de rede no fetch do frontend.
+
+### Estrutura final
+
+| Camada | Arquivo | O que faz |
+|---|---|---|
+| Dados — Segurança | `lib/db/seguranca-ocorrencias.js` | CRUD de ocorrências + `diasSemAcidentes()` (calculado a partir de `MAX(data)`, nunca gravado como coluna) |
+| Dados — Expedição | `lib/db/expedicao.js` | CRUD de cargas + agregação semanal (S1–S4), acumulado do mês, forecast |
+| Dados — Comentários | `lib/db/one-page-comentarios.js` | Texto livre por bloco + Assuntos Gerais ({texto, fotos: [{id, imagem, tema}]}, fotos comprimidas no navegador antes de salvar, mesma técnica de `_comprimirFotoDefeito`/setor-qualidade.js), todos os meses num único `public/db/one-page-comentarios.json` |
+| Rotas | `lib/rotas/seguranca.js` | `GET /db/seguranca_ocorrencias.json`, `GET /seguranca/dias-sem-acidentes`, `POST /registrar-ocorrencia-seguranca`, `POST /excluir-ocorrencia-seguranca` |
+| Rotas | `lib/rotas/expedicao.js` | `GET /db/expedicao_cargas.json`, `GET /expedicao/agregacao-semanal`, `POST /registrar-carga-expedicao`, `POST /excluir-carga-expedicao` |
+| Rotas | `lib/rotas/one-page-report.js` | `GET /db/one-page-comentarios.json`, `POST /salvar-comentarios-one-page-report`, e o endpoint de agregação `GET /db/one-page-report.json?mes=YYYY-MM` (junta os 5 blocos num payload só, já calculado por mês) |
+| Frontend | `public/partials/page-one-page-report.html` + `public/css/one-page-report.css` + `public/js/one-page-report.js` | Tela em si — gráficos SVG próprios (barra/donut), consome `GET /db/one-page-report.json`, com fallback pra dados de exemplo só se a rede falhar |
+
+Escrita (registrar/excluir ocorrência de Segurança e carga de Expedição, salvar Comentários) exige sessão de administrador (`sessaoOuAdmin`) — nenhuma dessas ainda é uma área cadastrada em `AREAS_DE_EDICAO` (`lib/perfis.js`); qual perfil pode editar cada bloco é uma decisão de produto em aberto, não técnica. Leitura (todos os `GET`) é livre, mesmo modelo do resto do sistema.
+
+**Testes:** `test/seguranca-ocorrencias-crud.test.js` (10), `test/expedicao-crud.test.js` (13), `test/one-page-comentarios-crud.test.js` (15, incluindo fotos de Assuntos Gerais — tema, id gerado no servidor, limite de 12 fotos, imagem inválida recusada), `test/one-page-report.test.js` (8, cobrindo o endpoint de agregação — mês ausente/inválido, cada bloco isoladamente, conversão de comentários texto→array) — 46 casos no total.
