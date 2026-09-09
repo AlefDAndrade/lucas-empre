@@ -33,7 +33,29 @@
     { id: 'nav_analise_bercos', comboPadrao: 'Alt+0', page: 'analise-bercos', label: 'Análise de Berços', icon: '💧' },
     { id: 'nav_paradas', comboPadrao: 'Alt+P', page: 'paradas', label: 'Registro de Paradas', icon: '⏸' },
     { id: 'nav_setor_qualidade', comboPadrao: 'Alt+Q', page: 'setor-qualidade', label: 'Setor de Qualidade', icon: '🛡' },
+    // Faltava — mesma categoria de 'setor-qualidade', acima (página de
+    // menu de nível superior, com data-page no nav-tabbar E no
+    // page-menu.html), mas ficou de fora da auditoria anterior porque já
+    // tinha uma entrada em REFERENCIA_CONFIG (o Ctrl+hover) e pareceu
+    // "coberta" — só que aquilo documenta uma AÇÃO dentro da página, não
+    // dá o atalho de NAVEGAÇÃO até ela (achado numa conversa seguinte:
+    // "o setor de manutenção ficou sem atalho").
+    { id: 'nav_manutencao', comboPadrao: 'Alt+N', page: 'manutencao', label: 'Manutenção', icon: '🔧' },
     { id: 'nav_metas', comboPadrao: 'Alt+M', page: 'metas', label: 'Metas', icon: '🏁' },
+    // ─── Mais 2 páginas sem atalho de navegação (auditoria numa conversa
+    // — "quais pages ainda não têm teclas de atalho"): letras livres
+    // (nenhuma colisão com Alt+D/C/V/E de ACTION_CONFIG, abaixo, nem com
+    // as já usadas aqui em cima).
+    { id: 'nav_one_page_report', comboPadrao: 'Alt+R', page: 'one-page-report', label: 'One Page Report', icon: '📄' },
+    { id: 'nav_tracos_descartados', comboPadrao: 'Alt+T', page: 'tracos-descartados', label: 'Traços Descartados', icon: '🗑' },
+    // Estas 2 também têm botão próprio no dropdown "Traços" da
+    // nav-tabbar (não são só destino de Ctrl+clique, como uma auditoria
+    // anterior tinha assumido) — por consistência com as outras páginas
+    // do mesmo dropdown (todas com Alt+dígito), ganharam o delas também.
+    // O Ctrl+clique continua funcionando do mesmo jeito, como atalho
+    // secundário a partir de Registro de Baterias/Relatório de Injeção.
+    { id: 'nav_analise_focada', comboPadrao: 'Alt+F', page: 'analise-focada', label: 'Análise Focada', icon: '🔬' },
+    { id: 'nav_consulta_tracos', comboPadrao: 'Alt+I', page: 'consulta-tracos', label: 'Consulta de Insumos por Traço', icon: '🧪' },
   ];
 
   /**
@@ -174,6 +196,19 @@
       contexto: 'Relatório de Injeção',
       page: 'relatorio',
       descricao: 'Abre a Consulta de Insumos daquele traço específico — funciona em qualquer modo (normal ou edição).',
+    },
+    // ─── Atalho real já existente em produção, mas nunca catalogado
+    // aqui (achado numa auditoria — "quais atalhos existem mas não
+    // estão na lista"): sem isto, ninguém descobre ele sozinho, nem ele
+    // aparece em Configurações → Atalhos de Teclado / no modal de
+    // ajuda. Comportamento em si não mudou — só passou a ser
+    // documentado.
+    {
+      icon: '👁',
+      combo: 'Ctrl + passar o mouse',
+      contexto: 'Manutenção',
+      page: 'manutencao',
+      descricao: 'Mostra um preview flutuante da trajetória daquele item, sem abrir o modal completo — só desktop (não existe em toque).',
     },
     {
       icon: '🖱',

@@ -43,7 +43,7 @@ Restart=on-failure
 RestartSec=5
 # Ambiente de produção — mesmas variáveis que server.js já lê (ver
 # README.md, "Como rodar"). PORT/HOST são opcionais; sem elas, usa os
-# padrões 5000/127.0.0.1 (Caddy faz proxy pra essa porta, ver acima).
+# padrões 3000/127.0.0.1 (Caddy faz proxy pra essa porta, ver acima).
 # Environment=PORT=3000
 # Environment=HOST=127.0.0.1
 

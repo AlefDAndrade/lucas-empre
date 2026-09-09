@@ -25,7 +25,7 @@
 #
 # USO (na própria VM, via SSH, com sudo):
 #   sudo bash deploy/instalar-https.sh [porta-do-node]
-#   (porta-do-node é opcional, padrão 5000 — mesmo padrão de server.js)
+#   (porta-do-node é opcional, padrão 3000 — mesmo padrão de server.js)
 #
 # Depois de rodar, o sistema passa a ser acessado em:
 #   https://SEU-IP-COM-HIFENS.nip.io
