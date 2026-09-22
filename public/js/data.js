@@ -41,25 +41,94 @@ let VOLUME_POR_PLACA = []; // [{ label: 'S/P - 7,5 cm', volume: 0.1373 }, ...]
 // motivos que sempre existiram, pra instalações de antes desta mudança
 // não perderem nenhum motivo já em uso.
 let MOTIVO_PARADA_OPTS = [];
-// Tipos de Manutenção (Registro de Chamado/Manutenção Programada →
-// Configurações → Tipos de Manutenção) — mesmo raciocínio de
-// MOTIVO_PARADA_OPTS, acima: antes fixo em 2 valores ("Elétrica"/
-// "Mecânica") em page-manutencao.html, agora configurável. Fallback
-// (defaults abaixo, em loadConfig) mantém os mesmos 2 tipos de sempre.
-let TIPO_MANUTENCAO_OPTS = [];
-// Prioridade de Chamado (Registro de Manutenção → Configurações →
-// Prioridades) — mesmo raciocínio de TIPO_MANUTENCAO_OPTS, acima, só
-// que cada item é um objeto { label, cor } (não só uma string): cada
-// nível de prioridade tem uma cor própria (usada nas bolinhas do
-// kanban, badges e botões de seleção — ver _corPrioridade,
-// manutencao.js). Fallback (defaults abaixo, em loadConfig) mantém os
-// mesmos 3 níveis/cores de sempre (BAIXA=verde, MÉDIA=azul,
-// ALTA=vermelho) — cor em var(--...) de propósito nos 3 defaults
-// (nunca hexadecimal fixo), pra continuar acompanhando o tema
-// claro/escuro como sempre acompanhou; prioridades novas cadastradas
-// pelo admin usam hexadecimal fixo (escolhido num color picker — ver
-// Configurações > Prioridades), sem essa integração com o tema.
-let PRIORIDADE_OPTS = [];
+// Insumos de Receita (Configurações → Insumos de Receitas) — mesmo
+// raciocínio de MOTIVO_PARADA_OPTS, acima: catálogo
+// (lista de nomes) configurável pelo Administrador. Cada item é
+// { nome, categoria: 'padrao' | 'custom' } — ver PLANO-insumos-dinamicos-
+// receitas.md, Fase 4. "Padrão" são os 5 insumos que sempre existiram
+// como colunas FIXAS das tabelas tracos/ajustes (ver lib/db/tracos.js,
+// CAMPOS_SOMA) — sempre presentes, nome travado, sem botão de remover em
+// Configurações (ver NOMES_INSUMOS_PADRAO/_normalizarInsumosReceita,
+// abaixo). "Custom" são os que o Administrador cadastra livremente —
+// esses sim aparecem/somem do formulário de traço via o botão "+"
+// (Fase 5), gravados em traco_insumos/ajuste_insumos (Fase 2/3).
+let INSUMO_RECEITA_OPTS = [];
+
+// Nomes canônicos dos 5 Padrão — espelha CAMPOS_SOMA/NOMES_INSUMOS_PADRAO
+// de lib/db/tracos.js (duplicado aqui pelo mesmo motivo de
+// LIMITE_INJECAO_MIN em lib/rotas/edicao.js: este arquivo roda no
+// navegador, não dá pra require() o lado do servidor).
+const NOMES_INSUMOS_PADRAO = ['Cimento', 'Água', 'EPS', 'Superplastificante', 'Incorporador de Ar'];
+
+/**
+ * Normaliza o que veio de config.json (`insumos_receita.opcoes`) pro
+ * formato atual ({nome, categoria}[]) — aceita tanto o formato NOVO
+ * (array de objetos) quanto o formato ANTIGO (array de strings, de uma
+ * instalação salva antes da Fase 4 desta feature): strings viram objeto,
+ * categoria decidida por NOMES_INSUMOS_PADRAO. Os 5 Padrão SEMPRE entram
+ * no resultado, mesmo que o config.json salvo não os liste (instalação
+ * bem antiga) — nunca some, e nunca vira "custom" por engano, mesmo que
+ * o JSON esteja malformado nesse ponto.
+ */
+// Formata o texto digitado num campo "Dimensão" pra já virar "9,5 cm" sem a
+// pessoa precisar escrever o "cm" — e sem duplicar caso ela escreva mesmo
+// assim. Regras, na ordem aplicada:
+//  1) descarta qualquer caractere que não seja número, vírgula ou ponto —
+//     o campo é só pra medida, não aceita texto livre (letras, símbolos
+//     etc. são simplesmente ignorados enquanto a pessoa digita, nem
+//     chegam a aparecer no campo);
+//  2) ponto vira vírgula (9.5 -> 9,5), que é o separador decimal padrão
+//     usado no resto do sistema;
+//  3) o que sobrar (só o número) recebe " cm" no final automaticamente.
+// `final`: true quando é a formatação de fechamento (blur/Enter/✓) — aí
+// uma vírgula sem nada depois (ex: "9,") não faz sentido como medida
+// definitiva, então é descartada e vira só "9 cm". Enquanto a pessoa
+// ainda está digitando (final=false), a vírgula solta é mantida, senão
+// ela nunca conseguiria digitar as casas decimais depois dela.
+// Compartilhada entre Registrar Operação (operacao.js) e Editar Operação
+// (app-core.js) — movida pra cá (era privada de operacao.js) pra nunca
+// as duas telas acabarem com regras de formatação levemente diferentes
+// (mesmo padrão de bug já visto entre insumos Padrão/Custom, ver
+// PLANO-insumos-dinamicos-receitas.md).
+function formatarDimensaoLive(bruto, final) {
+  let v = (bruto || '');
+  // Tira um "cm" que já esteja no final (com/sem espaço, maiúsc/minúsc)
+  // pra recalcular em cima só do número — evita "9,5 cm cm" ao digitar
+  // mais alguma coisa depois do sufixo já ter aparecido.
+  v = v.replace(/\s*cm\s*$/i, '');
+  // Só dígitos, vírgula e ponto passam — qualquer letra, espaço ou outro
+  // símbolo é descartado (não é um valor inválido "a ser corrigido
+  // depois": simplesmente não entra no campo).
+  v = v.replace(/[^\d,.]/g, '');
+  // Ponto sempre vira vírgula (padrão decimal do sistema)
+  v = v.replace(/\./g, ',');
+  // Permite só uma vírgula (a partir da segunda, descarta) — evita algo
+  // como "9,5,3" que não seria uma medida válida.
+  const partes = v.split(',');
+  if (partes.length > 2) v = partes[0] + ',' + partes.slice(1).join('');
+  // Vírgula "pendurada" sem casa decimal depois (ex: "9," ou "9,,"): só
+  // faz sentido enquanto a pessoa ainda está digitando. Ao fechar o
+  // campo, tira a vírgula solta — "9," vira "9", não "9, cm".
+  if (final && /,$/.test(v)) v = v.replace(/,+$/, '');
+  if (v === '') return '';
+  return v + ' cm';
+}
+
+function _normalizarInsumosReceita(bruto) {
+  const porNome = new Map();
+  (Array.isArray(bruto) ? bruto : []).forEach(item => {
+    let nome = null;
+    if (typeof item === 'string') nome = item.trim();
+    else if (item && typeof item === 'object' && typeof item.nome === 'string') nome = item.nome.trim();
+    if (!nome) return;
+    const categoria = NOMES_INSUMOS_PADRAO.includes(nome) ? 'padrao' : 'custom';
+    porNome.set(nome, { nome, categoria });
+  });
+  NOMES_INSUMOS_PADRAO.forEach(nome => porNome.set(nome, { nome, categoria: 'padrao' }));
+  const padrao = NOMES_INSUMOS_PADRAO.map(nome => porNome.get(nome));
+  const custom = [...porNome.values()].filter(o => o.categoria === 'custom');
+  return [...padrao, ...custom];
+}
 
 // Direcionamento de painéis por palete — qual dos 4 paletes-base recebe
 // cada QUADRANTE (metade da bateria × lado do berço). Configurável em
@@ -504,30 +573,17 @@ async function loadConfig() {
       console.warn('[LW] config.json sem "motivos_parada.opcoes" válido — mantendo motivos já carregados.');
     }
 
-    // Tipos de Manutenção — mesmo padrão de Motivos de Parada, acima.
-    if (Array.isArray(cfg.tipos_manutencao?.opcoes) && cfg.tipos_manutencao.opcoes.length) {
-      TIPO_MANUTENCAO_OPTS = cfg.tipos_manutencao.opcoes;
-    } else if (!TIPO_MANUTENCAO_OPTS.length) {
-      console.warn('[LW] config.json sem "tipos_manutencao.opcoes" válido — usando fallback de tipos de manutenção.');
-      TIPO_MANUTENCAO_OPTS = ['Elétrica', 'Mecânica'];
+    // Insumos de Receita — mesmo padrão de Motivos de Parada, acima, mas
+    // com normalização (ver _normalizarInsumosReceita, Fase 4): garante
+    // categoria Padrão/Custom mesmo vindo de config.json de instalação
+    // antiga (formato só-string).
+    if (Array.isArray(cfg.insumos_receita?.opcoes) && cfg.insumos_receita.opcoes.length) {
+      INSUMO_RECEITA_OPTS = _normalizarInsumosReceita(cfg.insumos_receita.opcoes);
+    } else if (!INSUMO_RECEITA_OPTS.length) {
+      console.warn('[LW] config.json sem "insumos_receita.opcoes" válido — usando fallback de insumos.');
+      INSUMO_RECEITA_OPTS = _normalizarInsumosReceita([]);
     } else {
-      console.warn('[LW] config.json sem "tipos_manutencao.opcoes" válido — mantendo tipos de manutenção já carregados.');
-    }
-
-    // Prioridade de Chamado — mesmo padrão de Tipos de Manutenção,
-    // acima, validando também que cada item tenha 'label' e 'cor'.
-    if (Array.isArray(cfg.prioridades?.opcoes) && cfg.prioridades.opcoes.length &&
-        cfg.prioridades.opcoes.every(o => o && typeof o.label === 'string' && typeof o.cor === 'string')) {
-      PRIORIDADE_OPTS = cfg.prioridades.opcoes;
-    } else if (!PRIORIDADE_OPTS.length) {
-      console.warn('[LW] config.json sem "prioridades.opcoes" válido — usando fallback de prioridades.');
-      PRIORIDADE_OPTS = [
-        { label: 'BAIXA', cor: 'var(--green)' },
-        { label: 'MÉDIA', cor: 'var(--accent)' },
-        { label: 'ALTA', cor: 'var(--red)' },
-      ];
-    } else {
-      console.warn('[LW] config.json sem "prioridades.opcoes" válido — mantendo prioridades já carregadas.');
+      console.warn('[LW] config.json sem "insumos_receita.opcoes" válido — mantendo insumos já carregados.');
     }
 
 
@@ -609,12 +665,7 @@ async function loadConfig() {
       'Reunião / Treinamento', 'Parada de Qualidade', 'Aguardando Liberação',
       'Pausa de Descanso', 'Outro',
     ];
-    TIPO_MANUTENCAO_OPTS = ['Elétrica', 'Mecânica'];
-    PRIORIDADE_OPTS = [
-      { label: 'BAIXA', cor: 'var(--green)' },
-      { label: 'MÉDIA', cor: 'var(--accent)' },
-      { label: 'ALTA', cor: 'var(--red)' },
-    ];
+    INSUMO_RECEITA_OPTS = _normalizarInsumosReceita([]);
   }
 
   // Se o admin salvou uma config customizada, ela tem prioridade
@@ -1820,6 +1871,14 @@ async function registrarRelatorioInjecao(record, modoTeste = false) {
     silo: t.silo || '',
     expansao: t.expansao || '',
     densidade_eps: t.densidadeEPS || '',
+    // Insumos CUSTOM (ver PLANO-insumos-dinamicos-receitas.md) — BUG
+    // CORRIGIDO: esta função reconstrói cada linha do zero, campo por
+    // campo, e esquecia de incluir insumos_custom (só ia pros ajustes,
+    // registrados à parte e ao vivo via registrarAjusteTraco — por isso
+    // eles sempre chegavam certos no servidor, mas o valor ORIGINAL da
+    // receita nunca ia junto: dashboards/tabela/CEP acabavam somando só
+    // o ajuste (ex: 3), nunca original+ajuste (ex: 1+3=4).
+    ...(t.insumos_custom ? { insumos_custom: t.insumos_custom } : {}),
   }));
 
   if (!linhas.length) return;
@@ -2173,28 +2232,6 @@ async function getStats(filtros = {}) {
     por_data[b.data].m2 += (b.m2_total || 0);
   });
 
-  // By turno
-  const por_turno = {};
-  ['1º TURNO', '2º TURNO', '3º TURNO'].forEach(t => {
-    const td = data.filter(b => b.turno === t);
-    const paineisPorTipoTurno = somarPorTipo(td, 'paineis_por_tipo');
-    const m2PorTipoTurno = somarPorTipo(td, 'm2_por_tipo');
-    por_turno[t] = {
-      total: td.length,
-      atraso: td.filter(b => b.houve_atraso === 'SIM').length,
-      m2: td.reduce((s, b) => s + (b.m2_total || 0), 0),
-      tempo_medio: td.length ? td.reduce((s, b) => s + (b.tempo_min || 0), 0) / td.length : 0,
-      paineis: td.reduce((s, b) => s + (b.total_paineis || 0), 0),
-      paineis_por_tipo: paineisPorTipoTurno,
-      m2_por_tipo: m2PorTipoTurno,
-      // Aliases de compatibilidade:
-      paineis_2p: paineisPorTipoTurno['2p'] || 0,
-      paineis_sp: paineisPorTipoTurno['sp'] || 0,
-      m2_2p: m2PorTipoTurno['2p'] || 0,
-      m2_sp: m2PorTipoTurno['sp'] || 0,
-    };
-  });
-
   // Motivos de atraso
   const motivos = {};
   data.filter(b => b.houve_atraso === 'SIM' && b.motivo_atraso)
@@ -2207,7 +2244,7 @@ async function getStats(filtros = {}) {
     total_baterias, total_paineis, total_paineis_2p, total_paineis_sp,
     total_m2, total_m2_2p, total_m2_sp,
     baterias_atraso, pct_atraso, media_tempo, media_tracos,
-    dias_producao, por_data, por_turno, motivos, data
+    dias_producao, por_data, motivos, data
   };
 }
 
@@ -3004,8 +3041,10 @@ window.LW = {
   get BATERIA_IDS() { return BATERIA_IDS; },
   get VOLUME_POR_PLACA() { return VOLUME_POR_PLACA; },
   get MOTIVO_PARADA_OPTS() { return MOTIVO_PARADA_OPTS; },
-  get TIPO_MANUTENCAO_OPTS() { return TIPO_MANUTENCAO_OPTS; },
-  get PRIORIDADE_OPTS() { return PRIORIDADE_OPTS; },
+  get INSUMO_RECEITA_OPTS() { return INSUMO_RECEITA_OPTS; },
+  // Nomes canônicos dos 5 Padrão — Fase 5 usa pra saber quais campos do
+  // formulário de traço são sempre fixos (nunca passam pelo botão "+").
+  get NOMES_INSUMOS_PADRAO() { return NOMES_INSUMOS_PADRAO; },
 
 
   // Config loader
@@ -3110,6 +3149,7 @@ window.LW = {
 
   // Texto livre customizado (substitui prompt() nativo)
   mostrarPrompt,
+  formatarDimensaoLive,
 
   // Escape de HTML — usar sempre que texto livre (digitado pelo usuário)
   // for inserido via innerHTML, pra evitar XSS armazenado.

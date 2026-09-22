@@ -39,10 +39,24 @@
     // abaixo) — editar por lá NUNCA mais mexe em state.dimensao, só
     // nesta posição específica.
     bercos_dimensoes: null,
+    // Override do NÚMERO de berços — null = usa o `bercos` cadastrado da
+    // bateria selecionada (LW.BATERIA_IDS), igual sempre foi. Só recebe
+    // valor quando a pessoa confirma uma Dimensão manual e responde "sim"
+    // à pergunta "isso muda o número de berços?" (ver
+    // _perguntarMudancaBercos()/_confirmarDimensaoManual, abaixo). Vale
+    // SÓ para esta operação — nunca altera o cadastro fixo da bateria em
+    // Configurações. Volta a null ao trocar de bateria (novo `bercos` de
+    // referência) ou ao limpar a Dimensão manual (volta tudo a automático).
+    bercos_override: null,
   };
 
   let timerInterval = null;
   let expandedTracoIndex = 0; // Índice do traço aberto (acordeão exclusivo)
+  // Insumos de Receitas dinâmicos (Fase 5) — índices de traço com o
+  // picker "+ Adicionar insumo" aberto no momento (ver
+  // renderInsumosCustomSecao/LWOp.toggleInsumoCustomPicker). Só UI
+  // transitória, não faz parte de `state` (não persiste/sincroniza).
+  const _insumoCustomPickerAberto = new Set();
 
   // Aviso de conexão AO VIVO (item 9 do plano de Registro Offline, ver
   // README) — true enquanto o monitor abaixo considera a rede fora, pra
@@ -60,9 +74,18 @@
 
       // Só existe UMA operação em andamento por vez, na fábrica inteira —
       // a fonte de verdade passa a ser o servidor, não mais só o
-      // localStorage deste navegador. Sem conexão, cai pro rascunho local
-      // salvo aqui (mesmo comportamento de antes desta sincronização
-      // existir).
+      // localStorage deste navegador, DEPOIS de "Iniciar Injeção" (ver
+      // persist(), abaixo — só transmite a partir daí). Sem conexão, cai
+      // pro rascunho local salvo aqui, seja qual for o status (mesmo
+      // comportamento de sempre — base do Registro Offline, ver README).
+      // Quando o servidor RESPONDE dizendo que não tem nada em andamento
+      // (não é erro, é o normal antes de alguém iniciar algo), quem
+      // decide se um rascunho 'idle' local sobrevive ou não é
+      // _aplicarEstadoExterno (abaixo) — mesma regra vale tanto pra esta
+      // carga inicial quanto pro "handshake" do WebSocket ao vivo (ver
+      // LW.conectarOperacaoAndamento, logo abaixo: o servidor manda o
+      // estado atual assim que a conexão abre, e ele também pode vir
+      // null).
       let estadoInicial;
       try {
         estadoInicial = await LW.getOperacaoAndamento();
@@ -104,6 +127,30 @@
     // sem aviso o teste em andamento aqui.
     if (state.modo_teste) return;
     clearInterval(timerInterval);
+    if (!dados) {
+      // Servidor diz que não tem NENHUMA operação em andamento — seja no
+      // boot da página (ver init(), acima) ou no "handshake" que o
+      // WebSocket manda assim que conecta (servidor sempre manda o
+      // estado atual nessa hora, ver server.js — e ele também pode vir
+      // null). ANTES de esvaziar tudo (resetState, abaixo), dá uma
+      // chance pro rascunho LOCAL sobreviver, mas só se ele ainda não
+      // tiver sido "iniciado" (status 'idle'): campos preenchidos ANTES
+      // de "Iniciar Injeção" nunca chegaram a ser transmitidos pro
+      // servidor (ver persist(), abaixo — só a partir daí), então o
+      // servidor genuinamente não tem como saber deles — sem esta
+      // exceção, um refresh (ou até só a reconexão do WebSocket, alguns
+      // segundos depois do boot) apagava silenciosamente bateria, tipo
+      // de montagem, dimensão, turno e traços já digitados (ver
+      // conversa que motivou esta mudança).
+      // Um rascunho local já 'running'/'paused' é IGNORADO aqui de
+      // propósito: a partir do momento em que uma operação é iniciada, o
+      // servidor É quem manda — pode ter sido finalizada ou assumida por
+      // OUTRO dispositivo nesse meio tempo, e reviver um rascunho local
+      // desatualizado nesse caso arriscaria mostrar como "em andamento"
+      // uma operação que já foi registrada de verdade por outra tela.
+      const rascunhoLocal = LW.getOperacaoAtual();
+      if (rascunhoLocal && rascunhoLocal.status === 'idle') dados = rascunhoLocal;
+    }
     if (dados) {
       state = dados;
       // Compat: rascunhos salvos antes deste campo existir não têm
@@ -221,6 +268,12 @@
       }
 
       state.id_bateria = novoId;
+      // Um override de berços (ver _aplicarNovaCapacidadeBercos, abaixo)
+      // foi calculado em cima da bateria ANTERIOR — trocar de bateria
+      // sempre volta a usar o `bercos` cadastrado da bateria nova, de
+      // propósito (sem isso, um override "8 berços" setado pra uma B1
+      // continuaria valendo mesmo trocando pra uma bateria de 22 berços).
+      state.bercos_override = null;
       // Preserva o que já foi configurado berço a berço, redimensionando
       // pra capacidade da bateria nova (pode ser maior ou menor) em vez de
       // jogar tudo fora — mesma lógica de redimensionamento já usada ao
@@ -259,13 +312,13 @@
     });
     // Formata em tempo real: a pessoa digita só o número (ex: "9,5" ou
     // "9.5") e o " cm" já aparece sozinho no final — ver
-    // _formatarDimensaoLive() logo abaixo pra detalhes (inclusive o
+    // LW.formatarDimensaoLive() (data.js) pra detalhes (inclusive o
     // ponto virando vírgula, que é o padrão usado no resto do sistema).
     $('op-dimensao').addEventListener('input', e => {
       const input = e.target;
       const cursorPos = input.selectionStart;
       const antes = input.value;
-      const formatado = _formatarDimensaoLive(antes);
+      const formatado = LW.formatarDimensaoLive(antes);
       if (formatado !== antes) {
         input.value = formatado;
         // Cursor: como só mexemos no sufixo " cm" (nunca no que a pessoa
@@ -297,6 +350,20 @@
     if (el) el.textContent = LW.formatTime(nowBrasilia());
   }
 
+  // Número de berços EFETIVO desta operação: o override local (ver
+  // state.bercos_override, declarado acima) quando existe, senão o
+  // `bercos` cadastrado da bateria selecionada — mesmo valor de sempre.
+  // Único ponto de leitura da capacidade; updateCapacidade(),
+  // recalcPaineis() e abrirGradeMontagemPersonalizada() usam este helper
+  // em vez de ler `bateria.bercos` direto, pra nunca ficarem
+  // dessincronizados entre si depois de um override.
+  function _capacidadeAtual() {
+    const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
+    const override = Number(state.bercos_override);
+    if (Number.isFinite(override) && override > 0) return override;
+    return bateria?.bercos || 0;
+  }
+
   function updateCapacidade() {
     const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
     if (bateria) {
@@ -309,7 +376,13 @@
         state.dimensao = bateria.label; // Sincroniza a dimensão automaticamente
         if ($('op-dimensao')) $('op-dimensao').value = state.dimensao;
       }
-      $('op-capacidade').value = `${bateria.bercos} berços`;
+      // Com override ativo (ver _aplicarNovaCapacidadeBercos, abaixo),
+      // mostra o número customizado — com um sinalizador visual (nunca
+      // silencioso) pra ficar claro que não é mais o valor cadastrado da
+      // bateria.
+      $('op-capacidade').value = state.bercos_override
+        ? `${_capacidadeAtual()} berços (customizado)`
+        : `${bateria.bercos} berços`;
     } else {
       if (!state.dimensaoManual) {
         state.dimensao = '';
@@ -340,54 +413,16 @@
     }
   }
 
-  // Formata o texto digitado em "Dimensão" pra já virar "9,5 cm" sem a
-  // pessoa precisar escrever o "cm" — e sem duplicar caso ela escreva
-  // mesmo assim. Regras, na ordem aplicada:
-  //  1) descarta qualquer caractere que não seja número, vírgula ou ponto
-  //     — o campo é só pra medida, não aceita texto livre (letras,
-  //     símbolos etc. são simplesmente ignorados enquanto a pessoa
-  //     digita, nem chegam a aparecer no campo);
-  //  2) ponto vira vírgula (9.5 -> 9,5), que é o separador decimal
-  //     padrão usado no resto do sistema;
-  //  3) o que sobrar (só o número) recebe " cm" no final automaticamente.
-  // `final`: true quando é a formatação de fechamento (blur/Enter/✓) — aí
-  // uma vírgula sem nada depois (ex: "9,") não faz sentido como medida
-  // definitiva, então é descartada e vira só "9 cm". Enquanto a pessoa
-  // ainda está digitando (final=false), a vírgula solta é mantida, senão
-  // ela nunca conseguiria digitar as casas decimais depois dela.
-  function _formatarDimensaoLive(bruto, final) {
-    let v = (bruto || '');
-    // Tira um "cm" que já esteja no final (com/sem espaço, maiúsc/minúsc)
-    // pra recalcular em cima só do número — evita "9,5 cm cm" ao digitar
-    // mais alguma coisa depois do sufixo já ter aparecido.
-    v = v.replace(/\s*cm\s*$/i, '');
-    // Só dígitos, vírgula e ponto passam — qualquer letra, espaço ou
-    // outro símbolo é descartado (não é um valor inválido "a ser
-    // corrigido depois": simplesmente não entra no campo).
-    v = v.replace(/[^\d,.]/g, '');
-    // Ponto sempre vira vírgula (padrão decimal do sistema)
-    v = v.replace(/\./g, ',');
-    // Permite só uma vírgula (a partir da segunda, descarta) — evita algo
-    // como "9,5,3" que não seria uma medida válida.
-    const partes = v.split(',');
-    if (partes.length > 2) v = partes[0] + ',' + partes.slice(1).join('');
-    // Vírgula "pendurada" sem casa decimal depois (ex: "9," ou "9,,"): só
-    // faz sentido enquanto a pessoa ainda está digitando. Ao fechar o
-    // campo, tira a vírgula solta — "9," vira "9", não "9, cm".
-    if (final && /,$/.test(v)) v = v.replace(/,+$/, '');
-    if (v === '') return '';
-    return v + ' cm';
-  }
-
   // Trava o campo de novo e grava o valor digitado como definitivo pra
   // esta operação — chamado ao clicar de novo no ✓, apertar Enter, ou
   // sair do campo (blur), o que vier primeiro.
-  function _confirmarDimensaoManual() {
+  async function _confirmarDimensaoManual() {
     const input = $('op-dimensao');
     const btn = $('btn-editar-dimensao');
     if (!input || input.readOnly) return; // já estava travado — nada a confirmar
 
-    const valor = _formatarDimensaoLive(input.value.trim(), true);
+    const valorAnterior = state.dimensao;
+    const valor = LW.formatarDimensaoLive(input.value.trim(), true);
     input.value = valor;
     state.dimensao = valor;
     // Vazio = desiste da edição manual, volta a acompanhar a bateria
@@ -401,8 +436,92 @@
     input.classList.toggle('auto-filled', !state.dimensaoManual);
     if (btn) { btn.textContent = '✏️'; btn.title = 'Definir uma dimensão específica para esta operação'; }
 
-    if (!state.dimensaoManual) updateCapacidade(); // reaplica o automático na hora
+    if (!state.dimensaoManual) {
+      // Volta a automático: some junto qualquer override de berços que
+      // essa dimensão manual tivesse trazido (state.bercos_override) —
+      // sem uma dimensão específica não faz sentido manter uma
+      // capacidade customizada em cima dela.
+      state.bercos_override = null;
+      updateCapacidade(); // reaplica o automático na hora
+      recalcPaineis();
+    } else if (valor !== valorAnterior && LW.BATERIA_IDS.find(b => b.id === state.id_bateria)) {
+      // Só pergunta quando a dimensão de fato mudou (evita perguntar de
+      // novo se a pessoa só clicou em ✏️/✓ sem alterar nada) e quando já
+      // existe uma bateria selecionada (sem ela não há "berços atuais"
+      // pra comparar/editar).
+      await _perguntarMudancaBercos();
+    }
     persist();
+  }
+
+  /**
+   * Chamada sempre que uma Dimensão manual É REALMENTE alterada (ver
+   * _confirmarDimensaoManual, acima) — uma dimensão diferente pode mudar
+   * fisicamente quantos berços cabem na bateria (molde mais largo/mais
+   * estreito). Pergunta se é o caso e, se sim, pede o novo número —
+   * vira um OVERRIDE só desta operação (state.bercos_override), NUNCA
+   * mexe no cadastro fixo da bateria em Configurações (decisão tomada
+   * na conversa que motivou esta função).
+   */
+  async function _perguntarMudancaBercos() {
+    const mudou = await LW.mostrarConfirmacao(
+      `Dimensão definida: ${state.dimensao}. Isso muda o número de berços desta bateria (só nesta operação)?`,
+      {
+        titulo: 'A dimensão mudou o número de berços?',
+        textoConfirmar: 'Sim, mudou',
+        textoCancelar: 'Não, continua igual',
+        icon: '📐',
+      }
+    );
+    if (!mudou) return;
+
+    const capacidadeAtual = _capacidadeAtual();
+    let novoValor = null;
+    while (novoValor === null) {
+      // eslint-disable-next-line no-await-in-loop -- pede de novo só quando o valor digitado é inválido; cada iteração depende da anterior.
+      const digitado = await LW.mostrarPrompt(
+        `Berços atuais: ${capacidadeAtual}. Qual vai ser o novo número de berços?`,
+        { titulo: 'Novo número de berços', placeholder: 'Ex: 18', icon: '🔢', textoConfirmar: 'Aplicar' }
+      );
+      if (digitado === null) return; // cancelou — mantém a capacidade como estava
+
+      const n = Number(String(digitado).trim().replace(',', '.'));
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+        // eslint-disable-next-line no-await-in-loop -- alerta bloqueante antes de perguntar de novo, de propósito.
+        await LW.mostrarAlerta('Informe um número inteiro de berços, maior que zero.', { tipo: 'aviso' });
+        continue;
+      }
+      novoValor = n;
+    }
+
+    _aplicarNovaCapacidadeBercos(novoValor);
+  }
+
+  /**
+   * Aplica o novo número de berços (override local, ver
+   * _perguntarMudancaBercos, acima) ao state inteiro: redimensiona os
+   * arrays já preenchidos berço a berço — Montagem Personalizada
+   * (bercos_personalizados) e override de Dimensão por berço
+   * (bercos_dimensoes) — mesma lógica de redimensionamento já usada ao
+   * trocar de bateria (ver listener de 'op-id-bateria', acima: berços que
+   * sobrarem são descartados, berços novos nascem vazios/null). Depois
+   * atualiza a tela ("Capacidade (Berços)") e os cálculos de Painéis.
+   */
+  function _aplicarNovaCapacidadeBercos(novaCapacidade) {
+    state.bercos_override = novaCapacidade;
+
+    if (state.tipo_montagem === LW.TIPO_MONTAGEM_PERSONALIZADA && Array.isArray(state.bercos_personalizados)) {
+      const atual = state.bercos_personalizados;
+      state.bercos_personalizados = Array.from({ length: novaCapacidade }, (_, i) => atual[i] || null);
+    }
+    if (Array.isArray(state.bercos_dimensoes)) {
+      const atualDim = state.bercos_dimensoes;
+      const redimensionado = Array.from({ length: novaCapacidade }, (_, i) => atualDim[i] || null);
+      state.bercos_dimensoes = redimensionado.some(Boolean) ? redimensionado : null;
+    }
+
+    updateCapacidade();
+    recalcPaineis();
   }
 
 
@@ -442,8 +561,10 @@
   }
 
   function recalcPaineis() {
-    const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
-    const bercos = bateria?.bercos || 0;
+    // Usa _capacidadeAtual() (respeita state.bercos_override quando
+    // existe) em vez de ler bateria.bercos direto — ver comentário na
+    // declaração do helper, acima.
+    const bercos = _capacidadeAtual();
 
     const elPaineisTipo = $('op-cards-paineis-tipo');
     const elM2Tipo = $('op-cards-m2-tipo');
@@ -786,17 +907,23 @@
   // original + todos os ajustes. Densidade e Flow são remedição: cada
   // ajuste SOBRESCREVE o valor anterior — vale o último valor registrado.
   function totalInsumo(insumo, fieldKey) {
-    const temOriginal = insumo.original !== '' && insumo.original !== null;
-    const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
+    // Blindagem (bug relatado: "Utilizar Sobra" travava sem erro visível)
+    // — `ajustes` pode faltar ou vir malformado em dados antigos/encadeados
+    // (ex: sobra reaproveitada de outra sobra); trata como [] em vez de
+    // deixar `.reduce`/`.length` estourar com "Cannot read properties of
+    // undefined" e travar o render inteiro no meio do caminho.
+    const ajustes = Array.isArray(insumo?.ajustes) ? insumo.ajustes : [];
+    const temOriginal = insumo?.original !== '' && insumo?.original !== null && insumo?.original !== undefined;
+    const temAjustes = ajustes.length > 0;
     if (!temOriginal && !temAjustes) return '';
 
     const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
     if (isResultado) {
-      if (temAjustes) return insumo.ajustes[insumo.ajustes.length - 1];
+      if (temAjustes) return ajustes[ajustes.length - 1];
       return parseFloat(insumo.original) || 0;
     }
 
-    return insumo.ajustes.reduce((s, a) => s + a, parseFloat(insumo.original) || 0);
+    return ajustes.reduce((s, a) => s + a, parseFloat(insumo.original) || 0);
   }
 
   // Migra traços antigos (campos _real simples) para nova estrutura com ajustes
@@ -808,6 +935,9 @@
         t[realKey] = { original: t[realKey], ajustes: [] };
       }
     });
+    // Insumos CUSTOM (Fase 5) — rascunho salvo no localStorage antes desta
+    // feature existir simplesmente não tem a chave; garante que exista.
+    if (!t.insumos_custom || typeof t.insumos_custom !== 'object') t.insumos_custom = {};
     // Migrar densidade e flow se necessário
     ['densidade', 'flow'].forEach(key => {
       const targetKey = key + '_insumo';
@@ -868,8 +998,7 @@
    * precisar mudar esse call site.
    */
   function tracoCompleto(t, i, tracos) {
-    const insumoPreenchido = (key) => {
-      const insumo = t[key];
+    const insumoPreenchidoValor = (insumo) => {
       if (!insumo) return false;
       // Preenchido se tem valor ORIGINAL ou pelo menos 1 AJUSTE — bug
       // relatado numa conversa: Flow/Densidade preenchidos só através do
@@ -884,6 +1013,11 @@
       const temAjuste = Array.isArray(insumo.ajustes) && insumo.ajustes.length > 0;
       return temOriginal || temAjuste;
     };
+    const insumoPreenchido = (key) => insumoPreenchidoValor(t[key]);
+    // Insumos CUSTOM (Fase 5) — todo insumo que o traço tem (chave em
+    // insumos_custom) é obrigatório, mesmo critério dos 5 Padrão acima —
+    // é assim que o "+" vira de fato um campo obrigatório no formulário.
+    const customsOk = Object.values(t.insumos_custom || {}).every(insumoPreenchidoValor);
     const semErroBerco = tracos === undefined || !_erroBercos(tracos, i ?? 0);
     return !!t.berco_ini && !!t.berco_fim && !!t.silo && !!t.expansao && !!t.densidadeEPS
       && semErroBerco
@@ -894,7 +1028,8 @@
       && insumoPreenchido('incorporador_real')
       && insumoPreenchido('tempo_batida')
       && insumoPreenchido('densidade_insumo')
-      && insumoPreenchido('flow_insumo');
+      && insumoPreenchido('flow_insumo')
+      && customsOk;
   }
 
   /**
@@ -916,13 +1051,15 @@
     // ficava mostrando ⚪ (vazio) nesse campo específico, mesmo tendo
     // dado de verdade.
     const temAjuste = (campo) => Array.isArray(t[campo]?.ajustes) && t[campo].ajustes.length > 0;
+    const customTemDado = Object.values(t.insumos_custom || {}).some(ins => !!ins?.original || (Array.isArray(ins?.ajustes) && ins.ajustes.length > 0));
     const hasData = t.berco_ini || t.berco_fim || t.silo || t.expansao || t.densidadeEPS || t.obs
       || !!t.cimento_real?.original || !!t.agua_real?.original || !!t.eps_real?.original
       || !!t.superplast_real?.original || !!t.incorporador_real?.original
       || !!t.tempo_batida?.original || !!t.densidade_insumo?.original || !!t.flow_insumo?.original
       || temAjuste('cimento_real') || temAjuste('agua_real') || temAjuste('eps_real')
       || temAjuste('superplast_real') || temAjuste('incorporador_real')
-      || temAjuste('tempo_batida') || temAjuste('densidade_insumo') || temAjuste('flow_insumo');
+      || temAjuste('tempo_batida') || temAjuste('densidade_insumo') || temAjuste('flow_insumo')
+      || customTemDado;
     return {
       icon: isComplete ? '✅' : (hasData ? '⚠️' : '⚪'),
       cls: isComplete ? 'complete' : (hasData ? 'pending' : 'empty'),
@@ -995,7 +1132,12 @@
    */
   function tracoTemAjusteSemTempoBatida(t) {
     const camposInsumo = ['cimento_real', 'agua_real', 'eps_real', 'superplast_real', 'incorporador_real'];
-    const maxAjustesInsumo = Math.max(0, ...camposInsumo.map(c => (t[c]?.ajustes?.length) || 0));
+    const ajustesFixos = camposInsumo.map(c => (t[c]?.ajustes?.length) || 0);
+    // Insumos CUSTOM (Fase 5) — mesma contagem, contribuem pro máximo
+    // também (um ajuste de "Fibra" sem tempo de batida é a mesma
+    // inconsistência que um ajuste de Cimento sem tempo de batida).
+    const ajustesCustom = Object.values(t.insumos_custom || {}).map(ins => (ins?.ajustes?.length) || 0);
+    const maxAjustesInsumo = Math.max(0, ...ajustesFixos, ...ajustesCustom);
     const ajustesTempo = t.tempo_batida?.ajustes?.length || 0;
     return maxAjustesInsumo > ajustesTempo;
   }
@@ -1049,6 +1191,11 @@
       eps_real: { original: '', ajustes: [] },
       superplast_real: { original: '', ajustes: [] },
       incorporador_real: { original: '', ajustes: [] },
+      // Insumos CUSTOM (Fase 5, ver PLANO-insumos-dinamicos-receitas.md) —
+      // {nome: {original, ajustes}}, mesmo formato dos 5 Padrão acima.
+      // Começa vazio — só ganha uma chave quando o botão "+" adiciona um
+      // (ver LWOp.adicionarInsumoCustom).
+      insumos_custom: {},
       tempo_batida: { original: '', ajustes: [] },
       densidade_insumo: { original: '', ajustes: [] },
       flow_insumo: { original: '', ajustes: [] },
@@ -1074,6 +1221,19 @@
     const prevTraco = state.tracos[state.tracos.length - 1];
     const sugeridoIni = prevTraco?.berco_fim ? String(Number(prevTraco.berco_fim) + 1) : '1';
 
+    // Normaliza um campo de insumo {original, ajustes} vindo da sobra —
+    // defesa em profundidade (mesmo raciocínio de totalInsumo, acima):
+    // uma sobra reaproveitada de OUTRA sobra pode ter encadeado um campo
+    // malformado (sem `ajustes`, por exemplo); garante a forma esperada
+    // ANTES de virar o state do traço, não só na hora de exibir.
+    const normalizarCampoInsumo = (campo) => {
+      if (!campo || typeof campo !== 'object') return { original: '', ajustes: [] };
+      return {
+        original: campo.original ?? '',
+        ajustes: Array.isArray(campo.ajustes) ? campo.ajustes : [],
+      };
+    };
+
     // Reconstrói o traço a partir dos dados persistidos na sobra
     const receita = sobra.receita || {};
     const traco = {
@@ -1083,12 +1243,18 @@
       berco_ini: sugeridoIni,
       berco_fim: '',
       // Receita carregada da sobra
-      cimento_real: receita.cimento_real || { original: '', ajustes: [] },
-      agua_real: receita.agua_real || { original: '', ajustes: [] },
-      eps_real: receita.eps_real || { original: '', ajustes: [] },
-      superplast_real: receita.superplast_real || { original: '', ajustes: [] },
-      incorporador_real: receita.incorporador_real || { original: '', ajustes: [] },
-      tempo_batida: receita.tempo_batida || { original: '', ajustes: [] },
+      cimento_real: normalizarCampoInsumo(receita.cimento_real),
+      agua_real: normalizarCampoInsumo(receita.agua_real),
+      eps_real: normalizarCampoInsumo(receita.eps_real),
+      superplast_real: normalizarCampoInsumo(receita.superplast_real),
+      incorporador_real: normalizarCampoInsumo(receita.incorporador_real),
+      // Insumos CUSTOM — carregados da sobra (já readonly, mesmo raciocínio
+      // dos 5 Padrão acima: traço reaproveitado nunca reedita a receita).
+      // Cada entrada também passa por normalizarCampoInsumo — mesma defesa.
+      insumos_custom: Object.fromEntries(
+        Object.entries(receita.insumos_custom || {}).map(([nome, campo]) => [nome, normalizarCampoInsumo(campo)])
+      ),
+      tempo_batida: normalizarCampoInsumo(receita.tempo_batida),
       // Flow e densidade carregados — o operador pode registrar o novo resultado medido
       densidade_insumo: (sobra.densidade !== undefined && sobra.densidade !== null)
         ? { original: String(sobra.densidade), ajustes: [] }
@@ -1210,13 +1376,27 @@
 
     document.getElementById('btn-utilizar-sobra').addEventListener('click', async () => {
       modal.remove();
-      // Garante que a base do contador diário esteja definida nesta operação,
-      // mesmo que o primeiro traço adicionado seja um reaproveitado de sobra.
-      await _garantirBaseNumTraco();
-      // Adiciona o traço reaproveitado ao state
-      _adicionarTracoDeSobra(sobra);
-      // Marca sobra como utilizada (em segundo plano para não travar a UI)
-      try { await LW.desativarSobra('utilizada', state.modo_teste); } catch (_) { }
+      // Blindagem contra falha silenciosa (relatada numa conversa: "clico e
+      // não acontece nada", sem eu conseguir reproduzir em teste) — se
+      // QUALQUER passo abaixo falhar, mostra um alerta explícito em vez de
+      // simplesmente não fazer nada; ajuda tanto o operador (sabe que
+      // precisa tentar de novo/chamar suporte) quanto a próxima investigação
+      // (a mensagem de erro fica visível, não só no console).
+      try {
+        // Garante que a base do contador diário esteja definida nesta operação,
+        // mesmo que o primeiro traço adicionado seja um reaproveitado de sobra.
+        await _garantirBaseNumTraco();
+        // Adiciona o traço reaproveitado ao state
+        _adicionarTracoDeSobra(sobra);
+        // Marca sobra como utilizada (em segundo plano para não travar a UI)
+        try { await LW.desativarSobra('utilizada', state.modo_teste); } catch (_) { }
+      } catch (err) {
+        console.error('[LW] Falha ao utilizar sobra:', err);
+        LW.mostrarAlerta(
+          `Não consegui carregar a sobra deste traço (${err.message || 'erro desconhecido'}). Tente de novo — se persistir, use "+ Criar Novo Traço" e avise o suporte.`,
+          { tipo: 'erro' }
+        );
+      }
     });
 
     document.getElementById('btn-criar-novo-traco').addEventListener('click', () => {
@@ -1468,6 +1648,12 @@
     const t = state.tracos[i];
     if (!t || t._reaproveitado) return;
 
+    // Insumos CUSTOM já gravados neste traço (Fase 5/correção posterior,
+    // ver PLANO-insumos-dinamicos-receitas.md) — assim como os 5 Padrão
+    // acima, são OPCIONAIS em cada ajuste: preenche só se estiver sendo
+    // ajustado agora, não precisa repetir todo ajuste.
+    const nomesCustomDoTraco = Object.keys(t.insumos_custom || {});
+
     const existente = document.getElementById('modal-ajuste-receita');
     if (existente) existente.remove();
 
@@ -1526,6 +1712,19 @@
           </div>
         </div>
 
+        ${nomesCustomDoTraco.length ? `
+        <div class="form-group" style="margin-bottom:6px">
+          <label class="form-label" style="margin-bottom:10px">Insumos deste traço <span style="color:var(--text-3);font-weight:400;text-transform:none">(opcional — preencha só o que foi adicionado)</span></label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            ${nomesCustomDoTraco.map((nome, idx) => `
+              <div class="form-group">
+                <label class="form-label">${nome} (kg)</label>
+                <input class="form-input" type="number" step="0.01" id="ar-custom-${idx}" placeholder="0">
+              </div>
+            `).join('')}
+          </div>
+        </div>` : ''}
+
         <div class="form-group" style="margin-bottom:6px;margin-top:14px">
           <label class="form-label" style="margin-bottom:10px">Remedição <span style="color:var(--text-3);font-weight:400;text-transform:none">(opcional — sobrescreve o valor anterior)</span></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -1565,10 +1764,10 @@
     document.getElementById('ar-s-dn').addEventListener('click', () => incDecAr('ar-dur-s', 59, -1));
 
     document.getElementById('ar-btn-cancelar').addEventListener('click', () => modal.remove());
-    document.getElementById('ar-btn-salvar').addEventListener('click', () => _salvarAjusteReceita(i, modal));
+    document.getElementById('ar-btn-salvar').addEventListener('click', () => _salvarAjusteReceita(i, modal, nomesCustomDoTraco));
   }
 
-  async function _salvarAjusteReceita(i, modal) {
+  async function _salvarAjusteReceita(i, modal, nomesCustomDoTraco = []) {
     const t = state.tracos[i];
     if (!t) { modal.remove(); return; }
 
@@ -1586,8 +1785,20 @@
     }
     const minutos = Math.round((segundos / 60) * 100) / 100; // pro arquivo de auditoria (em minutos)
 
+    // Insumos CUSTOM deste traço — OPCIONAIS, mesmo critério dos 5 Padrão
+    // (CAMPOS_INSUMO_AJUSTE, abaixo): preenche só o que entrou, sem
+    // bloquear o salvar se ficar em branco.
+    const insumosCustomAjuste = {}; // { nome: valor }
+    for (let idx = 0; idx < nomesCustomDoTraco.length; idx++) {
+      const nome = nomesCustomDoTraco[idx];
+      const input = document.getElementById(`ar-custom-${idx}`);
+      const val = parseFloat(input?.value);
+      if (!isNaN(val) && val > 0) insumosCustomAjuste[nome] = val;
+    }
+
     const camposPreenchidos = {}; // { cimento_real: valor, ... } — pro state do traço
     const ajusteAudit = { tempo_batida: minutos }; // { tempo_batida, cimento, agua, densidade, flow, ... } — pro arquivo de auditoria
+    if (Object.keys(insumosCustomAjuste).length) ajusteAudit.insumos_custom = insumosCustomAjuste;
 
     // Insumos (somam ao total) — todos opcionais, preenche só o que entrou.
     CAMPOS_INSUMO_AJUSTE.forEach(c => {
@@ -1619,6 +1830,15 @@
     Object.entries(camposPreenchidos).forEach(([campo, valor]) => {
       if (!t[campo] || typeof t[campo] !== 'object') t[campo] = { original: '', ajustes: [] };
       t[campo].ajustes.push(valor);
+    });
+
+    // Insumos custom — mesma ideia, mas dentro de t.insumos_custom[nome].
+    Object.entries(insumosCustomAjuste).forEach(([nome, valor]) => {
+      if (!t.insumos_custom) t.insumos_custom = {};
+      if (!t.insumos_custom[nome] || typeof t.insumos_custom[nome] !== 'object') {
+        t.insumos_custom[nome] = { original: '', ajustes: [] };
+      }
+      t.insumos_custom[nome].ajustes.push(valor);
     });
 
     persist();
@@ -1699,7 +1919,11 @@
           resolve(false);
           return;
         }
-        capacidade = bateria.bercos || 0;
+        // Respeita o override local de berços (ver _capacidadeAtual,
+        // acima) — sem isso, a grade de Montagem Personalizada abriria
+        // sempre com o número cadastrado da bateria, ignorando a
+        // capacidade customizada desta operação.
+        capacidade = _capacidadeAtual();
         tituloBateria = bateria.id;
       }
 
@@ -2117,8 +2341,21 @@
    * Pergunta se houve sobra no ÚLTIMO traço e persiste sobra.json se sim.
    * @param {object} record — registro já salvo da operação
    */
-  function _perguntarSobraAoFinalizar(record) {
-    const tracos = record.tracos || [];
+  function _perguntarSobraAoFinalizar(record, tracosOriginais) {
+    // `tracosOriginais` (novo parâmetro) — os traços em memória ANTES do
+    // achatamento pra envio E antes de resetState() limpar `state` (ver
+    // chamada desta função, mais abaixo: resetState() já rodou por lá
+    // antes desta função, então `state.tracos` não pode mais ser lido
+    // aqui — precisa vir capturado de fora). BUG CORRIGIDO (relatado:
+    // "insumos custom vindo vazios" na sobra): antes, esta função lia
+    // record.tracos — o fullRecord já ACHATADO pra envio ao servidor
+    // (ver finalizarInjecao), onde insumos_custom vira {nome:
+    // valorOriginal} (número simples — os ajustes já foram registrados
+    // ao vivo à parte). A sobra precisa do formato RICO
+    // {original, ajustes} de cada campo (mesmo que os 5 Padrão, que não
+    // sofrem esse achatamento) — por isso usa tracosOriginais aqui.
+    // record.id continua vindo do fullRecord (é só o id da operação).
+    const tracos = tracosOriginais || [];
     if (tracos.length === 0) return;
 
     const ultimoTraco = tracos[tracos.length - 1];
@@ -2179,6 +2416,7 @@
           eps_real: ultimoTraco.eps_real,
           superplast_real: ultimoTraco.superplast_real,
           incorporador_real: ultimoTraco.incorporador_real,
+          insumos_custom: ultimoTraco.insumos_custom,
           tempo_batida: ultimoTraco.tempo_batida,
           silo: ultimoTraco.silo,
           expansao: ultimoTraco.expansao,
@@ -2367,6 +2605,94 @@
   }
 
   // Renderiza campo de insumo (entrada do valor original + badge de ajustes)
+  // Insumos CUSTOM (Fase 5, ver PLANO-insumos-dinamicos-receitas.md) —
+  // mesma lógica visual de renderCampoInsumo, mas lendo/escrevendo em
+  // t.insumos_custom[nome] em vez de t[fieldKey] direto (chave dinâmica,
+  // não dá pra reaproveitar a função de cima sem mudar a assinatura dela).
+  // fieldKey fixo ('insumo_custom', não o nome) pro totalInsumo NUNCA
+  // cair no caso "isResultado" (densidade/flow) por coincidência de nome.
+  function renderCampoInsumoCustom(t, i, nome) {
+    const insumo = (t.insumos_custom && t.insumos_custom[nome]) || { original: '', ajustes: [] };
+    const temAjustes = insumo.ajustes && insumo.ajustes.length > 0;
+    const total = totalInsumo(insumo, 'insumo_custom');
+    const valorExibido = total !== '' ? parseFloat(total).toFixed(2) : '';
+    // Mesma fórmula "9,50 + 0,50 = 10,00" que os 5 Padrão já mostram (ver
+    // renderCampoInsumo) — faltou na primeira versão desta função, só
+    // tinha o badge do total. fieldKey 'insumo_custom' (mesmo sentinel de
+    // totalInsumo, acima) garante que formatAjustesDisplay nunca trata
+    // como "isResultado" (Densidade/Flow, que usa "→" em vez de "+").
+    const displayAjustes = temAjustes ? formatAjustesDisplay(insumo, 2, 'insumo_custom') : '';
+    // Só pode desfazer a adição ANTES de qualquer ajuste — depois do
+    // primeiro ajuste, esse insumo já faz parte do histórico do traço
+    // (mesma trava de "readonly" que os 5 Padrão já têm), então some o
+    // "x" pra não sugerir que dá pra tirar sem mais nem menos.
+    const podeRemover = !t._reaproveitado && !temAjustes;
+    const nomeEscapado = nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+    return `
+      <div class="form-group insumo-group">
+        <label class="form-label" style="display:flex;align-items:center;gap:6px">
+          ${nome} (kg) <span class="required">*</span>
+          ${podeRemover ? `<button type="button" onclick="LWOp.removerInsumoCustom(${i},'${nomeEscapado}')"
+              title="Remover este insumo do traço" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;margin-left:auto">✕</button>` : ''}
+        </label>
+        <div class="insumo-input-row">
+          <input class="form-input ${(t._reaproveitado || temAjustes) ? 'readonly-reaproveitado' : ''}" type="number" step="0.01"
+            value="${valorExibido}"
+            oninput="LWOp.updateInsumoCustomOriginal(${i},'${nomeEscapado}',this.value)"
+            ${t._reaproveitado || temAjustes ? 'readonly' : ''}
+            placeholder="kg">
+        </div>
+        ${temAjustes ? `
+          <div class="insumo-ajustes-display">
+            <span class="ajustes-formula">${displayAjustes}</span>
+            <span class="ajustes-total-badge">Total: ${valorExibido || '—'}</span>
+          </div>` : ''}
+      </div>`;
+  }
+
+  // Botão "+" (adicionar insumo Custom) + picker inline — só oferece os
+  // Custom do catálogo (LW.INSUMO_RECEITA_OPTS) que ESTE traço ainda não
+  // tem. Estado de "picker aberto" é por índice de traço (Set módulo,
+  // abaixo), não fica em `state` — é só UI transitória, não precisa
+  // persistir/sincronizar entre abas.
+  function renderInsumosCustomSecao(t, i) {
+    const nomesAtuais = Object.keys(t.insumos_custom || {});
+    const camposExistentes = nomesAtuais.map(nome => renderCampoInsumoCustom(t, i, nome)).join('');
+
+    // Traço reaproveitado: receita inteira travada, sem botão "+" (mesmo
+    // raciocínio dos 5 Padrão — não dá pra editar a receita de novo).
+    if (t._reaproveitado) return camposExistentes;
+
+    const disponiveis = (LW.INSUMO_RECEITA_OPTS || [])
+      .filter(o => o.categoria === 'custom' && !nomesAtuais.includes(o.nome));
+    const pickerAberto = _insumoCustomPickerAberto.has(i);
+
+    let picker = '';
+    if (pickerAberto) {
+      picker = disponiveis.length ? `
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;margin-top:4px">
+          <select class="form-input" id="insumo-custom-select-${i}" style="flex:1">
+            ${disponiveis.map(o => `<option value="${o.nome.replace(/"/g, '&quot;')}">${o.nome}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost" onclick="LWOp.confirmarAdicionarInsumoCustom(${i})">Adicionar</button>
+          <button type="button" class="btn btn-ghost" onclick="LWOp.toggleInsumoCustomPicker(${i})">Cancelar</button>
+        </div>` : `
+        <div style="grid-column:1/-1;color:var(--text-3);font-size:.8rem;margin-top:4px">
+          Nenhum insumo Custom disponível — cadastre em Configurações → Insumos de Receitas.
+        </div>`;
+    }
+
+    return `
+      ${camposExistentes}
+      <div style="grid-column:1/-1;display:flex;align-items:center">
+        ${!pickerAberto ? `<button type="button" onclick="LWOp.toggleInsumoCustomPicker(${i})"
+            style="background:none;border:1px dashed var(--border);color:var(--text-2);border-radius:var(--radius);
+                   padding:8px 14px;cursor:pointer;font-size:.82rem">+ Adicionar insumo</button>` : ''}
+      </div>
+      ${picker}`;
+  }
+
   function renderCampoInsumo(t, i, fieldKey, label, step, decimais, placeholder) {
     const insumo = t[fieldKey] || { original: '', ajustes: [] };
     const isResultado = fieldKey && (fieldKey.includes('densidade') || fieldKey.includes('flow'));
@@ -2532,6 +2858,7 @@
             ${renderCampoInsumo(t, i, 'superplast_real', 'Superplast. (kg)', '0.001', 2, 'kg', t._reaproveitado)}
             ${renderCampoInsumo(t, i, 'incorporador_real', 'Incorp. de Ar (kg)', '0.001', 2, 'kg', t._reaproveitado)}
             ${renderCampoTempoBatida(t, i, t._reaproveitado)}
+            ${renderInsumosCustomSecao(t, i)}
           </div>
           <div id="ac-relacao-${i}">${renderRelacaoAC(t)}</div>
 
@@ -2705,7 +3032,20 @@
         }
         return {
           ...t,
-          operacoes
+          operacoes,
+          // Insumos CUSTOM (Fase 5, ver PLANO-insumos-dinamicos-receitas.md)
+          // — diferente dos 5 Padrão (spread acima já manda {original,
+          // ajustes}, que o servidor sabe desmembrar via extrairOriginal),
+          // db.salvarInsumosCustomDoTraco espera um mapa CHATO
+          // {nome: valor} — só o original (os ajustes já foram gravados
+          // ao vivo, um por um, via /registrar-ajuste-traco, igual os
+          // Padrão). Achata aqui, sobrescrevendo o {original,ajustes}
+          // que o spread de "...t" acima colocou.
+          insumos_custom: Object.fromEntries(
+            Object.entries(t.insumos_custom || {})
+              .filter(([, v]) => v && v.original !== '' && v.original !== null && v.original !== undefined)
+              .map(([nome, v]) => [nome, Number(v.original)])
+          ),
         };
       }),
     };
@@ -2732,6 +3072,11 @@
       return;
     }
 
+    // Captura a referência ANTES de resetState() limpar `state` (logo
+    // abaixo) — precisa sobreviver até a pergunta de sobra, depois do
+    // reset (ver comentário de _perguntarSobraAoFinalizar).
+    const tracosOriginaisParaSobra = state.tracos;
+
     Promise.all([
       LW.registrarOperacao(historyRecord, state.modo_teste),
       LW.registrarRelatorioInjecao(fullRecord, state.modo_teste),
@@ -2744,7 +3089,7 @@
         resetState();
         renderAll();
         // Pergunta sobre sobra ANTES de mostrar o modal de sucesso
-        _perguntarSobraAoFinalizar(fullRecord);
+        _perguntarSobraAoFinalizar(fullRecord, tracosOriginaisParaSobra);
       })
       .catch(err => {
         // TypeError é o que o fetch() do navegador lança quando não
@@ -3071,6 +3416,7 @@
       modo_teste: false,
       bercos_personalizados: null,
       bercos_dimensoes: null,
+      bercos_override: null,
     };
     // Sem operação em andamento, o monitor de conexão ao vivo (item 9 do
     // plano de Registro Offline) não se aplica mais — zera pra não
@@ -3229,7 +3575,7 @@
     const capacidade = bateria?.bercos || 0;
 
     if (typeof novaDimensao === 'string' && novaDimensao.trim() !== '') {
-      const valorFormatado = _formatarDimensaoLive(novaDimensao.trim(), true);
+      const valorFormatado = LW.formatarDimensaoLive(novaDimensao.trim(), true);
       if (!capacidade || numeroBerco < 1 || numeroBerco > capacidade) {
         LW.mostrarAlerta('Berço fora da capacidade atual da bateria.', { tipo: 'erro' });
       } else {
@@ -3332,6 +3678,52 @@
         const el = document.getElementById(`ac-relacao-${i}`);
         if (el) el.innerHTML = renderRelacaoAC(state.tracos[i]);
       }
+    },
+    // Insumos CUSTOM (Fase 5, ver PLANO-insumos-dinamicos-receitas.md) —
+    // mesmo padrão de updateInsumoOriginal acima, mas em t.insumos_custom[nome].
+    updateInsumoCustomOriginal(i, nome, value) {
+      const t = state.tracos[i];
+      if (!t) return;
+      if (!t.insumos_custom) t.insumos_custom = {};
+      let insumo = t.insumos_custom[nome];
+      if (!insumo || typeof insumo !== 'object' || !('ajustes' in insumo)) {
+        insumo = { original: value, ajustes: [] };
+        t.insumos_custom[nome] = insumo;
+      } else {
+        insumo.original = value;
+      }
+      persist();
+    },
+    // Abre/fecha o picker "+ Adicionar insumo" pro traço `i`.
+    toggleInsumoCustomPicker(i) {
+      if (_insumoCustomPickerAberto.has(i)) _insumoCustomPickerAberto.delete(i);
+      else _insumoCustomPickerAberto.add(i);
+      renderTracos();
+    },
+    // Confirma a escolha do <select> do picker e adiciona o insumo ao traço
+    // — campo nasce vazio (obrigatório, ver tracoCompleto) até a pessoa
+    // preencher o valor.
+    confirmarAdicionarInsumoCustom(i) {
+      const select = document.getElementById(`insumo-custom-select-${i}`);
+      const nome = select && select.value;
+      if (!nome) return;
+      const t = state.tracos[i];
+      if (!t) return;
+      if (!t.insumos_custom) t.insumos_custom = {};
+      t.insumos_custom[nome] = { original: '', ajustes: [] };
+      _insumoCustomPickerAberto.delete(i);
+      persist();
+      renderTracos();
+    },
+    // Desfaz a adição de um insumo Custom — só chamável antes do primeiro
+    // ajuste (botão nem aparece depois, ver renderCampoInsumoCustom), mas
+    // a função em si não reforça essa trava: quem decide é o render.
+    removerInsumoCustom(i, nome) {
+      const t = state.tracos[i];
+      if (!t || !t.insumos_custom) return;
+      delete t.insumos_custom[nome];
+      persist();
+      renderTracos();
     },
     removeTraco,
     // Registro de Traço Descartado (Perda) — ver README, passo 3 do plano.

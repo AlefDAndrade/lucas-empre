@@ -1,303 +1,11 @@
 // ============================================================
 //  LIGHTWALL SC — SISTEMA DE INJEÇÃO
-//  dashboard.js — Dashboard Geral + Desempenho por Turnos
+//  dashboard.js — Registro de Baterias + Relatório de Injeção
 // ============================================================
 
 'use strict';
 
 (function () {
-
-  // ---- Simple bar chart (pure canvas) ----
-  function drawBarChart(canvasId, labels, values, color = '#f59e0b') {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width = canvas.offsetWidth;
-    const H = canvas.height = 200;
-
-    ctx.clearRect(0, 0, W, H);
-
-    const max = Math.max(...values, 1);
-    const pad = { top: 20, right: 16, bottom: 30, left: 36 };
-    const bw = Math.max(4, (W - pad.left - pad.right) / labels.length - 4);
-    const chartW = W - pad.left - pad.right;
-    const chartH = H - pad.top - pad.bottom;
-
-    // Grid lines
-    ctx.strokeStyle = '#2a2f3a';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const y = pad.top + chartH * (1 - i / 4);
-      ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(W - pad.right, y);
-      ctx.stroke();
-      ctx.fillStyle = '#5c6475';
-      ctx.font = '10px JetBrains Mono, monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(Math.round(max * i / 4), pad.left - 4, y + 4);
-    }
-
-    labels.forEach((label, i) => {
-      const x = pad.left + i * (chartW / labels.length) + (chartW / labels.length - bw) / 2;
-      const barH = (values[i] / max) * chartH;
-      const y = pad.top + chartH - barH;
-
-      // Bar
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.85;
-      const radius = 3;
-      ctx.beginPath();
-      ctx.moveTo(x + radius, y);
-      ctx.lineTo(x + bw - radius, y);
-      ctx.quadraticCurveTo(x + bw, y, x + bw, y + radius);
-      ctx.lineTo(x + bw, y + barH);
-      ctx.lineTo(x, y + barH);
-      ctx.lineTo(x, y + radius);
-      ctx.quadraticCurveTo(x, y, x + radius, y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = 1;
-
-      // Label
-      ctx.fillStyle = '#5c6475';
-      ctx.font = '9px Barlow, sans-serif';
-      ctx.textAlign = 'center';
-      const lx = x + bw / 2;
-      // Show only every Nth label to avoid crowding
-      const step = Math.max(1, Math.floor(labels.length / 10));
-      if (i % step === 0) ctx.fillText(label, lx, H - 6);
-    });
-  }
-
-  // ---- Desempenho por Turnos ----
-
-  function initTurnos() {
-    const today = todayBrasilia();
-    const d30 = new Date(nowBrasilia().getTime() - 30 * 86400000).toISOString().split('T')[0];
-    document.getElementById('turnos-data-inicio').value = d30;
-    document.getElementById('turnos-data-fim').value = today;
-
-    document.getElementById('btn-turnos-filtrar').addEventListener('click', renderTurnos);
-    document.getElementById('btn-turnos-exportar')?.addEventListener('click', exportarTurnosInterativo);
-    renderTurnos();
-  }
-
-  async function renderTurnos() {
-    const inicio = document.getElementById('turnos-data-inicio').value;
-    const fim = document.getElementById('turnos-data-fim').value;
-    const s = await LW.getStats({ dataInicio: inicio, dataFim: fim });
-
-    const turnos = ['1º TURNO', '2º TURNO', '3º TURNO'];
-    const ids = ['t1', 't2', 't3'];
-
-    turnos.forEach((t, i) => {
-      const td = s.por_turno[t];
-      const id = ids[i];
-      document.getElementById(`${id}-baterias`).textContent = td.total;
-      document.getElementById(`${id}-paineis`).textContent = td.paineis.toLocaleString('pt-BR');
-      document.getElementById(`${id}-m2`).textContent = td.m2.toFixed(0) + ' m²';
-      document.getElementById(`${id}-atraso`).textContent = td.total ? Math.round(td.atraso / td.total * 100) + '%' : '—';
-      document.getElementById(`${id}-tempo`).textContent = LW.formatDuration(td.tempo_medio);
-      document.getElementById(`${id}-2p`).textContent = td.paineis_2p.toLocaleString('pt-BR');
-      document.getElementById(`${id}-sp`).textContent = td.paineis_sp.toLocaleString('pt-BR');
-    });
-
-    // Turno mais/menos eficiente (por m²)
-    const byM2 = turnos.map(t => ({ t, m2: s.por_turno[t].m2 })).filter(x => x.m2 > 0);
-    if (byM2.length) {
-      byM2.sort((a, b) => b.m2 - a.m2);
-      document.getElementById('melhor-turno').textContent = byM2[0].t;
-      document.getElementById('pior-turno').textContent = byM2[byM2.length - 1].t;
-    }
-
-    // Bar charts por turno
-    requestAnimationFrame(() => {
-      drawBarChart('chart-turnos-m2', turnos.map(t => t.replace('º TURNO', '')), turnos.map(t => s.por_turno[t].m2), '#3b82f6');
-      drawBarChart('chart-turnos-atraso', turnos.map(t => t.replace('º TURNO', '')), turnos.map(t => s.por_turno[t].atraso), '#ef4444');
-    });
-
-    // Insights turnos
-    const el = document.getElementById('turnos-insights');
-    const items = [];
-    if (byM2.length) {
-      items.push({ icon: '🏆', text: `Turno mais produtivo: ${byM2[0].t} com ${byM2[0].m2.toFixed(0)} m²` });
-    }
-    turnos.forEach(t => {
-      const td = s.por_turno[t];
-      if (td.total > 0 && td.atraso / td.total > 0.3) {
-        items.push({ icon: '⚠️', text: `${t}: alta taxa de atraso (${Math.round(td.atraso / td.total * 100)}%)` });
-      }
-    });
-    if (!items.length) {
-      items.push({ icon: '✅', text: 'Desempenho equilibrado entre os turnos no período.' });
-    }
-    el.innerHTML = items.map(i =>
-      `<div class="insight-item"><span>${i.icon}</span><span>${i.text}</span></div>`
-    ).join('');
-  }
-
-  // ── Exportar Dashboard Interativo (HTML standalone) ─────────────────────
-  // Retrato FIXO do que está na tela no momento do clique — busca o
-  // histórico já filtrado pelo mesmo período ativo nos campos
-  // #turnos-data-inicio/#turnos-data-fim, não mais o histórico inteiro
-  // com uma UI de filtro pra reaplicar depois.
-  async function exportarTurnosInterativo() {
-    const btn = document.getElementById('btn-turnos-exportar');
-    if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
-    try {
-      const inicio = document.getElementById('turnos-data-inicio')?.value || '';
-      const fim = document.getElementById('turnos-data-fim')?.value || '';
-      const s = await LW.getStats({ dataInicio: inicio, dataFim: fim });
-      const descricaoPeriodo = (inicio || fim)
-        ? (inicio ? new Date(inicio + 'T00:00:00').toLocaleDateString('pt-BR') : 'início') + ' até ' + (fim ? new Date(fim + 'T00:00:00').toLocaleDateString('pt-BR') : 'hoje')
-        : 'Todos os registros';
-      const html = _gerarHtmlTurnosStandalone(s.data, descricaoPeriodo);
-      LW.baixarArquivoTexto(
-        `desempenho_turnos_${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}.html`,
-        html
-      );
-    } catch (err) {
-      console.error('Falha ao exportar dashboard interativo (Turnos):', err);
-      if (LW.mostrarAlerta) LW.mostrarAlerta('Não consegui gerar o dashboard interativo agora.', { tipo: 'erro' });
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '🌐 Exportar Interativo'; }
-    }
-  }
-
-  function _gerarHtmlTurnosStandalone(dataArray, descricaoPeriodo) {
-    const dadosJson = JSON.stringify(dataArray).replace(/<\/script/gi, '<\\/script');
-
-    return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Desempenho por Turnos — Exportado</title>
-<style>${LW.gerarCssExportPadrao()}
-  .turno-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; }
-  .turno-card h3 { margin:0 0 10px; font-size:.9rem; }
-  .turno-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px; }
-  .turno-sub-label { font-size:.68rem; text-transform:uppercase; color:var(--text-3); }
-  .turno-sub-value { font-size:1.3rem; font-weight:700; color:var(--text); }
-  canvas { width:100%; height:200px; display:block; }
-</style>
-</head>
-<body>
-  <h1>📊 Desempenho por Turnos</h1>
-  <div class="sub" id="exp-sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
-  <div class="filtro-aplicado">📅 Filtro aplicado: <b>${LW.escaparHtml(descricaoPeriodo)}</b></div>
-
-  <div style="display:flex;gap:20px;font-size:.85rem;align-items:center;margin-bottom:20px">
-    <div>🏆 Mais eficiente: <strong class="accent" id="melhor-turno">—</strong></div>
-    <div>🐢 Menos eficiente: <strong id="pior-turno">—</strong></div>
-  </div>
-
-  <div class="turno-grid">
-    ${['1','2','3'].map(n => `
-    <div class="turno-card">
-      <h3>${n}º Turno</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div><div class="turno-sub-label">Baterias</div><div class="turno-sub-value" id="t${n}-baterias">—</div></div>
-        <div><div class="turno-sub-label">m² Prod.</div><div class="turno-sub-value" id="t${n}-m2">—</div></div>
-        <div><div class="turno-sub-label">Painéis</div><div class="turno-sub-value" id="t${n}-paineis">—</div></div>
-        <div><div class="turno-sub-label">% Atraso</div><div class="turno-sub-value red" id="t${n}-atraso">—</div></div>
-        <div><div class="turno-sub-label">Tempo Médio</div><div style="font-family:var(--font-mono);font-size:.85rem" id="t${n}-tempo">—</div></div>
-        <div><div class="turno-sub-label">2/P / S/P</div><div style="font-size:.8rem"><span id="t${n}-2p">—</span> / <span id="t${n}-sp">—</span></div></div>
-      </div>
-    </div>`).join('')}
-  </div>
-
-  <div class="charts-grid">
-    <div class="chart-box"><h4>m² por Turno</h4><canvas id="chart-turnos-m2"></canvas></div>
-    <div class="chart-box"><h4>Atrasos por Turno</h4><canvas id="chart-turnos-atraso"></canvas></div>
-  </div>
-
-  <div class="summary-box"><strong>Insights</strong><div id="turnos-insights" style="margin-top:8px"></div></div>
-  <div class="rodape">Exportado de Desempenho por Turnos — Lightwall SC · retrato do filtro aplicado no momento da exportação, dados embutidos neste arquivo, funciona offline.</div>
-
-<script>
-(function () {
-  'use strict';
-  const DADOS = ${dadosJson};
-
-  function formatDuration(minutes) {
-    if (!minutes || isNaN(minutes)) return '—';
-    const totalSegundos = Math.round(minutes * 60);
-    const h = Math.floor(totalSegundos / 3600);
-    const m = Math.floor((totalSegundos % 3600) / 60);
-    const s = totalSegundos % 60;
-    return \`\${h}:\${String(m).padStart(2, '0')}:\${String(s).padStart(2, '0')}\`;
-  }
-
-  ${somarPorTipo}
-  ${drawBarChart}
-
-  function calcularPorTurno(data) {
-    const por_turno = {};
-    ['1º TURNO', '2º TURNO', '3º TURNO'].forEach(t => {
-      const td = data.filter(b => b.turno === t);
-      const paineisPorTipoTurno = somarPorTipo(td, 'paineis_por_tipo');
-      const m2PorTipoTurno = somarPorTipo(td, 'm2_por_tipo');
-      por_turno[t] = {
-        total: td.length,
-        atraso: td.filter(b => b.houve_atraso === 'SIM').length,
-        m2: td.reduce((s, b) => s + (b.m2_total || 0), 0),
-        tempo_medio: td.length ? td.reduce((s, b) => s + (b.tempo_min || 0), 0) / td.length : 0,
-        paineis: td.reduce((s, b) => s + (b.total_paineis || 0), 0),
-        paineis_2p: paineisPorTipoTurno['2p'] || 0,
-        paineis_sp: paineisPorTipoTurno['sp'] || 0,
-      };
-    });
-    return por_turno;
-  }
-
-  function render() {
-    const por_turno = calcularPorTurno(DADOS);
-
-    const turnos = ['1º TURNO', '2º TURNO', '3º TURNO'];
-    const ids = ['t1', 't2', 't3'];
-    turnos.forEach((t, i) => {
-      const td = por_turno[t];
-      const id = ids[i];
-      document.getElementById(\`\${id}-baterias\`).textContent = td.total;
-      document.getElementById(\`\${id}-paineis\`).textContent = td.paineis.toLocaleString('pt-BR');
-      document.getElementById(\`\${id}-m2\`).textContent = td.m2.toFixed(0) + ' m²';
-      document.getElementById(\`\${id}-atraso\`).textContent = td.total ? Math.round(td.atraso / td.total * 100) + '%' : '—';
-      document.getElementById(\`\${id}-tempo\`).textContent = formatDuration(td.tempo_medio);
-      document.getElementById(\`\${id}-2p\`).textContent = td.paineis_2p.toLocaleString('pt-BR');
-      document.getElementById(\`\${id}-sp\`).textContent = td.paineis_sp.toLocaleString('pt-BR');
-    });
-
-    const byM2 = turnos.map(t => ({ t, m2: por_turno[t].m2 })).filter(x => x.m2 > 0);
-    if (byM2.length) {
-      byM2.sort((a, b) => b.m2 - a.m2);
-      document.getElementById('melhor-turno').textContent = byM2[0].t;
-      document.getElementById('pior-turno').textContent = byM2[byM2.length - 1].t;
-    }
-
-    drawBarChart('chart-turnos-m2', turnos.map(t => t.replace('º TURNO', '')), turnos.map(t => por_turno[t].m2), '#3b82f6');
-    drawBarChart('chart-turnos-atraso', turnos.map(t => t.replace('º TURNO', '')), turnos.map(t => por_turno[t].atraso), '#ef4444');
-
-    const el = document.getElementById('turnos-insights');
-    const items = [];
-    if (byM2.length) items.push({ icon: '🏆', text: \`Turno mais produtivo: \${byM2[0].t} com \${byM2[0].m2.toFixed(0)} m²\` });
-    turnos.forEach(t => {
-      const td = por_turno[t];
-      if (td.total > 0 && td.atraso / td.total > 0.3) {
-        items.push({ icon: '⚠️', text: \`\${t}: alta taxa de atraso (\${Math.round(td.atraso / td.total * 100)}%)\` });
-      }
-    });
-    if (!items.length) items.push({ icon: '✅', text: 'Desempenho equilibrado entre os turnos no período.' });
-    el.innerHTML = items.map(i => \`<div style="display:flex;gap:8px;padding:4px 0"><span>\${i.icon}</span><span>\${i.text}</span></div>\`).join('');
-  }
-
-  render();
-})();
-</script>
-</body>
-</html>`;
-  }
 
   // ---- Registro de Baterias (table) ----
 
@@ -1373,6 +1081,14 @@
     const colunasInsumo = _CAMPOS_AJUSTE_EVENTO.filter(def =>
       eventos.some(aj => aj && aj[def.nome] !== undefined && aj[def.nome] !== null && aj[def.nome] !== ''));
 
+    // Insumos CUSTOM (ver PLANO-insumos-dinamicos-receitas.md) — mesmo
+    // critério das colunas fixas acima ("só entra se algum ajuste deste
+    // traço específico usou"), mas em número variável: união de todos os
+    // nomes que aparecem em QUALQUER evento[i].insumos_custom.
+    const nomesCustom = [...new Set(
+      eventos.flatMap(aj => Object.keys(aj?.insumos_custom || {}))
+    )];
+
     const linhas = [];
     for (let i = 0; i < maxLinhas; i++) {
       const aj = eventos[i];
@@ -1382,6 +1098,12 @@
         const num = parseFloat(v);
         const texto = def.formatador ? def.formatador(num) : `${_fmtNumDetalhe(num)}${def.unidade || ''}`;
         return `<td class="mono">${texto}</td>`;
+      }).join('');
+
+      const celulasCustom = nomesCustom.map(nome => {
+        const v = aj?.insumos_custom?.[nome];
+        if (v === undefined || v === null || v === '') return `<td class="relatorio-ajusteN-vazio">—</td>`;
+        return `<td class="mono">${_fmtNumDetalhe(parseFloat(v))}kg</td>`;
       }).join('');
 
       const celulaDensidade = densidadeLeituras.length
@@ -1396,6 +1118,7 @@
           <td class="relatorio-ajusteN-num">${i + 1}º ajuste</td>
           <td class="relatorio-ajusteN-quando">${aj?.registrado_em ? LW.formatDateTime(aj.registrado_em) : '—'}</td>
           ${celulasInsumo}
+          ${celulasCustom}
           ${celulaDensidade}
           ${celulaFlow}
         </tr>`);
@@ -1408,6 +1131,7 @@
             <th>Ajuste</th>
             <th>Quando</th>
             ${colunasInsumo.map(def => `<th>${def.label}</th>`).join('')}
+            ${nomesCustom.map(nome => `<th>${LW.escaparHtml(nome)}</th>`).join('')}
             ${densidadeLeituras.length ? '<th>Densidade</th>' : ''}
             ${flowLeituras.length ? '<th>Flow</th>' : ''}
           </tr>
@@ -1453,6 +1177,14 @@
       .filter(def => !def.resultado)
       .map(def => _linhaDetalheCampo(def, l[def.campo]))
       .filter(Boolean);
+    // Insumos CUSTOM (ver PLANO-insumos-dinamicos-receitas.md) — mesmo
+    // fallback, mas em número variável; `l.insumos_custom[nome]` já vem
+    // no mesmo formato {original, ajustes} dos 5 Padrão (ver rowParaTraco,
+    // lib/db/tracos.js), então reaproveita _linhaDetalheCampo direto.
+    Object.entries(l.insumos_custom || {}).forEach(([nome, valorBruto]) => {
+      const item = _linhaDetalheCampo({ campo: nome, label: nome, unidade: 'kg', resultado: false }, valorBruto);
+      if (item) itens.push(item);
+    });
 
     if (!itens.length) {
       return `<div class="relatorio-ajuste-vazio">Nenhum reajuste de receita foi registrado para este traço — os valores aplicados na injeção foram exatamente os planejados.</div>`;
@@ -1466,10 +1198,15 @@
   // pelo filtro rápido "Apenas com reajustes". Usa a mesma lista de campos
   // do painel de detalhamento, então sempre fica em sincronia com ele.
   function _tracoTemAjuste(l) {
-    return _CAMPOS_DETALHE_RELATORIO.some(def => {
+    const temAjusteFixo = _CAMPOS_DETALHE_RELATORIO.some(def => {
       const v = l[def.campo];
       return v && typeof v === 'object' && Array.isArray(v.ajustes) && v.ajustes.length > 0;
     });
+    if (temAjusteFixo) return true;
+    // Insumos CUSTOM — mesmo critério acima, mas em número variável (ver
+    // PLANO-insumos-dinamicos-receitas.md).
+    return Object.values(l.insumos_custom || {}).some(v =>
+      v && typeof v === 'object' && Array.isArray(v.ajustes) && v.ajustes.length > 0);
   }
 
   // Abre/fecha a linha de detalhe associada a uma linha do Relatório de
@@ -1481,6 +1218,33 @@
     const estavaAberta = detalhe.style.display !== 'none';
     detalhe.style.display = estavaAberta ? 'none' : '';
     if (icone) icone.textContent = estavaAberta ? '▸' : '▾';
+  }
+
+  // Injeta/remove dinamicamente as colunas de insumo CUSTOM na tabela
+  // principal do Relatório de Injeção (ver PLANO-insumos-dinamicos-
+  // receitas.md) — pedido explícito numa conversa, revendo a decisão
+  // original de manter só os 5 Padrão nas colunas fixas. Diferente de
+  // _garantirColunasDinamicasTipo (Registro de Baterias, acima), que só
+  // CRESCE (tipo de placa novo nunca some): aqui a lista de nomes é
+  // recalculada em TODO render a partir dos traços atualmente visíveis
+  // (já filtrados) — então limpa as colunas custom do render anterior
+  // antes de reinserir, pra um filtro que esconde um traço Custom também
+  // esconder a coluna dele, e a tabela nunca acumular coluna "fantasma".
+  function _garantirColunasCustomRelatorio(nomes) {
+    const thead = document.querySelector('#relatorio-thead tr');
+    if (!thead) return;
+    thead.querySelectorAll('th[data-custom-col]').forEach(th => th.remove());
+
+    // Âncora: insere as colunas Custom logo ANTES de "Tempo de Batida" —
+    // mesma posição das <td> na linha (ver renderRelatorio, tdsCustom).
+    const thAncora = thead.querySelector('th[data-col="tempo_batida"]');
+    if (!thAncora) return;
+    nomes.forEach(nome => {
+      const th = document.createElement('th');
+      th.setAttribute('data-custom-col', '1');
+      th.textContent = nome;
+      thead.insertBefore(th, thAncora);
+    });
   }
 
   async function renderRelatorio() {
@@ -1509,6 +1273,18 @@
     if (f.expansao.size) linhas = linhas.filter(l => f.expansao.has(l.expansao));
     if (f.apenas_com_ajuste) linhas = linhas.filter(l => _tracoTemAjuste(l));
     document.getElementById('rel-count').textContent = linhas.length + ' registros';
+
+    // Insumos CUSTOM (ver PLANO-insumos-dinamicos-receitas.md) — união de
+    // todos os nomes usados por QUALQUER traço atualmente visível (já
+    // filtrado, acima) — colunas variam com o filtro aplicado, mesmo
+    // critério das colunas de Custom no painel de detalhe
+    // (_construirTabelaAjustesPorEvento). Precisa vir ANTES do "if
+    // (!linhas.length) return" pra garantir que a tabela some as colunas
+    // extras (via _garantirColunasCustomRelatorio) quando um filtro deixa
+    // a lista vazia, em vez de manter colunas "fantasma" do render anterior.
+    const nomesCustomTabela = [...new Set(linhas.flatMap(l => Object.keys(l.insumos_custom || {})))].sort();
+    _garantirColunasCustomRelatorio(nomesCustomTabela);
+    const colspanTotal = 17 + nomesCustomTabela.length;
 
     _ligarOrdenacaoTabela('relatorio-thead', _ordenacaoRelatorio, renderRelatorio);
     _atualizarSetaOrdenacao('relatorio-thead', _ordenacaoRelatorio);
@@ -1587,6 +1363,7 @@
         <td>${_valRel(l.eps_real)}</td>
         <td>${_valRel(l.superplast_real)}</td>
         <td>${_valRel(l.incorporador_real)}</td>
+        ${nomesCustomTabela.map(nome => `<td>${_valRel(l.insumos_custom?.[nome])}</td>`).join('')}
         <td>${(() => {
         let v = _valRel(l.tempo_batida, 'tempo_batida');
         if (v === '—') return '—';
@@ -1598,7 +1375,7 @@
       })()}</td>
       </tr>
       <tr class="relatorio-detalhe-row" id="detalhe-${rowId}" style="display:none">
-        <td colspan="17">${_construirDetalheRelatorio(l, mapaAjustesPorTraco.get(l.id_traco))}</td>
+        <td colspan="${colspanTotal}">${_construirDetalheRelatorio(l, mapaAjustesPorTraco.get(l.id_traco))}</td>
       </tr>
     `;
       }).join('');
@@ -2199,8 +1976,7 @@
 
   // ---- Public ----
   window.LWDash = {
-    initTurnos, initRegistro, initRelatorio, renderRelatorio,
-    exportarTurnosInterativo,
+    initRegistro, initRelatorio, renderRelatorio,
     navegarParaTracosDoRegistro,
     toggleModoEdicaoRegistro,
     toggleModoFocoRegistro,

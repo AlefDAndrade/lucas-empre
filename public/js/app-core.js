@@ -84,25 +84,14 @@
     }
 
     // Confere se o perfil atual pode EDITAR a `area` (ver AREAS_DE_EDICAO,
-    // lib/perfis.js: 'injetora', 'paradas', 'qualidade', 'manutencao',
-    // 'manutencao-chamado') — usado só pra ESCONDER/DESABILITAR controles
-    // no front; a validação que importa de verdade é sempre a do servidor
-    // (cada rota de escrita confere de novo, ver podeEditarArea() em
-    // server.js).
+    // lib/perfis.js: 'injetora', 'paradas', 'qualidade') — usado só pra
+    // ESCONDER/DESABILITAR controles no front; a validação que importa de
+    // verdade é sempre a do servidor (cada rota de escrita confere de
+    // novo, ver podeEditarArea() em server.js).
     function _perfilPodeEditar(area) {
       const role = sessionStorage.getItem('lw_role');
       if (role === 'Administrador') return true; // master: irrestrito
       if (!_areasDeEdicao) return true; // ainda carregando — fail-open temporário, ver _paginaPermitida
-      // Mesma regra de subconjunto do backend (ver podeEditar(),
-      // lib/perfis.js: "'manutencao' completa implica
-      // 'manutencao-chamado'") — sem isso, um perfil com 'manutencao'
-      // completa (Supervisão, Manutenção, e agora também Operador de
-      // Injetora e Encarregado — ver conversa que motivou isso) ficava
-      // com os botões "Novo Chamado"/"Salvar Chamado" ESCONDIDOS,
-      // porque o array bruto de `editar` deles nunca continha a string
-      // 'manutencao-chamado' junto (só 'manutencao'). O backend sempre
-      // aceitava a rota; só o front escondia o botão sem necessidade.
-      if (area === 'manutencao-chamado' && _areasDeEdicao.includes('manutencao')) return true;
       return _areasDeEdicao.includes(area);
     }
 
@@ -151,14 +140,7 @@
       });
     }
 
-    // Deep-link de notificação push de chamado de manutenção (ver
-    // lib/notificacoes-push.js, que agora manda a URL como
-    // "/index.html?chamado=ID", e public/service-worker.js, que repassa
-    // essa URL tanto abrindo uma aba nova quanto focando uma já aberta).
-    // Extrai só o id — usada tanto no boot (location.href) quanto na
-    // mensagem que o service worker manda pra uma aba já aberta (ver
-    // listener 'message' logo abaixo).
-    // Mesma ideia de _extrairChamadoIdDaUrl, acima, só que pro retorno do
+    // Mesma ideia da extração de parâmetro de URL usada pro retorno do
     // fluxo OAuth do Google (ver GET /backup-drive/callback,
     // lib/rotas/backup-drive.js) — a URL vem como
     // "/?config=backup-drive&ok=1|0&msg=...". Devolve null se o parâmetro
@@ -173,60 +155,8 @@
       }
     }
 
-    function _extrairChamadoIdDaUrl(urlStr) {
-      try {
-        return new URL(urlStr, window.location.origin).searchParams.get('chamado');
-      } catch (e) {
-        return null;
-      }
-    }
-
-    // Mesma ideia de _extrairChamadoIdDaUrl, acima, só que pro deep-link
-    // de notificação de MANUTENÇÃO PROGRAMADA (ver
-    // notificarManutencaoProgramada, lib/notificacoes-push.js, que manda
-    // a URL como "/index.html?programada=ID" — parâmetro diferente de
-    // "chamado" de propósito, pra não confundir com um chamado corretivo).
-    function _extrairProgramadaIdDaUrl(urlStr) {
-      try {
-        return new URL(urlStr, window.location.origin).searchParams.get('programada');
-      } catch (e) {
-        return null;
-      }
-    }
-
-    // Leva a pessoa direto pra tela de Manutenção, já com o chamado
-    // específico aberto (a mesma caixa "Aceitar/Recusar" que aparece
-    // hoje ao abrir manualmente — ver MAN.abrirChamado, manutencao.js).
-    // MAN.abrirChamado já garante os dados carregados/atualizados antes
-    // de tentar abrir (o chamado pode ter sido criado agora mesmo), então
-    // só chamamos showPage() DEPOIS, só pra deixar a aba/página visível
-    // — sem isso, o MAN.init() disparado de dentro de showPage() rodaria
-    // em paralelo com o carregamento que MAN.abrirChamado já está fazendo.
-    async function _abrirChamadoDeNotificacao(id) {
-      if (!id) return false;
-      if (!_paginaPermitida('manutencao')) return false; // perfil sem acesso à página — ignora silenciosamente, cai no boot normal
-      if (typeof MAN === 'undefined' || typeof MAN.abrirChamado !== 'function') return false;
-      await MAN.abrirChamado(id);
-      showPage('manutencao');
-      return true;
-    }
-
-    // Mesma ideia de _abrirChamadoDeNotificacao, acima, só que leva a
-    // pessoa direto pra aba "Programada" com o AGENDAMENTO específico
-    // aberto (ver MAN.abrirAgendamentoProgramada, manutencao.js) — usada
-    // pelo deep-link da notificação de "Manutenção programada agendada".
-    async function _abrirProgramadaDeNotificacao(id) {
-      if (!id) return false;
-      if (!_paginaPermitida('manutencao')) return false; // perfil sem acesso à página — ignora silenciosamente, cai no boot normal
-      if (typeof MAN === 'undefined' || typeof MAN.abrirAgendamentoProgramada !== 'function') return false;
-      await MAN.abrirAgendamentoProgramada(id);
-      showPage('manutencao');
-      return true;
-    }
-
-    // Mesma ideia de _extrairChamadoIdDaUrl, acima, só que pro deep-link
-    // de "PDF pronto" (Etapa 6 do plano "PDF sobrevive a fechar a aba" —
-    // ver lib/notificacoes-push.js/notificarPdfPronto e
+    // Deep-link de "PDF pronto" (Etapa 6 do plano "PDF sobrevive a fechar
+    // a aba" — ver lib/notificacoes-push.js/notificarPdfPronto e
     // public/js/exportar-pdf-status.js) — a URL vem como
     // "/index.html?pdfPronto=jobId".
     function _extrairPdfProntoJobIdDaUrl(urlStr) {
@@ -240,15 +170,11 @@
     // Recebido do service worker quando a notificação é clicada com uma
     // aba do app JÁ aberta (ver 'notificationclick', service-worker.js —
     // nesse caso ele só FOCA a aba existente, sem recarregar a página, e
-    // avisa aqui pra gente navegar internamente até o chamado certo).
+    // avisa aqui pra gente navegar internamente até o lugar certo).
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (event) => {
         const dados = event.data || {};
         if (dados.tipo !== 'lw-notificacao-clique') return;
-        const id = _extrairChamadoIdDaUrl(dados.url);
-        if (id) { _abrirChamadoDeNotificacao(id); return; }
-        const idProgramada = _extrairProgramadaIdDaUrl(dados.url);
-        if (idProgramada) { _abrirProgramadaDeNotificacao(idProgramada); return; }
         const idPdfPronto = _extrairPdfProntoJobIdDaUrl(dados.url);
         if (idPdfPronto && window.LWExportarPdfStatus) LWExportarPdfStatus.abrirDeNotificacao(idPdfPronto);
       });
@@ -507,10 +433,6 @@
         window._dashInit = true;
         LWDash.initDashboard();
       }
-      if (pageId === 'turnos' && !window._turnosInit) {
-        window._turnosInit = true;
-        LWDash.initTurnos();
-      }
       if (pageId === 'registro') {
         LWDash.initRegistro();
       }
@@ -625,21 +547,6 @@
       // Descartados, acima.
       if (pageId === 'one-page-report') {
         LWOnePageReport.init();
-      }
-
-      // Manutenção — mesmo padrão de guarda "só uma vez, na 1ª vez que
-      // abre" do Setor de Qualidade, acima (ver comentário lá).
-      if (pageId === 'manutencao' && !window._manInit) {
-        window._manInit = true;
-        MAN.init();
-      } else if (pageId === 'manutencao') {
-        // "Tipos de Manutenção" (Configurações > Tipos de Manutenção)
-        // reaplicado ao reentrar — mesmo raciocínio de "Ordem dos
-        // Paletes"/"Bateria" no Setor de Qualidade, acima (ver comentário
-        // lá): cobre o caso raro de o config mudar sem um reload completo
-        // no meio.
-        MAN.carregarOpcoesTipoManutencao();
-        MAN.carregarOpcoesPrioridade();
       }
 
       // Tour guiado automático no 1º acesso a cada página (ver tour.js) —
@@ -861,26 +768,10 @@
       // tempo abaixo.
       _relogioSegurancaBoot = setTimeout(_finalizarBootUI, 8000);
 
-      // Veio de um clique em notificação de chamado de manutenção? (ver
-      // _extrairChamadoIdDaUrl, acima, e lib/notificacoes-push.js) —
-      // capturado JÁ AQUI, antes de qualquer outra coisa, porque limpamos
-      // o parâmetro da URL logo abaixo (senão um F5 nesta aba reabriria o
-      // mesmo chamado de novo pra sempre).
-      const _chamadoIdDaNotificacao = _extrairChamadoIdDaUrl(window.location.href);
-      // Mesma ideia, pro deep-link de "Manutenção programada agendada"
-      // (ver _extrairProgramadaIdDaUrl, acima) — os dois parâmetros nunca
-      // vêm juntos na mesma URL (cada notificação manda só um), mas
-      // capturamos os dois aqui, antes de limpar a URL, pelo mesmo
-      // motivo: um F5 nesta aba não pode reabrir o mesmo registro de
-      // novo pra sempre.
-      const _programadaIdDaNotificacao = _extrairProgramadaIdDaUrl(window.location.href);
       // Retorno do fluxo OAuth do Google (ver GET /backup-drive/callback) —
-      // mesmo raciocínio dos dois de cima: captura ANTES de limpar a URL,
-      // senão um F5 nesta aba reabriria a mensagem de novo.
+      // captura ANTES de limpar a URL, senão um F5 nesta aba reabriria a
+      // mensagem de novo.
       const _retornoBackupDrive = _extrairRetornoBackupDriveDaUrl(window.location.href);
-      if (_chamadoIdDaNotificacao || _programadaIdDaNotificacao) {
-        window.history.replaceState(null, '', window.location.pathname);
-      }
       if (_retornoBackupDrive) {
         window.history.replaceState(null, '', window.location.pathname);
       }
@@ -989,10 +880,7 @@
         document.getElementById('btn-config').style.display = 'inline-flex';
         document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = '');
         document.querySelectorAll('[data-hide-analista]').forEach(el => el.style.display = '');
-        if (!(_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao))
-            && !(_programadaIdDaNotificacao && await _abrirProgramadaDeNotificacao(_programadaIdDaNotificacao))) {
-          _restaurarUltimaPagina();
-        }
+        _restaurarUltimaPagina();
         // Sempre por cima da restauração de página normal — a pessoa
         // acabou de voltar da tela de consentimento do Google, precisa
         // ver o resultado independente de qual página estava aberta antes.
@@ -1058,12 +946,7 @@
           const temAlgumaAbaDeConfig = ['dados', 'atalhos', 'usuarios', 'automacao', 'sql'].some(s => _paginaPermitida('config-' + s));
           document.getElementById('btn-config').style.display = temAlgumaAbaDeConfig ? 'inline-flex' : 'none';
 
-          if (_chamadoIdDaNotificacao && await _abrirChamadoDeNotificacao(_chamadoIdDaNotificacao)) {
-            // já navegou pro chamado — nem Operação (Operador de Injetora)
-            // nem "última página" entram em jogo neste boot específico.
-          } else if (_programadaIdDaNotificacao && await _abrirProgramadaDeNotificacao(_programadaIdDaNotificacao)) {
-            // idem, só que pro agendamento de manutenção programada.
-          } else if (role === 'OperadorInjetora') {
+          if (role === 'OperadorInjetora') {
             // Operador de Injetora sempre entra direto na tela de trabalho
             // (Registrar Operação), mesmo comportamento de sempre — os
             // outros perfis restauram a última página vista, ou caem no
@@ -1578,8 +1461,6 @@
       // na hora de restaurar", mesmo depois do servidor já ter deixado
       // de exigir).
       'operacoes_nao_avaliadas.json': v => Array.isArray(v),
-      'manutencao_corretiva.json':    v => Array.isArray(v),
-      'manutencao_programada.json':   v => Array.isArray(v),
     };
 
     // Alguns desses arquivos legitimamente ficam vazios (0 bytes) até o app
@@ -1598,8 +1479,6 @@
       'avaliacoes_qualidade.json': [],
       'operacoes_avaliadas.json': [],
       'operacoes_nao_avaliadas.json': [],
-      'manutencao_corretiva.json': [],
-      'manutencao_programada.json': [],
     };
 
     function parseArquivoRestaurar(nome, texto) {
@@ -1636,8 +1515,6 @@
       'avaliacoes_qualidade.json': 'Avaliações de Qualidade',
       'operacoes_avaliadas.json': 'Operações Avaliadas (Qualidade)',
       'operacoes_nao_avaliadas.json': 'Fila de Avaliação (Qualidade)',
-      'manutencao_corretiva.json': 'Chamados de Manutenção Corretiva',
-      'manutencao_programada.json': 'Manutenção Programada',
       'config.json': 'Configurações (baterias, tipos de montagem, automação)',
       'security.json': 'Senha de Administrador',
       'usuarios.json': 'Usuários cadastrados',
@@ -1711,7 +1588,7 @@
         // qualquer coisa pro servidor.
         const OPCIONAIS = [
           'bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json',
-          'operacoes_nao_avaliadas.json', 'manutencao_corretiva.json', 'manutencao_programada.json',
+          'operacoes_nao_avaliadas.json',
           'metas.json',
         ];
         const obrigatorios = esperados.filter(n => !OPCIONAIS.includes(n));
@@ -1825,15 +1702,12 @@
       'avaliacoes_qualidade.json':  v => Array.isArray(v),
       'operacoes_avaliadas.json':   v => Array.isArray(v),
       'relatorio_edicoes.json':     v => Array.isArray(v),
-      'manutencao_corretiva.json':  v => Array.isArray(v),
-      'manutencao_programada.json': v => Array.isArray(v),
     };
     const MESCLAR_DEFAULT_SE_VAZIO = {
       'historico.json': [], 'historico_edicoes.json': [], 'relatorio_injecao.json': [],
       'ajustes_tracos.json': [], 'paradas.json': [],
       'tracos_descartados.json': [], 'bercos_visuais.json': [], 'avaliacoes_qualidade.json': [],
       'operacoes_avaliadas.json': [], 'relatorio_edicoes.json': [],
-      'manutencao_corretiva.json': [], 'manutencao_programada.json': [],
     };
     const MESCLAR_LABELS = {
       'historico.json': 'Operações (Registro de Baterias)',
@@ -1846,8 +1720,6 @@
       'avaliacoes_qualidade.json': 'Avaliações de Qualidade',
       'operacoes_avaliadas.json': 'Operações Avaliadas (marcação)',
       'relatorio_edicoes.json': 'Histórico de edição de traços',
-      'manutencao_corretiva.json': 'Manutenção Corretiva',
-      'manutencao_programada.json': 'Manutenção Programada',
     };
 
     function parseArquivoMesclar(nome, texto) {
@@ -2052,12 +1924,6 @@
         if (r.edicoes_traco && r.edicoes_traco.inseridos) {
           linhas.push(`Histórico de edição de traços: <strong>${r.edicoes_traco.inseridos}</strong> registro(s)`);
         }
-        if (r.manutencao_corretiva && (r.manutencao_corretiva.inseridos || r.manutencao_corretiva.duplicatas)) {
-          linhas.push(`Manutenção corretiva: <strong>${r.manutencao_corretiva.inseridos} adicionados</strong>, ${r.manutencao_corretiva.duplicatas} já existiam aqui`);
-        }
-        if (r.manutencao_programada && (r.manutencao_programada.inseridos || r.manutencao_programada.duplicatas)) {
-          linhas.push(`Manutenção programada: <strong>${r.manutencao_programada.inseridos} adicionados</strong>, ${r.manutencao_programada.duplicatas} já existiam aqui`);
-        }
         if (!linhas.length) linhas.push('Nenhum registro novo encontrado — tudo neste backup já existia aqui.');
         if (r.filtroData) {
           linhas.push(`<span style="color:var(--text-3)">📅 Filtro de data aplicado (${r.filtroData.inicio ? _formatarDataInputBr(r.filtroData.inicio) : '…'} a ${r.filtroData.fim ? _formatarDataInputBr(r.filtroData.fim) : '…'}) — ${r.filtroData.ignorados} registro(s) do backup ficaram de fora por estarem fora do período.</span>`);
@@ -2104,7 +1970,7 @@
     // ESSENCIAIS_BACKUP_GERAL, acima).
     const OPCIONAIS_BACKUP_GERAL = [
       'bercos_visuais.json', 'avaliacoes_qualidade.json', 'operacoes_avaliadas.json',
-      'operacoes_nao_avaliadas.json', 'manutencao_corretiva.json', 'manutencao_programada.json',
+      'operacoes_nao_avaliadas.json',
       'metas.json', 'security.json', 'usuarios.json',
     ];
 
@@ -2733,7 +2599,7 @@
       // checagem fica explícita mesmo assim, não hardcoded pra um perfil
       // só, igual sempre foi (evita ficar obsoleta se um perfil novo
       // aparecer sem nenhuma aba de config no futuro).
-      if (role !== 'Administrador' && !_paginaPermitida('config-atalhos') && !_paginaPermitida('config-dados') && !_paginaPermitida('config-automacao') && !_paginaPermitida('config-usuarios') && !_paginaPermitida('config-autorizados') && !_paginaPermitida('config-operacoes-offline') && !_paginaPermitida('config-sql') && !_paginaPermitida('config-notificacoes') && !_paginaPermitida('config-paradas') && !_paginaPermitida('config-tipos-manutencao') && !_paginaPermitida('config-prioridades')) return;
+      if (role !== 'Administrador' && !_paginaPermitida('config-atalhos') && !_paginaPermitida('config-dados') && !_paginaPermitida('config-automacao') && !_paginaPermitida('config-usuarios') && !_paginaPermitida('config-autorizados') && !_paginaPermitida('config-operacoes-offline') && !_paginaPermitida('config-sql') && !_paginaPermitida('config-paradas') && !_paginaPermitida('config-insumos')) return;
 
       // Lê o estado atual das variáveis já carregadas pelo data.js
       // BATERIA_IDS agora é array de objetos {id, label, bercos}
@@ -2745,14 +2611,11 @@
         // acima: editar aqui não deve mexer em LW.MOTIVO_PARADA_OPTS
         // direto até salvar de verdade.
         motivosParada: [...LW.MOTIVO_PARADA_OPTS],
-        // Tipos de Manutenção (Configurações → Tipos de Manutenção) —
-        // mesmo raciocínio de motivosParada, acima.
-        tiposManutencao: [...LW.TIPO_MANUTENCAO_OPTS],
-        // Prioridades (Configurações → Prioridades) — cópia de CADA
-        // objeto também (map com spread), não só do array: senão editar
-        // _cfgDados.prioridades[i].cor (se um dia isso existir) mexeria
-        // direto no objeto de LW.PRIORIDADE_OPTS.
-        prioridades: LW.PRIORIDADE_OPTS.map(p => ({ ...p })),
+        // Insumos de Receitas (Configurações → Insumos de Receitas) —
+        // cópia de CADA objeto também (map com spread), não só do array:
+        // editar aqui (adicionar/remover Custom) não deve mexer direto em
+        // LW.INSUMO_RECEITA_OPTS até salvar.
+        insumosReceita: LW.INSUMO_RECEITA_OPTS.map(o => ({ ...o })),
       };
       _cfgSnapshotInicial = JSON.stringify(_cfgDados);
       cfgEscolherModoMontagem('simples');
@@ -2772,7 +2635,7 @@
       // sempre "dados", que era o padrão fixo de antes (só fazia sentido
       // quando só o Administrador Master via este modal).
       const primeiraAbaPermitida = role === 'Administrador' ? 'dados'
-        : ['dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'operacoes-offline', 'automacao', 'sql', 'notificacoes', 'paradas', 'tipos-manutencao', 'prioridades'].find(s => _paginaPermitida('config-' + s)) || 'atalhos';
+        : ['dados', 'paletes', 'atalhos', 'usuarios', 'autorizados', 'operacoes-offline', 'automacao', 'sql', 'paradas', 'insumos'].find(s => _paginaPermitida('config-' + s)) || 'atalhos';
       cfgMostrarSecao(primeiraAbaPermitida);
       document.getElementById('config-modal').style.display = 'flex';
       if (typeof LWTour !== 'undefined') LWTour.aoAbrirModal('config');
@@ -2794,7 +2657,7 @@
       // 'autorizados' (Operação em Andamento) faltava aqui — a aba nunca
       // era escondida de ninguém, pra nenhum perfil (bug separado, pego
       // na mesma revisão do bug do cssText, acima).
-      const MAPA = { dados: 'cfg-nav-dados', paletes: 'cfg-nav-paletes', atalhos: 'cfg-nav-atalhos', usuarios: 'cfg-nav-usuarios', autorizados: 'cfg-nav-autorizados', 'operacoes-offline': 'cfg-nav-operacoes-offline', automacao: 'cfg-nav-automacao', sql: 'cfg-nav-sql', notificacoes: 'cfg-nav-notificacoes', paradas: 'cfg-nav-paradas', 'tipos-manutencao': 'cfg-nav-tipos-manutencao', prioridades: 'cfg-nav-prioridades' };
+      const MAPA = { dados: 'cfg-nav-dados', paletes: 'cfg-nav-paletes', atalhos: 'cfg-nav-atalhos', usuarios: 'cfg-nav-usuarios', autorizados: 'cfg-nav-autorizados', 'operacoes-offline': 'cfg-nav-operacoes-offline', automacao: 'cfg-nav-automacao', sql: 'cfg-nav-sql', paradas: 'cfg-nav-paradas', insumos: 'cfg-nav-insumos' };
       Object.entries(MAPA).forEach(([secao, navId]) => {
         const el = document.getElementById(navId);
         if (el) el.style.display = _paginaPermitida('config-' + secao) ? '' : 'none';
@@ -2847,8 +2710,7 @@
     // menos código pra manter sincronizado quando uma seção nova entrar.
     const CFG_SECOES = [
       'dados', 'paletes', 'atalhos', 'usuarios', 'autorizados',
-      'operacoes-offline', 'automacao', 'sql', 'notificacoes', 'paradas',
-      'tipos-manutencao', 'prioridades',
+      'operacoes-offline', 'automacao', 'sql', 'paradas', 'insumos',
     ];
 
     function cfgMostrarSecao(secao) {
@@ -2870,7 +2732,6 @@
       if (secao === 'operacoes-offline') cfgRenderOperacoesOffline();
       if (secao === 'automacao') cfgRenderAutomacao();
       if (secao === 'sql') cfgSqlAoAbrirSecao();
-      if (secao === 'notificacoes') cfgRenderNotificacoes();
 
       // Reforça a visibilidade de abas por perfil aqui também (não só na
       // abertura do modal) — não importa quantas vezes cfgMostrarSecao
@@ -3346,31 +3207,20 @@
   `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum motivo cadastrado.</span>';
       }
 
-      // Tipos de Manutenção (Configurações → Tipos de Manutenção) —
-      // mesmo padrão de Motivos de Parada, acima.
-      const ltm = document.getElementById('cfg-tipos-manutencao-lista');
-      if (ltm) {
-        ltm.innerHTML = _cfgDados.tiposManutencao.map((t, i) => `
+      // Insumos de Receitas (Configurações → Insumos de Receitas) — Fase 4
+      // (ver PLANO-insumos-dinamicos-receitas.md): Padrão ganha badge e
+      // fica sem botão de remover (nome travado pra sempre); Custom
+      // continua com o fluxo de remover de sempre.
+      const li = document.getElementById('cfg-insumos-lista');
+      if (li) {
+        li.innerHTML = _cfgDados.insumosReceita.map((o, i) => `
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px">
-      <span style="font-size:.85rem;color:var(--text)">${t}</span>
-      <button onclick="cfgRemoverTipoManutencao(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
+      <span style="font-size:.85rem;color:var(--text)">${o.nome}</span>
+      ${o.categoria === 'padrao'
+        ? '<span style="font-size:.7rem;color:var(--text-3);background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:2px 10px;margin-left:auto">Padrão</span>'
+        : `<button onclick="cfgRemoverInsumo(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>`}
     </div>
-  `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum tipo cadastrado.</span>';
-      }
-
-      // Prioridades (Configurações → Prioridades) — mesmo padrão das
-      // listas acima, só com uma bolinha de cor extra (o "cor" de cada
-      // item pode ser tanto var(--...) quanto hexadecimal — ambos
-      // funcionam direto num style inline, o navegador resolve).
-      const lpr = document.getElementById('cfg-prioridades-lista');
-      if (lpr) {
-        lpr.innerHTML = _cfgDados.prioridades.map((p, i) => `
-    <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px">
-      <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:${p.cor};flex-shrink:0"></span>
-      <span style="font-size:.85rem;color:var(--text)">${p.label}</span>
-      <button onclick="cfgRemoverPrioridade(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>
-    </div>
-  `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhuma prioridade cadastrada.</span>';
+  `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum insumo cadastrado.</span>';
       }
 
       // "Definir Paletes" (ver public/js/paletes-config.js) — função
@@ -3453,61 +3303,40 @@
       cfgRenderTudo();
     }
 
-    // ---- Tipos de Manutenção (Configurações → Tipos de Manutenção) ----
-    // Mesmo padrão de cfgAdicionarMotivoParada/cfgRemoverMotivoParada,
-    // acima — lista simples de strings.
-    function cfgAdicionarTipoManutencao() {
-      const input = document.getElementById('cfg-tipo-manutencao-novo');
-      const tipo = input.value.trim();
-      if (!tipo) { LW.mostrarAlerta('Digite a descrição do tipo (ex: Hidráulica).', { tipo: 'aviso' }); return; }
-      if (_cfgDados.tiposManutencao.some(t => t.toLowerCase() === tipo.toLowerCase())) {
-        LW.mostrarAlerta('Este tipo já existe.', { tipo: 'aviso' });
+    // ---- Insumos de Receitas (Configurações → Insumos de Receitas) ----
+    // Fase 4 (ver PLANO-insumos-dinamicos-receitas.md): cada item agora é
+    // {nome, categoria}. Só CUSTOM passa por aqui — Padrão é travado (sem
+    // botão de remover no render, acima) e esta função nunca cria um com
+    // categoria 'padrao'. Formulário de traço (Fase 5) é o que de fato
+    // liga isso ao registro de operação — este catálogo, por enquanto,
+    // só decide quais Custom PODEM ser oferecidos lá.
+    function cfgAdicionarInsumo() {
+      const input = document.getElementById('cfg-insumo-novo');
+      const nome = input.value.trim();
+      if (!nome) { LW.mostrarAlerta('Digite o nome do insumo (ex: Superplastificante).', { tipo: 'aviso' }); return; }
+      if (_cfgDados.insumosReceita.some(o => o.nome.toLowerCase() === nome.toLowerCase())) {
+        LW.mostrarAlerta('Este insumo já existe.', { tipo: 'aviso' });
         return;
       }
-      _cfgDados.tiposManutencao.push(tipo);
+      _cfgDados.insumosReceita.push({ nome, categoria: 'custom' });
       input.value = '';
       cfgRenderTudo();
     }
 
-    async function cfgRemoverTipoManutencao(i) {
+    async function cfgRemoverInsumo(i) {
+      const alvo = _cfgDados.insumosReceita[i];
+      // Defensivo — o botão de remover nem aparece pra Padrão (ver render,
+      // acima), mas garante aqui também caso o índice venha adulterado.
+      if (!alvo || alvo.categoria === 'padrao') return;
       const confirmou = await LW.mostrarConfirmacao(
-        `Remover o tipo "${_cfgDados.tiposManutencao[i]}"?`,
-        { titulo: 'Remover tipo', textoConfirmar: 'Remover', tipo: 'perigo', icon: '🗑️' }
+        `Remover o insumo "${alvo.nome}"?`,
+        { titulo: 'Remover insumo', textoConfirmar: 'Remover', tipo: 'perigo', icon: '🗑️' }
       );
       if (!confirmou) return;
-      _cfgDados.tiposManutencao.splice(i, 1);
+      _cfgDados.insumosReceita.splice(i, 1);
       cfgRenderTudo();
     }
 
-    // ---- Prioridades (Configurações → Prioridades) ----
-    // Mesmo padrão de cfgAdicionarTipoManutencao/cfgRemoverTipoManutencao,
-    // acima, só que cada item é {label, cor} — cor vem de um <input
-    // type="color"> (sempre hexadecimal aqui; os 3 padrões de fábrica
-    // usam var(--...) só porque foram semeados assim direto em
-    // config.json, pra acompanhar o tema — ver data.js).
-    function cfgAdicionarPrioridade() {
-      const inputLabel = document.getElementById('cfg-prioridade-label-novo');
-      const inputCor = document.getElementById('cfg-prioridade-cor-novo');
-      const label = inputLabel.value.trim();
-      if (!label) { LW.mostrarAlerta('Digite a descrição da prioridade (ex: URGENTE).', { tipo: 'aviso' }); return; }
-      if (_cfgDados.prioridades.some(p => p.label.toLowerCase() === label.toLowerCase())) {
-        LW.mostrarAlerta('Esta prioridade já existe.', { tipo: 'aviso' });
-        return;
-      }
-      _cfgDados.prioridades.push({ label, cor: inputCor.value || '#f59e0b' });
-      inputLabel.value = '';
-      cfgRenderTudo();
-    }
-
-    async function cfgRemoverPrioridade(i) {
-      const confirmou = await LW.mostrarConfirmacao(
-        `Remover a prioridade "${_cfgDados.prioridades[i].label}"?`,
-        { titulo: 'Remover prioridade', textoConfirmar: 'Remover', tipo: 'perigo', icon: '🗑️' }
-      );
-      if (!confirmou) return;
-      _cfgDados.prioridades.splice(i, 1);
-      cfgRenderTudo();
-    }
 
 
     // cfgAdicionarDimensao e cfgRemoverDimensao removidos — dimensão agora pertence à bateria
@@ -3675,8 +3504,7 @@
       if (!_cfgDados.baterias.length) { LW.mostrarAlerta('Adicione ao menos uma bateria.', { tipo: 'aviso' }); return; }
       if (!_cfgDados.montagens.length) { LW.mostrarAlerta('Adicione ao menos um tipo de montagem.', { tipo: 'aviso' }); return; }
       if (!_cfgDados.motivosParada.length) { LW.mostrarAlerta('Adicione ao menos um motivo de parada.', { tipo: 'aviso' }); return; }
-      if (!_cfgDados.tiposManutencao.length) { LW.mostrarAlerta('Adicione ao menos um tipo de manutenção.', { tipo: 'aviso' }); return; }
-      if (!_cfgDados.prioridades.length) { LW.mostrarAlerta('Adicione ao menos uma prioridade.', { tipo: 'aviso' }); return; }
+      if (!_cfgDados.insumosReceita.length) { LW.mostrarAlerta('Adicione ao menos um insumo.', { tipo: 'aviso' }); return; }
 
       // "Definir Paletes" (ver public/js/paletes-config.js) — valida
       // ANTES de tentar salvar (mesmo raciocínio das duas checagens
@@ -3752,11 +3580,8 @@
           // (rascunho desta tela), nunca herdado de cfgAtual pra este
           // campo específico.
           motivos_parada: { opcoes: _cfgDados.motivosParada },
-          // Tipos de Manutenção — mesmo raciocínio de motivos_parada,
-          // acima.
-          tipos_manutencao: { opcoes: _cfgDados.tiposManutencao },
-          // Prioridades — mesmo raciocínio de tipos_manutencao, acima.
-          prioridades: { opcoes: _cfgDados.prioridades },
+          // Insumos de Receitas — mesmo raciocínio de motivos_parada, acima.
+          insumos_receita: { opcoes: _cfgDados.insumosReceita },
           // Preserva volume_por_placa — usa o que acabou de vir do
           // servidor; LW.VOLUME_POR_PLACA só como rede de segurança caso
           // o fetch acima falhe e cfgAtual fique vazio.
@@ -4916,6 +4741,32 @@
     // clicar "Salvar Alterações" (ver salvarEdicaoOperacao).
     let _eoBercosPersonalizados = [];
 
+    // Dimensão manual desta edição — mesmo padrão de state.dimensao/
+    // dimensaoManual em Registrar Operação (operacao.js): true depois que
+    // a pessoa confirma um valor digitado à mão (✏️, ver
+    // _eoConfirmarDimensaoManual), impede _eoAtualizarPreview() de
+    // sobrescrever com o label automático da bateria selecionada.
+    let _eoDimensao = '';
+    let _eoDimensaoManual = false;
+    // Override do NÚMERO de berços desta operação — mesmo padrão de
+    // state.bercos_override (operacao.js): null = usa o `bercos`
+    // cadastrado da bateria selecionada. Só recebe valor ao confirmar uma
+    // Dimensão manual DIFERENTE da anterior e responder "sim" pra "isso
+    // mudou o número de berços?" (ver _eoPerguntarMudancaBercos, abaixo).
+    // Vale só pra esta operação — nunca mexe no cadastro da bateria em
+    // Configurações.
+    let _eoBercosOverride = null;
+    // Berços marcados como Vazou/Não Enchido nesta operação (mesmo
+    // vocabulário de bercos_visuais, db.js) — null até o admin abrir o
+    // editor "🔲 Berços" pela 1ª vez nesta sessão do modal (busca do
+    // servidor só então, ver _eoAbrirBercosVisuais); depois disso, cópia
+    // de trabalho editada em memória, só vai pro servidor junto com o
+    // resto ao clicar "Salvar Alterações" (mesmo espírito de
+    // _eoBercosPersonalizados, acima).
+    let _eoBercosVisuais = null;
+    let _eoBercosVisuaisOriginal = null; // snapshot da busca — vira o "de" do diff de auditoria
+    let _eoBercosVisuaisModoNaoEnchido = false; // toggle local do modo de marcação, igual bateria-atual.js
+
     function abrirEdicaoOperacao(bateria) {
       if (!_perfilTemAcao('edicao-dados')) return;
       _eoRegistroOriginal = JSON.parse(JSON.stringify(bateria));
@@ -4923,7 +4774,34 @@
         ? [...bateria.bercos_personalizados]
         : [];
 
+      // Dimensão/berços já gravados nesta operação (bateria.dimensao/
+      // capacidade) — só tratados como "manual" (preservados ao trocar de
+      // bateria/recalcular) se DIFERIREM do que a bateria cadastrada HOJE
+      // diria automaticamente. Cobre tanto uma dimensão manual definida
+      // na hora do registro quanto o cadastro da bateria ter mudado
+      // depois (Configurações) sem que esta operação antiga devesse
+      // mudar junto.
+      const bateriaObjAtual = LW.BATERIA_IDS.find(b => b.id === bateria.id_bateria);
+      _eoDimensao = bateria.dimensao || bateriaObjAtual?.label || '';
+      _eoDimensaoManual = !!bateria.dimensao && bateria.dimensao !== bateriaObjAtual?.label;
+      _eoBercosOverride = (bateria.capacidade && bateriaObjAtual && bateria.capacidade !== bateriaObjAtual.bercos)
+        ? bateria.capacidade
+        : null;
+      // Berços visuais sempre recomeçam null — busca do zero na 1ª vez
+      // que "🔲 Berços" for aberto NESTA sessão do modal (nunca reaproveita
+      // o que ficou na memória de uma operação diferente editada antes).
+      _eoBercosVisuais = null;
+      _eoBercosVisuaisOriginal = null;
+      _eoBercosVisuaisModoNaoEnchido = false;
+
       document.getElementById('eo-erro').style.display = 'none';
+
+      const inputDimensao = document.getElementById('eo-dimensao');
+      inputDimensao.value = _eoDimensao;
+      inputDimensao.readOnly = true;
+      inputDimensao.classList.toggle('auto-filled', !_eoDimensaoManual);
+      const btnEditarDimensao = document.getElementById('eo-btn-editar-dimensao');
+      if (btnEditarDimensao) { btnEditarDimensao.textContent = '✏️'; btnEditarDimensao.title = 'Definir uma dimensão específica para esta operação'; }
 
       document.getElementById('eo-ro-data').textContent = bateria.data ? bateria.data.split('-').reverse().join('/') : '—';
       document.getElementById('eo-ro-inicio').textContent = bateria.inicio ? LW.formatTime(bateria.inicio) : '—';
@@ -4965,13 +4843,123 @@
     function fecharEdicaoOperacao() {
       document.getElementById('editar-operacao-modal').style.display = 'none';
       _eoRegistroOriginal = null;
+      _eoBercosVisuais = null;
+      _eoBercosVisuaisOriginal = null;
     }
 
     // Ao trocar a bateria, o preview (painéis/m²/cimentícia) recalcula com
     // a capacidade da bateria nova selecionada — cobre o caso "registrei B1
-    // mas era B6".
+    // mas era B6". Um override de berços (ver _eoBercosOverride, acima) foi
+    // calculado em cima da bateria ANTERIOR — trocar de bateria sempre
+    // volta a usar o `bercos` cadastrado da bateria nova, de propósito
+    // (mesma decisão de state.bercos_override em operacao.js). A dimensão
+    // também sincroniza de novo, a menos que tenha sido definida
+    // manualmente pra esta edição.
     function _eoAoMudarBateria() {
+      _eoBercosOverride = null;
+      if (!_eoDimensaoManual) {
+        const bateriaObj = LW.BATERIA_IDS.find(b => b.id === document.getElementById('eo-id-bateria').value);
+        _eoDimensao = bateriaObj?.label || '';
+        const inputDimensao = document.getElementById('eo-dimensao');
+        if (inputDimensao) inputDimensao.value = _eoDimensao;
+      }
       _eoAtualizarPreview();
+    }
+
+    // Número de berços EFETIVO desta edição — o override local quando
+    // existe (ver _eoBercosOverride, acima), senão o `bercos` cadastrado
+    // da bateria selecionada. Único ponto de leitura da capacidade nesta
+    // tela — mesmo papel de _capacidadeAtual() em operacao.js.
+    function _eoCapacidadeAtual() {
+      const bateriaObj = LW.BATERIA_IDS.find(b => b.id === document.getElementById('eo-id-bateria').value);
+      const override = Number(_eoBercosOverride);
+      if (Number.isFinite(override) && override > 0) return override;
+      return bateriaObj?.bercos || 0;
+    }
+
+    // Destrava/confirma o campo Dimensão — mesma interação de Registrar
+    // Operação (ver editarDimensao, operacao.js): 1º clique destrava e
+    // foca, 2º clique (ou Enter/blur) confirma.
+    function _eoEditarDimensao() {
+      const input = document.getElementById('eo-dimensao');
+      const btn = document.getElementById('eo-btn-editar-dimensao');
+      if (!input) return;
+      if (input.readOnly) {
+        input.readOnly = false;
+        input.focus();
+        input.select();
+        if (btn) { btn.textContent = '✓'; btn.title = 'Confirmar esta dimensão'; }
+      } else {
+        _eoConfirmarDimensaoManual();
+      }
+    }
+
+    // Trava o campo de novo e grava o valor digitado como definitivo pra
+    // esta edição — chamado ao clicar de novo no ✓, apertar Enter, ou
+    // sair do campo (blur). Mesmo fluxo de _confirmarDimensaoManual
+    // (operacao.js): dimensão diferente da anterior + bateria já
+    // selecionada -> pergunta se isso mudou o número de berços.
+    async function _eoConfirmarDimensaoManual() {
+      const input = document.getElementById('eo-dimensao');
+      const btn = document.getElementById('eo-btn-editar-dimensao');
+      if (!input || input.readOnly) return; // já estava travado — nada a confirmar
+
+      const valorAnterior = _eoDimensao;
+      const valor = LW.formatarDimensaoLive(input.value.trim(), true);
+      input.value = valor;
+      _eoDimensao = valor;
+      _eoDimensaoManual = valor !== '';
+      input.readOnly = true;
+      input.classList.toggle('auto-filled', !_eoDimensaoManual);
+      if (btn) { btn.textContent = '✏️'; btn.title = 'Definir uma dimensão específica para esta operação'; }
+
+      if (!_eoDimensaoManual) {
+        // Volta a automático: some junto qualquer override de berços que
+        // essa dimensão manual tivesse trazido.
+        _eoBercosOverride = null;
+      } else if (valor !== valorAnterior && document.getElementById('eo-id-bateria').value) {
+        await _eoPerguntarMudancaBercos();
+      }
+      _eoAtualizarPreview();
+    }
+
+    // Chamada sempre que uma Dimensão manual É REALMENTE alterada (ver
+    // _eoConfirmarDimensaoManual, acima) — mesmo texto/fluxo de
+    // _perguntarMudancaBercos (operacao.js). O número vira um OVERRIDE só
+    // desta edição (_eoBercosOverride), NUNCA mexe no cadastro fixo da
+    // bateria em Configurações.
+    async function _eoPerguntarMudancaBercos() {
+      const mudou = await LW.mostrarConfirmacao(
+        `Dimensão definida: ${_eoDimensao}. Isso muda o número de berços desta bateria (só nesta operação)?`,
+        {
+          titulo: 'A dimensão mudou o número de berços?',
+          textoConfirmar: 'Sim, mudou',
+          textoCancelar: 'Não, continua igual',
+          icon: '📐',
+        }
+      );
+      if (!mudou) return;
+
+      const capacidadeAtual = _eoCapacidadeAtual();
+      let novoValor = null;
+      while (novoValor === null) {
+        // eslint-disable-next-line no-await-in-loop -- pede de novo só quando o valor digitado é inválido; cada iteração depende da anterior.
+        const digitado = await LW.mostrarPrompt(
+          `Berços atuais: ${capacidadeAtual}. Qual vai ser o novo número de berços?`,
+          { titulo: 'Novo número de berços', placeholder: 'Ex: 18', icon: '🔢', textoConfirmar: 'Aplicar' }
+        );
+        if (digitado === null) return; // cancelou — mantém a capacidade como estava
+
+        const n = Number(String(digitado).trim().replace(',', '.'));
+        if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+          // eslint-disable-next-line no-await-in-loop -- alerta bloqueante antes de perguntar de novo, de propósito.
+          await LW.mostrarAlerta('Informe um número inteiro de berços, maior que zero.', { tipo: 'aviso' });
+          continue;
+        }
+        novoValor = n;
+      }
+
+      _eoBercosOverride = novoValor;
     }
 
     // Recalcula painéis/m²/cimentícia em tempo real (mesma fórmula de
@@ -5019,7 +5007,11 @@
         return;
       }
       await LWOp.abrirGradeMontagem({
-        capacidade: bateriaObj.bercos || 0,
+        // Respeita o override local de berços (ver _eoCapacidadeAtual,
+        // acima) — sem isso, a grade abriria sempre com o número
+        // cadastrado da bateria, ignorando a capacidade customizada desta
+        // edição.
+        capacidade: _eoCapacidadeAtual(),
         valoresIniciais: _eoBercosPersonalizados,
         tituloBateria: bateriaObj.id,
         onConfirmar(resultado) {
@@ -5030,16 +5022,15 @@
     }
 
     function _eoAtualizarPreview() {
-      const idBateria = document.getElementById('eo-id-bateria').value;
       const tipoMontagem = document.getElementById('eo-tipo-montagem').value;
-      const bateriaObj = LW.BATERIA_IDS.find(b => b.id === idBateria);
-      const bercos = bateriaObj?.bercos || 0;
+      const bercos = _eoCapacidadeAtual();
 
       _eoAtualizarBotaoBercos();
 
       const calc = _eoCalcularPaineis(tipoMontagem, bercos);
       document.getElementById('eo-preview').innerHTML = `
-        <div>Dimensão: <strong style="color:var(--text)">${bateriaObj?.label || '—'}</strong></div>
+        <div>Dimensão: <strong style="color:var(--text)">${_eoDimensao || '—'}</strong></div>
+        <div>Berços: <strong style="color:var(--text)">${bercos}${_eoBercosOverride ? ' (customizado)' : ''}</strong></div>
         <div>Painéis Total: <strong style="color:var(--text)">${calc.total_paineis}</strong></div>
         <div>m² Total: <strong style="color:var(--text)">${calc.m2_total.toFixed(2)}</strong></div>
         <div>Placas Cimentícia: <strong style="color:var(--text)">${calc.placas_cimenticia}</strong></div>
@@ -5066,14 +5057,13 @@
         return;
       }
 
-      const bateriaObj = LW.BATERIA_IDS.find(b => b.id === idBateria);
-      const bercos = bateriaObj?.bercos || 0;
+      const bercos = _eoCapacidadeAtual();
       const calc = _eoCalcularPaineis(tipoMontagem, bercos);
 
       const novosValores = {
         id_bateria: idBateria,
-        dimensao: bateriaObj?.label || _eoRegistroOriginal.dimensao,
-        capacidade: bateriaObj?.bercos || _eoRegistroOriginal.capacidade,
+        dimensao: _eoDimensao || _eoRegistroOriginal.dimensao,
+        capacidade: bercos || _eoRegistroOriginal.capacidade,
         tipo_montagem: tipoMontagem,
         turno,
         motivo_atraso: motivoAtraso,
@@ -5092,6 +5082,33 @@
           : de !== para;
         if (mudou) diff.push({ campo, de: de ?? null, para: para ?? null });
       });
+
+      // Berços visuais (Vazou/Não Enchido, ver bercos_visuais) — tabela à
+      // parte de "operacoes", só entra no payload se o admin efetivamente
+      // abriu e mexeu no editor "🔲 Berços" (_eoBercosVisuais continua
+      // null até isso acontecer, ver _eoAbrirBercosVisuais). Redimensiona
+      // pro número de berços FINAL desta edição antes de comparar/enviar
+      // — cobre o caso de a Dimensão ter sido editada (e a capacidade
+      // mudado) DEPOIS de já ter aberto e mexido no editor de berços.
+      let bercosVisuais;
+      if (_eoBercosVisuais) {
+        const porBerco = {};
+        _eoBercosVisuais.forEach(b => { porBerco[b.berco] = b; });
+        bercosVisuais = Array.from({ length: bercos }, (_x, i) => {
+          const berco = 'B' + (i + 1);
+          const existente = porBerco[berco];
+          return {
+            berco, ordem: i + 1,
+            estado_esquerda: existente?.estado_esquerda || 'okay',
+            estado_direita: existente?.estado_direita || 'okay',
+          };
+        });
+        if (JSON.stringify(bercosVisuais) !== JSON.stringify(_eoBercosVisuaisOriginal || [])) {
+          diff.push({ campo: 'bercos_visuais', de: _eoBercosVisuaisOriginal || [], para: bercosVisuais });
+        } else {
+          bercosVisuais = undefined; // nada mudou de fato — não manda (evita reescrever atualizado_em à toa)
+        }
+      }
 
       if (!diff.length) {
         LW.mostrarAlerta('Nenhuma alteração foi feita.', { tipo: 'aviso' });
@@ -5112,7 +5129,7 @@
         const res = await fetch('/editar-operacao', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: _eoRegistroOriginal.id, novosValores, diff }),
+          body: JSON.stringify({ id: _eoRegistroOriginal.id, novosValores, diff, bercosVisuais }),
         });
         const json = await res.json();
         if (!json.ok) throw new Error(json.erro || 'Erro ao salvar edição.');
@@ -5128,6 +5145,188 @@
         btn.disabled = false;
         btn.textContent = textoOriginal;
       }
+    }
+
+    // ================================================================
+    //  BERÇOS VISUAIS (Vazou / Não Enchido) — editor retroativo, dentro
+    //  de Editar Operação
+    // ================================================================
+    // Em Registrar Operação, essas marcações só podem ser feitas AO VIVO
+    // (ver bateria-atual.js, GET/POST /bercos-andamento) — uma vez a
+    // operação registrada, não havia mais como corrigir um clique errado
+    // ou marcar algo que só foi percebido depois (ex: no Setor de
+    // Qualidade). Este editor cobre esse buraco: mesma grade visual
+    // (reaproveita as classes .ba-grid/.ba-celula/.ba-dot, já usadas em
+    // bateria-atual.js e relatorio-bercos.js), mas operando direto em
+    // cima da tabela bercos_visuais de UMA operação já finalizada — sem
+    // sincronização entre dispositivos, sem fila de pendentes offline
+    // (não faz sentido aqui: é uma correção administrativa pontual, não
+    // um acompanhamento ao vivo). Só grava de verdade junto com o resto
+    // da edição, ao clicar "Salvar Alterações" (ver salvarEdicaoOperacao,
+    // acima) — "Aplicar" aqui dentro só fecha este sub-modal, mantendo o
+    // resultado em _eoBercosVisuais.
+
+    // Tipo (código simples ou label) de CADA berço, na ordem — mesma
+    // lógica de _baTiposPorBerco (bateria-atual.js)/_tipoDoBerco
+    // (relatorio-bercos.js), duplicada aqui por serem 3 telas com fontes
+    // de dados ligeiramente diferentes (state ao vivo x _eoBercosPersonalizados
+    // x linha de histórico) — só a COR/resolução do tipo (LW.corDoBercoPersonalizado/
+    // corMontagemPorLabel) é de fato compartilhada (data.js).
+    function _eoTiposPorBerco(tipoMontagem, capacidade) {
+      if (tipoMontagem === LW.TIPO_MONTAGEM_PERSONALIZADA) {
+        return Array.from({ length: capacidade }, (_x, i) => _eoBercosPersonalizados[i] || null);
+      }
+      return Array.from({ length: capacidade }, () => tipoMontagem || null);
+    }
+
+    async function _eoAbrirBercosVisuais() {
+      if (!_eoRegistroOriginal) return;
+      const tipoMontagem = document.getElementById('eo-tipo-montagem').value;
+      const capacidade = _eoCapacidadeAtual();
+      if (!capacidade) {
+        LW.mostrarAlerta('Selecione a bateria antes de editar os berços.', { tipo: 'aviso' });
+        return;
+      }
+
+      // Busca do servidor só na 1ª vez que abre nesta sessão do modal —
+      // depois disso reaproveita a cópia de trabalho já em memória
+      // (_eoBercosVisuais), pra não perder edições ainda não salvas ao
+      // fechar/reabrir este sub-modal várias vezes.
+      if (!_eoBercosVisuais) {
+        let bercosServidor = [];
+        try {
+          const res = await fetch(`/bercos-visuais-operacao/${encodeURIComponent(_eoRegistroOriginal.id)}`);
+          const json = await res.json();
+          if (json.ok && Array.isArray(json.bercos)) bercosServidor = json.bercos;
+        } catch {
+          LW.mostrarAlerta('Não foi possível carregar os berços salvos — abrindo tudo como "okay".', { tipo: 'aviso' });
+        }
+        _eoBercosVisuaisOriginal = JSON.parse(JSON.stringify(bercosServidor));
+        const porBerco = {};
+        bercosServidor.forEach(b => { porBerco[b.berco] = b; });
+        _eoBercosVisuais = Array.from({ length: capacidade }, (_x, i) => {
+          const berco = 'B' + (i + 1);
+          const existente = porBerco[berco];
+          return {
+            berco, ordem: i + 1,
+            estado_esquerda: existente?.estado_esquerda || 'okay',
+            estado_direita: existente?.estado_direita || 'okay',
+          };
+        });
+      } else if (_eoBercosVisuais.length !== capacidade) {
+        // Capacidade mudou (edição de Dimensão) desde a última vez que
+        // este editor foi aberto — redimensiona preservando o que já
+        // tinha sido marcado nos berços que continuam existindo.
+        const porBerco = {};
+        _eoBercosVisuais.forEach(b => { porBerco[b.berco] = b; });
+        _eoBercosVisuais = Array.from({ length: capacidade }, (_x, i) => {
+          const berco = 'B' + (i + 1);
+          const existente = porBerco[berco];
+          return {
+            berco, ordem: i + 1,
+            estado_esquerda: existente?.estado_esquerda || 'okay',
+            estado_direita: existente?.estado_direita || 'okay',
+          };
+        });
+      }
+
+      _eoRenderBercosVisuais(tipoMontagem, capacidade);
+    }
+
+    function _eoRenderBercosVisuais(tipoMontagem, capacidade) {
+      const existente = document.getElementById('eo-bv-modal');
+      if (existente) existente.remove();
+
+      const ehPersonalizada = tipoMontagem === LW.TIPO_MONTAGEM_PERSONALIZADA;
+      const tipos = _eoTiposPorBerco(tipoMontagem, capacidade);
+
+      const modal = document.createElement('div');
+      modal.id = 'eo-bv-modal';
+      modal.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1001;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;width:680px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.6)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <h2 style="font-family:var(--font-display);font-size:1.15rem;color:var(--accent);letter-spacing:.05em">🔲 BERÇOS — VAZOU / NÃO ENCHIDO</h2>
+            <button type="button" id="eo-bv-fechar" style="background:none;border:none;color:var(--text-3);font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+          </div>
+          <div id="eo-bv-dica" style="margin-bottom:12px;font-size:.82rem;color:var(--text-2)"></div>
+          <div style="margin-bottom:12px">
+            <button type="button" id="eo-bv-btn-modo" class="btn btn-sm"></button>
+          </div>
+          <div id="eo-bv-grid" class="ba-grid" style="overflow-x:auto"></div>
+          <div style="margin-top:16px;padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid var(--yellow-dim,#a16207);border-radius:var(--radius);color:var(--text-2);font-size:.78rem">
+            ⚠ Só grava de verdade ao clicar "Salvar Alterações" no modal de Editar Operação — "Aplicar" aqui só fecha este editor, mantendo o que foi marcado.
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:16px">
+            <button type="button" class="btn btn-ghost" id="eo-bv-cancelar">Cancelar</button>
+            <button type="button" class="btn btn-danger" id="eo-bv-confirmar">Aplicar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      // Snapshot pra "Cancelar" descartar qualquer clique feito nesta
+      // sessão do editor, sem afetar o que já estava em _eoBercosVisuais
+      // antes de abrir (de uma sessão anterior deste mesmo sub-modal).
+      const antesDeAbrir = JSON.parse(JSON.stringify(_eoBercosVisuais));
+
+      function atualizarBotaoModo() {
+        const btn = document.getElementById('eo-bv-btn-modo');
+        btn.className = `btn btn-sm ${_eoBercosVisuaisModoNaoEnchido ? 'btn-danger' : 'btn-ghost'}`;
+        btn.textContent = _eoBercosVisuaisModoNaoEnchido
+          ? '✕ Marcando Não Enchido — clique p/ desligar'
+          : '🚫 Marcar Não Enchido';
+        document.getElementById('eo-bv-dica').textContent = _eoBercosVisuaisModoNaoEnchido
+          ? '✕ Clique num indicador para marcar aquele lado como não enchido (o painel nunca existiu).'
+          : '🖱️ Clique num indicador (• em cima = direito, ● embaixo = esquerdo) para marcar que aquele lado baixou/vazou.';
+      }
+
+      function desenharGrid() {
+        const grid = document.getElementById('eo-bv-grid');
+        grid.innerHTML = _eoBercosVisuais.map((b, i) => {
+          const tipo = tipos[i];
+          const cor = tipo ? (ehPersonalizada ? LW.corDoBercoPersonalizado(tipo) : LW.corMontagemPorLabel(tipo)) : null;
+          const numero = String(i + 1).padStart(2, '0');
+          const dirNaoEnchido = b.estado_direita === 'nao_enchido';
+          const esqNaoEnchido = b.estado_esquerda === 'nao_enchido';
+          const dirMarcado = b.estado_direita === 'baixou' || dirNaoEnchido;
+          const esqMarcado = b.estado_esquerda === 'baixou' || esqNaoEnchido;
+          return `
+            <div class="ba-celula" style="background:${cor ? cor.bg : 'var(--bg-2)'};color:${cor ? cor.cor : 'var(--text-3)'};border:1px solid ${cor ? cor.borda : 'var(--border)'}">
+              <span class="ba-dot ba-dot-topo${dirMarcado ? ' ba-dot-marcado' : ''}${dirNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${b.berco}" data-lado="direita" title="${dirNaoEnchido ? 'Direito — Não enchido' : dirMarcado ? 'Direito — Baixou/Vazou' : 'Direito'}">${dirNaoEnchido ? '✕' : '•'}</span>
+              <span class="ba-numero">${LW.escaparHtml(b.berco || ('B' + numero))}</span>
+              <span class="ba-dot ba-dot-base${esqMarcado ? ' ba-dot-marcado' : ''}${esqNaoEnchido ? ' ba-dot-nao-enchido' : ''}" data-berco="${b.berco}" data-lado="esquerda" title="${esqNaoEnchido ? 'Esquerdo — Não enchido' : esqMarcado ? 'Esquerdo — Baixou/Vazou' : 'Esquerdo'}">${esqNaoEnchido ? '✕' : '•'}</span>
+            </div>`;
+        }).join('');
+
+        grid.querySelectorAll('.ba-dot').forEach(dot => {
+          dot.addEventListener('click', () => {
+            const berco = dot.getAttribute('data-berco');
+            const lado = dot.getAttribute('data-lado');
+            const item = _eoBercosVisuais.find(b => b.berco === berco);
+            if (!item) return;
+            const campo = lado === 'direita' ? 'estado_direita' : 'estado_esquerda';
+            const desejado = _eoBercosVisuaisModoNaoEnchido ? 'nao_enchido' : 'baixou';
+            // Clique de novo no mesmo estado desmarca (volta a 'okay') —
+            // mesmo comportamento de _baCliqueDot (bateria-atual.js).
+            item[campo] = item[campo] === desejado ? 'okay' : desejado;
+            desenharGrid();
+          });
+        });
+      }
+
+      atualizarBotaoModo();
+      desenharGrid();
+
+      document.getElementById('eo-bv-btn-modo').addEventListener('click', () => {
+        _eoBercosVisuaisModoNaoEnchido = !_eoBercosVisuaisModoNaoEnchido;
+        atualizarBotaoModo();
+      });
+      document.getElementById('eo-bv-fechar').addEventListener('click', () => modal.remove());
+      document.getElementById('eo-bv-cancelar').addEventListener('click', () => {
+        _eoBercosVisuais = antesDeAbrir; // descarta os cliques desta sessão do sub-modal
+        modal.remove();
+      });
+      document.getElementById('eo-bv-confirmar').addEventListener('click', () => modal.remove());
     }
 
     // ================================================================
