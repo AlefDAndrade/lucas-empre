@@ -1578,6 +1578,15 @@
         return;
       }
 
+      // JSZip é carregado sob demanda (LW.carregarJszip, data.js).
+      try { await LW.carregarJszip(); } catch (e) { mostrarErroRestaurar(e.message); return; }
+
+      // JSZip é carregado sob demanda (LW.carregarJszip, data.js).
+      try { await LW.carregarJszip(); } catch (e) { mostrarErroMesclar(e.message); return; }
+
+      // JSZip é carregado sob demanda (LW.carregarJszip, data.js).
+      try { await LW.carregarJszip(); } catch (e) { mostrarErroRestaurarGeral(e.message); return; }
+
       try {
         const zip = await JSZip.loadAsync(file);
         const esperados = Object.keys(RESTAURAR_VALIDACOES);
@@ -2243,8 +2252,9 @@
     function handleImportFile(file) {
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = function (e) {
+      reader.onload = async function (e) {
         try {
+          await LW.carregarXlsx();
           const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
           const ws = wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
@@ -3216,9 +3226,18 @@
         li.innerHTML = _cfgDados.insumosReceita.map((o, i) => `
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px">
       <span style="font-size:.85rem;color:var(--text)">${o.nome}</span>
+      <label title="${o.categoria === 'padrao' ? 'Insumo Padrão é sempre fixo no formulário' : 'Fixo: aparece direto em Registrar Operação, sem precisar clicar em + Adicionar insumo'}"
+        style="display:flex;align-items:center;gap:6px;margin-left:auto;font-size:.75rem;color:var(--text-2);cursor:${o.categoria === 'padrao' ? 'not-allowed' : 'pointer'}">
+        Fixo
+        <span class="switch">
+          <input type="checkbox" role="switch" ${o.fixo ? 'checked' : ''} ${o.categoria === 'padrao' ? 'disabled' : ''}
+            onchange="cfgToggleInsumoFixo(${i}, this.checked)">
+          <span class="switch-slider"></span>
+        </span>
+      </label>
       ${o.categoria === 'padrao'
-        ? '<span style="font-size:.7rem;color:var(--text-3);background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:2px 10px;margin-left:auto">Padrão</span>'
-        : `<button onclick="cfgRemoverInsumo(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem;margin-left:auto">✕ Remover</button>`}
+        ? '<span style="font-size:.7rem;color:var(--text-3);background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:2px 10px">Padrão</span>'
+        : `<button onclick="cfgRemoverInsumo(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:.85rem">✕ Remover</button>`}
     </div>
   `).join('') || '<span style="color:var(--text-3);font-size:.82rem">Nenhum insumo cadastrado.</span>';
       }
@@ -3318,8 +3337,17 @@
         LW.mostrarAlerta('Este insumo já existe.', { tipo: 'aviso' });
         return;
       }
-      _cfgDados.insumosReceita.push({ nome, categoria: 'custom' });
+      _cfgDados.insumosReceita.push({ nome, categoria: 'custom', fixo: false });
       input.value = '';
+      cfgRenderTudo();
+    }
+
+    // Marca/desmarca um insumo Custom como fixo (aparece direto no formulário
+    // de Registrar Operação). Padrão é sempre fixo — no-op pra ele.
+    function cfgToggleInsumoFixo(i, valor) {
+      const alvo = _cfgDados.insumosReceita[i];
+      if (!alvo || alvo.categoria === 'padrao') return;
+      alvo.fixo = !!valor;
       cfgRenderTudo();
     }
 
