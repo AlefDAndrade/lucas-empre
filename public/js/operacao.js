@@ -374,7 +374,9 @@
       // acabou de digitar.
       if (!state.dimensaoManual) {
         state.dimensao = bateria.label; // Sincroniza a dimensão automaticamente
-        if ($('op-dimensao')) $('op-dimensao').value = state.dimensao;
+        if ($('op-dimensao')) $('op-dimensao').value = _textoCampoDimensao();
+      } else if ($('op-dimensao')) {
+        $('op-dimensao').value = _textoCampoDimensao();
       }
       // Com override ativo (ver _aplicarNovaCapacidadeBercos, abaixo),
       // mostra o número customizado — com um sinalizador visual (nunca
@@ -573,6 +575,7 @@
       $('op-paineis-total').textContent = '—';
       $('op-m2-total').textContent = '—';
       $('op-placas-cimenticia').textContent = '—';
+      _atualizarResumoPlacasEspessura(null);
       if (elPaineisTipo) elPaineisTipo.innerHTML = '';
       if (elM2Tipo) elM2Tipo.innerHTML = '';
       return;
@@ -588,9 +591,11 @@
     // na hora (ver _registrarOperacaoInterna).
     const marcacoes = (window.LWBateriaAtual && window.LWBateriaAtual.obterMarcacoes) ? window.LWBateriaAtual.obterMarcacoes() : {};
     const r = LW.aplicarNaoEnchidosNoCalc(base, state.tipo_montagem, state.bercos_personalizados, marcacoes);
+    r.placas_cimenticia_8mm = _calcPlacas8mmAtual(bercos, marcacoes);
     $('op-paineis-total').textContent = r.total_paineis;
     $('op-m2-total').textContent = r.m2_total.toFixed(2) + ' m²';
     $('op-placas-cimenticia').textContent = r.placas_cimenticia;
+    _atualizarResumoPlacasEspessura(r);
 
     // Gera os cards de Painéis por tipo (2/P, S/P, 3/P, ... — quantos a montagem tiver)
     const tipos = Object.keys(r.paineis_por_tipo);
@@ -3013,6 +3018,8 @@
       ? LW.calcPaineisPersonalizado(state.bercos_personalizados)
       : LW.calcPaineis(state.tipo_montagem, bercos);
     const calc = LW.aplicarNaoEnchidosNoCalc(calcBase, state.tipo_montagem, state.bercos_personalizados, marcacoes);
+    // Placas de 8 mm (painéis de 9,5 cm) — subconjunto de placas_cimenticia.
+    calc.placas_cimenticia_8mm = _calcPlacas8mmAtual(bercos, marcacoes);
 
     // Data da operação = data do FIM da injeção, não do início — uma
     // operação pausada no dia 1 e retomada/finalizada no dia 2 precisa
@@ -3472,7 +3479,7 @@
     $('op-toggle-teste').checked = !!state.modo_teste;
     $('op-toggle-teste').disabled = state.status !== 'idle';
     $('op-turno').value = state.turno || '1º TURNO';
-    $('op-dimensao').value = state.dimensao || '';
+    $('op-dimensao').value = _textoCampoDimensao();
     // Reflete state.dimensaoManual na aparência — importante num reload
     // (ou ao chegar estado de outro dispositivo via WebSocket): sem isso,
     // o campo sempre voltava a parecer "automático" mesmo numa dimensão
@@ -3480,8 +3487,8 @@
     $('op-dimensao').readOnly = true; // nunca começa destravado num render
     $('op-dimensao').classList.toggle('auto-filled', !state.dimensaoManual);
     if ($('btn-editar-dimensao')) {
-      $('btn-editar-dimensao').textContent = '✏️';
-      $('btn-editar-dimensao').title = 'Definir uma dimensão específica para esta operação';
+      $('btn-editar-dimensao').textContent = '⚙️';
+      $('btn-editar-dimensao').title = 'Configurar a dimensão de cada berço desta bateria';
     }
 
     $('op-montagem').value = state.tipo_montagem || '';
@@ -3615,9 +3622,11 @@
         // tiver um, senão a dimensão geral da operação (é o que a pessoa
         // via no campo ao abrir o modal, ver dimensaoBercoAtual em
         // bateria-atual.js) — só marca como mudança se realmente mudou.
-        const atualDoBerco = (Array.isArray(state.bercos_dimensoes) && state.bercos_dimensoes[numeroBerco - 1])
-          || state.dimensao || '';
-        if (valorFormatado !== atualDoBerco) {
+        const itemAtual = Array.isArray(state.bercos_dimensoes) ? state.bercos_dimensoes[numeroBerco - 1] : null;
+        const atualDoBerco = (itemAtual && typeof itemAtual !== 'object' && itemAtual) || state.dimensao || '';
+        // Berço com dimensões diferentes por lado ({direita, esquerda}) só
+        // se edita pelo ⚙️ (modal de dimensões) — aqui nunca é sobrescrito.
+        if (!(itemAtual && typeof itemAtual === 'object') && valorFormatado !== atualDoBerco) {
           if (!Array.isArray(state.bercos_dimensoes) || state.bercos_dimensoes.length !== capacidade) {
             const atual = Array.isArray(state.bercos_dimensoes) ? state.bercos_dimensoes : [];
             state.bercos_dimensoes = Array.from({ length: capacidade }, (_, i) => atual[i] || null);
@@ -3664,9 +3673,97 @@
     }
   }
 
+
+  // ── Dimensões por berço + placas de 8 mm ───────────────────────────────
+  // Uma mesma bateria pode misturar espessuras (ex: berços 1-10 = 9,5 cm,
+  // 11-20 = 9 cm). A dimensão geral continua em state.dimensao; o que
+  // difere dela fica em state.bercos_dimensoes (1 item por berço: null =
+  // usa a geral, "9,5 cm" = berço inteiro, { direita, esquerda } = cada
+  // painel com a sua — ver LW.dimensoesPorLadoDoBerco, data.js). Berço de 9,5 cm consome placa cimentícia de 8 mm, os
+  // demais 6 mm (regra em LW.dimensaoUsaPlaca8mm, data.js).
+
+  // Texto exibido no campo "Dimensão (Tipo)": a dimensão geral, ou — numa
+  // bateria com espessuras mistas — todas juntas (ex: "9,5 cm + 9 cm").
+  function _textoCampoDimensao() {
+    const dims = LW.dimensoesDistintas(_capacidadeAtual(), state.dimensao, state.bercos_dimensoes);
+    return dims.length ? dims.join(' + ') : (state.dimensao || '');
+  }
+
+  function _calcPlacas8mmAtual(capacidade, marcacoes) {
+    return LW.calcPlacas8mm({
+      tipoMontagem: state.tipo_montagem,
+      bercosPersonalizados: state.bercos_personalizados,
+      capacidade,
+      dimensaoGeral: state.dimensao,
+      bercosDimensoes: state.bercos_dimensoes,
+      marcacoes,
+    });
+  }
+
+  // Linha extra no card "P cimenticia": só aparece quando a operação
+  // consome alguma placa de 8 mm.
+  function _atualizarResumoPlacasEspessura(r) {
+    const el = $('op-placas-espessura');
+    if (!el) return;
+    const n8 = r ? (r.placas_cimenticia_8mm || 0) : 0;
+    if (!n8) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = `8 mm: ${n8} · 6 mm: ${Math.max(0, (r.placas_cimenticia || 0) - n8)}`;
+    el.style.display = 'block';
+  }
+
+  /**
+   * ⚙️ ao lado de "Dimensão (Tipo)" — abre o modal compartilhado
+   * (modal-dimensoes.js, o mesmo de Editar Operação) onde se define a
+   * dimensão padrão da bateria e a de cada berço/lado (painel). Só grava em
+   * `state` ao confirmar.
+   */
+  function abrirModalDimensoes() {
+    const bateria = LW.BATERIA_IDS.find(b => b.id === state.id_bateria);
+    if (!bateria) {
+      LW.mostrarAlerta('Selecione a bateria antes de configurar as dimensões.', { tipo: 'aviso' });
+      return;
+    }
+    LWDimensoes.abrir({
+      titulo: bateria.id,
+      capacidade: _capacidadeAtual(),
+      dimensaoBase: state.dimensao || '',
+      bercosDimensoes: state.bercos_dimensoes,
+      calcularPlacas8mm: ({ capacidade, dimensaoGeral, bercosDimensoes }) => LW.calcPlacas8mm({
+        tipoMontagem: state.tipo_montagem,
+        bercosPersonalizados: state.bercos_personalizados,
+        capacidade, dimensaoGeral, bercosDimensoes,
+        marcacoes: (window.LWBateriaAtual && window.LWBateriaAtual.obterMarcacoes) ? window.LWBateriaAtual.obterMarcacoes() : {},
+      }),
+      onConfirmar: _aplicarResultadoDimensoes,
+    });
+  }
+
+  async function _aplicarResultadoDimensoes({ dimensao, bercosDimensoes }) {
+    if (dimensao !== state.dimensao) {
+      state.dimensao = dimensao;
+      state.dimensaoManual = true;
+      // Mesma pergunta de sempre ao mudar a dimensão: muda o nº de berços?
+      await _perguntarMudancaBercos();
+    }
+    // O nº de berços pode ter mudado na pergunta acima: ajusta o tamanho do
+    // array (berços novos = dimensão padrão = null).
+    const capacidade = _capacidadeAtual();
+    const redim = Array.isArray(bercosDimensoes)
+      ? Array.from({ length: capacidade }, (_, i) => bercosDimensoes[i] ?? null)
+      : null;
+    state.bercos_dimensoes = redim && redim.some(Boolean) ? redim : null;
+
+    updateCapacidade();
+    recalcPaineis();
+    persist();
+    renderAll();
+    updatePendencias();
+  }
+
   // ---- Public API ----
   window.LWOp = {
     init,
+    abrirModalDimensoes,
     aplicarDetalhesBerco,
     // Chamada por bateria-atual.js toda vez que uma marcação "🚫 Não
     // Enchido"/"baixou" muda (clique local, desfazer, sincronização com
